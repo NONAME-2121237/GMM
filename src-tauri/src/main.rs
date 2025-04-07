@@ -207,67 +207,68 @@ fn deduce_mod_info_v2(
     base_mods_path: &PathBuf,
     maps: &DeductionMaps,
 ) -> Option<DeducedInfo> {
-    let mod_folder_name = mod_folder_path.file_name()?.to_string_lossy().to_string();
+    // Ensure file_name() is valid before proceeding
+    let mod_folder_name = match mod_folder_path.file_name() {
+         Some(name) => name.to_string_lossy().to_string(),
+         None => {
+             return None; // Cannot deduce without a folder name
+         }
+     };
+
     let mut info = DeducedInfo {
-        // Start with a generic 'other' - will be refined
-        entity_slug: format!("{}{}", "unknown", OTHER_ENTITY_SUFFIX),
-        mod_name: mod_folder_name.clone(), // Initial guess
+        entity_slug: format!("{}{}", "unknown", OTHER_ENTITY_SUFFIX), // Default placeholder
+        mod_name: mod_folder_name.clone(),
         mod_type_tag: None,
         author: None,
         description: None,
-        image_filename: find_preview_image(mod_folder_path), // Keep existing image finder
+        image_filename: find_preview_image(mod_folder_path),
     };
 
     let mut found_entity_slug: Option<String> = None;
-    let mut found_category_slug: Option<String> = None; // Track deduced category separately
+    let mut found_category_slug: Option<String> = None;
 
-    // --- 1. Deduce from Parent Folders ---
+    // --- 1. Deduce from Parent Folders (Walking UP) ---
     let mut current_path = mod_folder_path.parent();
     while let Some(path) = current_path {
-        // Stop if we reached the base mods path or its parent
         if path == *base_mods_path || path.parent() == Some(base_mods_path) {
             break;
         }
         if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
             let lower_folder_name = folder_name.to_lowercase();
 
-            // Check Entity Slug/Name (only if entity not already found)
+            // Check Entity Slug/Name
             if found_entity_slug.is_none() {
                 if maps.entity_slug_to_id.contains_key(folder_name) {
                     found_entity_slug = Some(folder_name.to_string());
-                     println!("[DeduceV2 {}] Found entity slug '{}' from parent folder.", mod_folder_name, found_entity_slug.as_ref().unwrap());
-                    // Don't break yet, continue checking for category higher up
                 } else if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&lower_folder_name) {
                     found_entity_slug = Some(slug.clone());
-                     println!("[DeduceV2 {}] Found entity '{}' (name match) from parent folder.", mod_folder_name, found_entity_slug.as_ref().unwrap());
-                    // Don't break yet
                 }
             }
 
-            // Check Category Slug/Name (always check, store the highest-level match)
-            if maps.category_slug_to_id.contains_key(folder_name) {
+            // Check Category Slug/Name
+             let cat_slug_match = maps.category_slug_to_id.contains_key(folder_name);
+             let cat_name_match_slug = maps.lowercase_category_name_to_slug.get(&lower_folder_name);
+
+            if cat_slug_match {
                 found_category_slug = Some(folder_name.to_string());
-                 println!("[DeduceV2 {}] Found category slug '{}' from parent folder (higher priority).", mod_folder_name, found_category_slug.as_ref().unwrap());
-            } else if let Some(slug) = maps.lowercase_category_name_to_slug.get(&lower_folder_name) {
-                 // Only update if we haven't found a slug match higher up
+            } else if let Some(slug) = cat_name_match_slug {
+                 // Only update if we haven't found a slug match higher up during this walk
                 if found_category_slug.is_none() || !maps.category_slug_to_id.contains_key(found_category_slug.as_ref().unwrap()) {
                      found_category_slug = Some(slug.clone());
-                     println!("[DeduceV2 {}] Found category '{}' (name match) from parent folder.", mod_folder_name, found_category_slug.as_ref().unwrap());
                  }
             }
+        } else {
         }
-        current_path = path.parent(); // Move up one level
-    } // End parent folder walk
+        current_path = path.parent();
+    }
 
-    // --- 2. Deduce from .ini File (Overrides folder names if specific) ---
+
+    // --- 2. Deduce from .ini File ---
     let mut ini_target_hint: Option<String> = None;
     let mut ini_type_hint: Option<String> = None;
 
-    // Find the first .ini file directly inside the mod folder
     let ini_path_option = WalkDir::new(mod_folder_path)
-        .max_depth(1) // Only immediate children
-        .min_depth(1)
-        .into_iter()
+        .max_depth(1).min_depth(1).into_iter()
         .filter_map(|e| e.ok())
         .find(|entry| entry.file_type().is_file() && entry.path().extension().map_or(false, |ext| ext.eq_ignore_ascii_case("ini")))
         .map(|e| e.into_path());
@@ -275,16 +276,14 @@ fn deduce_mod_info_v2(
     if let Some(ini_path) = ini_path_option {
         if let Ok(ini_content) = fs::read_to_string(&ini_path) {
             if let Ok(ini) = Ini::load_from_str(&ini_content) {
-                for section_name in ["Mod", "Settings", "Info", "General"] {
+                // ... (ini parsing logic remains the same) ...
+                 for section_name in ["Mod", "Settings", "Info", "General"] {
                     if let Some(section) = ini.section(Some(section_name)) {
-                        // Get Name, Author, Desc (can override defaults)
                         if let Some(name) = section.get("Name").or_else(|| section.get("ModName")) { info.mod_name = name.trim().to_string(); }
                         if let Some(author) = section.get("Author") { info.author = Some(author.trim().to_string()); }
                         if let Some(desc) = section.get("Description") { info.description = Some(desc.trim().to_string()); }
-                        // Get Hints (don't override folder deduction yet)
                         if let Some(target) = section.get("Target").or_else(|| section.get("Entity")).or_else(|| section.get("Character")) { ini_target_hint = Some(target.trim().to_string()); }
-                        if let Some(typ) = section.get("Type").or_else(|| section.get("Category")) { ini_type_hint = Some(typ.trim().to_string()); info.mod_type_tag = Some(typ.trim().to_string()); } // Also store raw tag
-                        // Break early if we found hints? Maybe not, let last section win.
+                        if let Some(typ) = section.get("Type").or_else(|| section.get("Category")) { ini_type_hint = Some(typ.trim().to_string()); info.mod_type_tag = Some(typ.trim().to_string()); }
                     }
                 }
             }
@@ -293,54 +292,93 @@ fn deduce_mod_info_v2(
 
     // Try matching INI Target Hint (if entity not already found via folders)
     if found_entity_slug.is_none() {
-        if let Some(target) = ini_target_hint {
+        if let Some(target) = &ini_target_hint { // Borrow hint
             let lower_target = target.to_lowercase();
-            if maps.entity_slug_to_id.contains_key(&target) {
-                found_entity_slug = Some(target);
-                println!("[DeduceV2 {}] Found entity slug '{}' from ini target.", mod_folder_name, found_entity_slug.as_ref().unwrap());
+            if maps.entity_slug_to_id.contains_key(target) {
+                found_entity_slug = Some(target.clone()); // Clone here
             } else if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&lower_target) {
                 found_entity_slug = Some(slug.clone());
-                 println!("[DeduceV2 {}] Found entity '{}' (name match) from ini target.", mod_folder_name, found_entity_slug.as_ref().unwrap());
             }
         }
     }
 
     // Try matching INI Type Hint (if category not already found via folders)
     if found_category_slug.is_none() {
-        if let Some(typ) = ini_type_hint {
+        if let Some(typ) = &ini_type_hint { // Borrow hint
             let lower_typ = typ.to_lowercase();
-             if maps.category_slug_to_id.contains_key(&typ) {
-                found_category_slug = Some(typ);
-                 println!("[DeduceV2 {}] Found category slug '{}' from ini type.", mod_folder_name, found_category_slug.as_ref().unwrap());
+             if maps.category_slug_to_id.contains_key(typ) {
+                found_category_slug = Some(typ.clone()); // Clone here
             } else if let Some(slug) = maps.lowercase_category_name_to_slug.get(&lower_typ) {
                 found_category_slug = Some(slug.clone());
-                println!("[DeduceV2 {}] Found category '{}' (name match) from ini type.", mod_folder_name, found_category_slug.as_ref().unwrap());
             }
         }
     }
 
 
     // --- 3. Final Assignment Logic ---
-    if let Some(entity_slug) = found_entity_slug {
-        // Entity found, assign it directly
-        info.entity_slug = entity_slug;
-        // We don't strictly *need* the category slug now, but could look it up if needed elsewhere
-    } else if let Some(category_slug) = found_category_slug {
-        // No specific entity, but category found. Assign to category's 'other'.
+    if let Some(ref entity_slug) = found_entity_slug {
+        info.entity_slug = entity_slug.clone();
+    } else if let Some(ref category_slug) = found_category_slug {
         info.entity_slug = format!("{}{}", category_slug, OTHER_ENTITY_SUFFIX);
-         println!("[DeduceV2 {}] No specific entity, assigned to category other: '{}'", mod_folder_name, info.entity_slug);
     } else {
-         // Fallback to default (e.g., characters-other or a generic unknown)
-         let fallback_category = "characters"; // Or choose a better default
-         info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
-         println!("[DeduceV2 {}] No entity or category deduced, assigned to fallback: '{}'", mod_folder_name, info.entity_slug);
+        // Priority 3: Try top-level folder name as category fallback
+        let relative_path_result = mod_folder_path.strip_prefix(base_mods_path);
+        if let Ok(relative_path) = relative_path_result {
+            if let Some(top_level_component) = relative_path.components().next() {
+                if let Some(top_folder_name) = top_level_component.as_os_str().to_str() {
+                    let lower_top_folder = top_folder_name.to_lowercase();
+                    let mut top_level_category_found: Option<String> = None; // Store the matched slug
+
+                    // --- Modified Fallback Check ---
+                    // Iterate through known category slugs and names for a partial match
+                    for (cat_slug, _) in &maps.category_slug_to_id {
+                        // Simple check: does slug start with folder name, or folder name start with slug?
+                        // Adjust this heuristic if needed (e.g., Levenshtein distance for typos)
+                        if cat_slug.starts_with(&lower_top_folder) || lower_top_folder.starts_with(cat_slug) {
+                            top_level_category_found = Some(cat_slug.clone());
+                            break; // Found a plausible match, stop checking slugs
+                        }
+                    }
+
+                    // If no slug matched, check names
+                    if top_level_category_found.is_none() {
+                        for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
+                             if cat_name_lower.starts_with(&lower_top_folder) || lower_top_folder.starts_with(cat_name_lower) {
+                                 top_level_category_found = Some(cat_slug.clone());
+                                 break; // Found a plausible match, stop checking names
+                             }
+                        }
+                    }
+                    // --- End Modified Fallback Check ---
+
+                    if let Some(found_cat_slug) = top_level_category_found {
+                        info.entity_slug = format!("{}{}", found_cat_slug, OTHER_ENTITY_SUFFIX);
+                    } else {
+                        // Priority 4: Hardcoded fallback if top-level folder doesn't match category even fuzzily
+                        let fallback_category = "characters";
+                        info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
+                    }
+                } else {
+                     let fallback_category = "characters";
+                     info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
+                }
+            } else {
+                 let fallback_category = "characters";
+                 info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
+            }
+        } else {
+             let fallback_category = "characters";
+             info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
+        }
     }
 
-    // Clean up Mod Name
-    info.mod_name = MOD_NAME_CLEANUP_REGEX.replace_all(&info.mod_name, "").trim().to_string();
-    if info.mod_name.is_empty() { // Use original folder name if cleanup resulted in empty
-        info.mod_name = mod_folder_name;
-    }
+    // Clean up Mod Name (remains the same)
+    // ... (name cleanup logic) ...
+     let original_mod_name = info.mod_name.clone();
+     info.mod_name = MOD_NAME_CLEANUP_REGEX.replace_all(&info.mod_name, "").trim().to_string();
+     if info.mod_name.is_empty() {
+         info.mod_name = mod_folder_name; // Use original folder name if cleanup resulted in empty
+     }
 
     Some(info)
 }
@@ -735,15 +773,11 @@ fn get_entity_details(entity_slug: String, db_state: State<DbState>) -> CmdResul
 
 #[command]
 fn get_assets_for_entity(entity_slug: String, db_state: State<DbState>, _app_handle: AppHandle) -> CmdResult<Vec<Asset>> {
-    println!("[get_assets_for_entity {}] Start command.", entity_slug);
-
     let base_mods_path = get_mods_base_path_from_settings(&db_state)
                              .map_err(|e| format!("[get_assets_for_entity {}] Error getting base mods path: {}", entity_slug, e))?;
-    println!("[get_assets_for_entity {}] Base mods path: {}", entity_slug, base_mods_path.display());
 
     let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
     let conn = &*conn_guard;
-    println!("[get_assets_for_entity {}] DB lock acquired for asset query.", entity_slug);
 
     // --- Entity ID Lookup ---
     let entity_id: i64 = conn.query_row(
@@ -754,14 +788,12 @@ fn get_assets_for_entity(entity_slug: String, db_state: State<DbState>, _app_han
         rusqlite::Error::QueryReturnedNoRows => format!("[get_assets_for_entity {}] Entity not found for assets lookup", entity_slug),
         _ => format!("[get_assets_for_entity {}] DB Error getting entity ID: {}", entity_slug, e),
     })?;
-    println!("[get_assets_for_entity {}] Found entity ID: {}", entity_slug, entity_id);
 
     // --- Prepare Statement ---
     let mut stmt = conn.prepare(
         "SELECT id, entity_id, name, description, folder_name, image_filename, author, category_tag
          FROM assets WHERE entity_id = ?1 ORDER BY name"
     ).map_err(|e| format!("[get_assets_for_entity {}] DB Error preparing asset statement: {}", entity_slug, e))?;
-    println!("[get_assets_for_entity {}] Prepared asset statement.", entity_slug);
 
     // --- Query Rows ---
     let asset_rows_result = stmt.query_map(params![entity_id], |row| {
@@ -781,24 +813,20 @@ fn get_assets_for_entity(entity_slug: String, db_state: State<DbState>, _app_han
     });
 
     let mut assets_to_return = Vec::new();
-    println!("[get_assets_for_entity {}] Starting iteration over asset rows from DB...", entity_slug);
 
     match asset_rows_result {
         Ok(asset_iter) => {
              for (index, asset_result) in asset_iter.enumerate() {
-                 println!("[get_assets_for_entity {}] Processing asset row index: {}", entity_slug, index);
                  match asset_result {
                      Ok(mut asset_from_db) => {
                          // --- Corrected State Detection Logic ---
                          // `asset_from_db.folder_name` currently holds the CLEAN relative path from DB
                          let clean_relative_path_from_db = PathBuf::from(&asset_from_db.folder_name);
-                         println!("[get_assets_for_entity {}] Asset from DB: ID={}, Name='{}', Clean RelPath='{}'", entity_slug, asset_from_db.id, asset_from_db.name, clean_relative_path_from_db.display());
 
                          // Construct potential paths based on the CLEAN relative path
                          let filename_osstr = clean_relative_path_from_db.file_name().unwrap_or_default();
                          let filename_str = filename_osstr.to_string_lossy();
                          if filename_str.is_empty() {
-                             println!("[get_assets_for_entity {}] WARN: Cannot get filename from clean relative path '{}'. Skipping asset ID {}.", entity_slug, clean_relative_path_from_db.display(), asset_from_db.id);
                              continue;
                          }
                          let disabled_filename = format!("{}{}", DISABLED_PREFIX, filename_str);
@@ -813,15 +841,11 @@ fn get_assets_for_entity(entity_slug: String, db_state: State<DbState>, _app_han
                             _ => base_mods_path.join(&disabled_filename), // No parent or parent is root
                          };
 
-                         println!("[get_assets_for_entity {}] Checking enabled path: {}", entity_slug, full_path_if_enabled.display());
-                         println!("[get_assets_for_entity {}] Checking disabled path: {}", entity_slug, full_path_if_disabled.display());
-
                          // Determine state based on which path exists
                          if full_path_if_enabled.is_dir() {
                              asset_from_db.is_enabled = true;
                              // Set folder_name to the actual path found on disk
                              asset_from_db.folder_name = clean_relative_path_from_db.to_string_lossy().replace("\\", "/");
-                             println!("[get_assets_for_entity {}] Mod state determined: ENABLED. Actual disk folder name: {}", entity_slug, asset_from_db.folder_name);
                          } else if full_path_if_disabled.is_dir() {
                              asset_from_db.is_enabled = false;
                              // Set folder_name to the actual path found on disk (the disabled one)
@@ -830,15 +854,11 @@ fn get_assets_for_entity(entity_slug: String, db_state: State<DbState>, _app_han
                                  _ => PathBuf::from(&disabled_filename),
                               };
                              asset_from_db.folder_name = disabled_relative_path.to_string_lossy().replace("\\", "/");
-                             println!("[get_assets_for_entity {}] Mod state determined: DISABLED. Actual disk folder name: {}", entity_slug, asset_from_db.folder_name);
                          } else {
                              // Mod folder doesn't exist in either state
-                             println!("[get_assets_for_entity {}] WARN: Mod folder for asset ID {} not found on disk (checked {} and {}). Skipping asset.", entity_slug, asset_from_db.id, full_path_if_enabled.display(), full_path_if_disabled.display());
                              continue; // Skip this asset
                          }
 
-                         println!("[get_assets_for_entity {}] Pushing valid asset to results: ID={}, Name='{}', Folder='{}', Enabled={}",
-                                  entity_slug, asset_from_db.id, asset_from_db.name, asset_from_db.folder_name, asset_from_db.is_enabled);
                          assets_to_return.push(asset_from_db);
                          // --- End Corrected State Detection ---
                      }
@@ -847,16 +867,13 @@ fn get_assets_for_entity(entity_slug: String, db_state: State<DbState>, _app_han
                      }
                  }
              }
-             println!("[get_assets_for_entity {}] Finished iterating over asset rows.", entity_slug);
         }
         Err(e) => {
              let err_msg = format!("[get_assets_for_entity {}] DB Error preparing asset iterator: {}", entity_slug, e);
-             eprintln!("{}", err_msg);
              return Err(err_msg);
         }
     }
 
-    println!("[get_assets_for_entity {}] Command finished successfully. Returning {} assets.", entity_slug, assets_to_return.len());
     Ok(assets_to_return)
 }
 
@@ -950,16 +967,12 @@ fn get_asset_image_path(
     image_filename: String,
     db_state: State<DbState> // Need db_state to get base path
 ) -> CmdResult<String> {
-    // Log with relevant info
-    println!("[get_asset_image_path] Getting image '{}' from disk folder '{}'", image_filename, folder_name_on_disk);
-
     // Get the base path from settings
     let base_mods_path = get_mods_base_path_from_settings(&db_state).map_err(|e| e.to_string())?;
 
     // Construct the FULL path to the mod folder using the name ON DISK
     // This assumes folder_name_on_disk is just the final component.
     let mod_folder_full_path = base_mods_path.join(&folder_name_on_disk);
-    println!("[get_asset_image_path] Checking mod folder path: {}", mod_folder_full_path.display());
 
 
     // Check if the folder itself exists before looking for the image inside
@@ -969,7 +982,6 @@ fn get_asset_image_path(
 
     // Construct the FULL path to the image file
     let image_full_path = mod_folder_full_path.join(&image_filename);
-    println!("[get_asset_image_path] Checking image path: {}", image_full_path.display());
 
     if !image_full_path.is_file() {
         return Err(format!("Image file '{}' not found in mod folder '{}'. Searched: {}", image_filename, folder_name_on_disk, image_full_path.display()));
@@ -1102,7 +1114,6 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
                         processed_mod_paths.insert(path.clone()); // Mark as processed
                         let path_display = path.display().to_string();
                         let folder_name_only = path.file_name().unwrap_or_default().to_string_lossy();
-                        println!("[Scan Task] Processing identified mod folder #{}: {}", processed_count, path_display);
 
                         // Emit progress event
                         app_handle_clone.emit_all(SCAN_PROGRESS_EVENT, ScanProgress {
@@ -1139,7 +1150,6 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
                                     };
                                     // Ensure forward slashes for consistency in DB
                                     let relative_path_to_store = relative_path_to_store.replace("\\", "/");
-                                    println!("[Scan Task] Storing clean relative path: {}", relative_path_to_store);
 
                                     // Check if this clean relative path already exists for the entity
                                     let existing_id: Option<i64> = conn.query_row(
@@ -1163,29 +1173,25 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
                                             ]
                                          );
                                          match insert_result {
-                                             Ok(changes) => { if changes > 0 { mods_added_count += 1; println!("[Scan Task] Added New: {}", relative_path_to_store); } }
+                                             Ok(changes) => { if changes > 0 { mods_added_count += 1; } }
                                              Err(e) => { eprintln!("[Scan Task] Error inserting NEW mod from path '{}' with clean relative path '{}': {}", path_display, relative_path_to_store, e); errors_count += 1; }
                                          }
                                      } else {
-                                        println!("[Scan Task] Exists (based on clean path): {}", relative_path_to_store);
                                          // Optionally update existing asset data here if needed
                                          // mods_updated_count += 1;
                                     }
                                  } else {
                                       // This case should be less frequent now due to fallback logic
-                                      eprintln!("[Scan Task] Error: Deduced entity slug '{}' has no ID in map for mod '{}'. This might indicate an issue with the fallback or maps.", deduced.entity_slug, path.display());
                                       errors_count += 1;
                                  }
                             }
                             None => {
-                                 eprintln!("[Scan Task] Error: Could not deduce info for potential mod folder '{}'. Skipping.", path.display());
                                  errors_count += 1;
                             }
                         } // End deduce_mod_info_v2 match
 
                         // *** CRUCIAL: Tell WalkDir not to descend into this mod folder ***
                         // We've processed it, don't look for mods inside it.
-                        println!("[Scan Task] Skipping descent into processed mod folder: {}", path.display());
                         walker.skip_current_dir();
 
                     } else if entry.file_type().is_dir() {

@@ -31,3 +31,6 @@ zip = "0.6" # Check for latest version
 
 [build-dependencies]
 tauri-build = { version = "1.5", features = [] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

@@ -40,31 +40,25 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete }) {
         }
     }, []);
 
-    // Effect to load image data
+    // Effect to load image data (or skip if 'other')
     useEffect(() => {
-        // --- ADD CHECK: Skip image loading for 'other' entities ---
         if (isOtherEntity) {
-            console.log(`[ModCard ${asset.id}] Skipping image load for 'Other' entity.`);
-            setImageBgCss(FALLBACK_MOD_IMAGE_BG); // Ensure fallback is set
+            // No need to load image for 'other' entities
+            setImageBgCss(FALLBACK_MOD_IMAGE_BG);
             setImageLoading(false);
             setImageError(false);
             cleanupObjectUrl();
-            return; // Exit effect early
+            return;
         }
-        // --- END CHECK ---
-
         let isMounted = true;
-        // Reset state on asset change (if not 'other')
         setImageBgCss(FALLBACK_MOD_IMAGE_BG);
         setImageError(false);
         setImageLoading(false);
         setToggleError(null);
         cleanupObjectUrl();
-
         if (asset.image_filename && folderNameOnDisk) {
             setImageLoading(true);
             console.log(`[ModCard ${asset.id}] Image Effect: Attempting load for ${asset.image_filename} in ${folderNameOnDisk}`);
-
             invoke('get_asset_image_path', { entitySlug: entitySlug, folderNameOnDisk: folderNameOnDisk, imageFilename: asset.image_filename })
             .then(filePath => {
                 if (!isMounted) return Promise.reject(new Error("Component unmounted"));
@@ -72,20 +66,19 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete }) {
                 return invoke('read_binary_file', { path: filePath });
             })
             .then(fileData => {
-                // ... (rest of the image loading logic remains the same) ...
-                 if (!isMounted || !fileData) return Promise.reject(new Error("Component unmounted or no file data")); // Stop chain
+                 if (!isMounted || !fileData) return Promise.reject(new Error("Component unmounted or no file data"));
                 console.log(`[ModCard ${asset.id}] Read binary data (length: ${fileData.length})`);
                  try {
                     const extension = asset.image_filename.split('.').pop().toLowerCase();
-                    let mimeType = 'image/png'; // Default
+                    let mimeType = 'image/png';
                     if (['jpg', 'jpeg'].includes(extension)) mimeType = 'image/jpeg';
                     else if (extension === 'gif') mimeType = 'image/gif';
                     else if (extension === 'webp') mimeType = 'image/webp';
                     const blob = new Blob([new Uint8Array(fileData)], { type: mimeType });
                     const url = URL.createObjectURL(blob);
-                    objectUrlRef.current = url; // Store for cleanup
+                    objectUrlRef.current = url;
                     if (isMounted) {
-                        setImageBgCss(`url('${url}')`); // Set the CSS background value
+                        setImageBgCss(`url('${url}')`);
                         setImageError(false);
                         console.log(`[ModCard ${asset.id}] Created Object URL: ${url}`);
                     } else {
@@ -117,16 +110,14 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete }) {
              console.log(`[ModCard ${asset.id}] No image filename or folder name defined.`);
              setImageBgCss(FALLBACK_MOD_IMAGE_BG);
         }
-
         return () => {
             isMounted = false;
             cleanupObjectUrl();
         };
-    // Add isOtherEntity to dependency array
     }, [asset.id, asset.image_filename, folderNameOnDisk, entitySlug, cleanupObjectUrl, isOtherEntity]);
 
     // Toggle Handler (remains the same)
-    const handleToggle = useCallback(async () => { /* ... */
+    const handleToggle = useCallback(async () => {
         if (isToggling) return;
         setIsToggling(true);
         setToggleError(null);
@@ -148,28 +139,28 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete }) {
      }, [isToggling, asset, entitySlug, onToggleComplete, isEnabled]);
 
     // Edit Handler (remains the same)
-    const handleEditClick = useCallback((e) => { /* ... */
+    const handleEditClick = useCallback((e) => {
         e.stopPropagation();
         e.preventDefault();
-        onEdit(asset); // Call parent's edit handler
+        onEdit(asset);
     }, [asset, onEdit]);
 
     // Delete Handler (remains the same)
-    const handleDeleteClick = useCallback((e) => { /* ... */
+    const handleDeleteClick = useCallback((e) => {
         e.stopPropagation();
         e.preventDefault();
-        onDelete(asset); // Call parent's delete handler
+        onDelete(asset);
     }, [asset, onDelete]);
 
 
     // --- Style for Image Container ---
+    // Style is only relevant if NOT isOtherEntity
     const imageContainerStyle = useMemo(() => ({
         marginBottom: '15px',
         height: '120px',
         width: '100%',
         backgroundColor: 'rgba(0,0,0,0.2)',
-        // Use fallback background if it's an 'other' entity or loading/error
-        backgroundImage: (isOtherEntity || imageLoading) ? FALLBACK_MOD_IMAGE_BG : imageBgCss,
+        backgroundImage: imageLoading ? FALLBACK_MOD_IMAGE_BG : imageBgCss, // Show fallback while loading too
         backgroundSize: 'cover',
         backgroundPosition: 'center center',
         backgroundRepeat: 'no-repeat',
@@ -179,23 +170,27 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete }) {
         alignItems: 'center',
         overflow: 'hidden',
         position: 'relative',
-    }), [imageLoading, imageBgCss, isOtherEntity]);
+    }), [imageLoading, imageBgCss]);
 
     // --- Render ---
     return (
         <div className={`mod-card ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Folder: ${folderNameOnDisk}`}>
-            {/* Image Display Area */}
-            <div style={imageContainerStyle}>
-                {imageLoading && !isOtherEntity && ( // Only show spinner if not 'other'
-                    <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i>
-                )}
-                {/* Show placeholder text if loading failed, or if it's 'other' */}
-                {!imageLoading && (imageBgCss === FALLBACK_MOD_IMAGE_BG || isOtherEntity) && (
-                     <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', padding: '5px', background: 'rgba(0,0,0,0.3)', borderRadius: '3px' }}>
-                        {isOtherEntity ? 'Preview N/A' : (imageError ? 'Preview failed' : 'No preview')}
-                    </span>
-                )}
-            </div>
+
+            {/* === Conditionally render the image container === */}
+            {!isOtherEntity && (
+                <div style={imageContainerStyle}>
+                    {imageLoading && (
+                        <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i>
+                    )}
+                    {!imageLoading && imageBgCss === FALLBACK_MOD_IMAGE_BG && (
+                        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', padding: '5px', background: 'rgba(0,0,0,0.3)', borderRadius: '3px' }}>
+                            {imageError ? 'Preview failed' : 'No preview'}
+                        </span>
+                    )}
+                </div>
+            )}
+            {/* === End Conditional Rendering === */}
+
 
             {/* Mod Header (remains the same) */}
              <div className="mod-header">

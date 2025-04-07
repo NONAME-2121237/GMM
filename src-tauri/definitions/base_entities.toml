@@ -125,9 +125,8 @@ name = "Enemies"
 entities = [
     # Common
     { name = "Hilichurl",        slug = "hilichurl",       description = "A common humanoid monster found across Teyvat.", details = '{"type": "Common"}', base_image = "hilichurl.png" },
-    { name = "Slime (Pyro)",     slug = "slime-pyro",      description = "A common elemental life form made of Pyro.", details = '{"type": "Common", "element": "Pyro"}', base_image = "slime_pyro.png" },
-    { name = "Slime (Cryo)",     slug = "slime-cryo",      description = "A common elemental life form made of Cryo.", details = '{"type": "Common", "element": "Cryo"}', base_image = "slime_cryo.png" },
-    { name = "Specter (Hydro)",  slug = "specter-hydro",   description = "A floating elemental creature born from high concentrations of Hydro.", details = '{"type": "Common", "element": "Hydro"}', base_image = "specter_hydro.png" },
+    { name = "Slime",     slug = "slime",      description = "A common elemental life form made of elemental energy.", details = '{"type": "Common"}', base_image = "slime.png" },
+    { name = "Specter",  slug = "specter",   description = "A floating elemental creature born from high concentrations of Elemental energy.", details = '{"type": "Common"}', base_image = "specter.png" },
     { name = "Fatui Skirmisher", slug = "fatui-skirmisher", description = "A soldier belonging to the Fatui military force (various elements).", details = '{"type": "Common", "faction": "Fatui"}', base_image = "fatui_skirmisher.png" },
     { name = "Treasure Hoarder", slug = "treasure-hoarder", description = "A member of a decentralized criminal organization that operates across Teyvat.", details = '{"type": "Common"}', base_image = "treasure_hoarder.png" },
     # Elite
@@ -135,7 +134,7 @@ entities = [
     { name = "Ruin Hunter",      slug = "ruin-hunter",     description = "A vaguely insectoid ancient war machine.", details = '{"type": "Elite", "faction": "Automaton"}', base_image = "ruin_hunter.png" },
     { name = "Geovishap Hatchling", slug = "geovishap-hatchling", description = "A young Geovishap.", details = '{"type": "Elite", "element": "Geo"}', base_image = "geovishap_hatchling.png" },
     { name = "Fatui Agent (Pyro)", slug = "fatui-agent-pyro", description = "An elite operative of the Fatui specializing in stealth and assassination.", details = '{"type": "Elite", "faction": "Fatui", "element": "Pyro"}', base_image = "fatui_agent_pyro.png" },
-    { name = "Abyss Mage (Hydro)", slug = "abyss-mage-hydro", description = "A creature from the Abyss wielding Hydro powers and a protective shield.", details = '{"type": "Elite", "faction": "Abyss Order", "element": "Hydro"}', base_image = "abyss_mage_hydro.png" },
+    { name = "Abyss Mage", slug = "abyss-mage", description = "A creature from the Abyss wielding Elemental powers and a protective shield.", details = '{"type": "Elite", "faction": "Abyss Order"}', base_image = "abyss_mage.png" },
     { name = "Mirror Maiden",    slug = "mirror-maiden",   description = "A Fatui operative who commands a Hydro Mirror.", details = '{"type": "Elite", "faction": "Fatui", "element": "Hydro"}', base_image = "mirror_maiden.png" },
     # Bosses (Example)
     { name = "Andrius",          slug = "andrius",         description = "Lupus Boreas, the Wolf of the North. One of the Four Winds of Mondstadt.", details = '{"type": "Weekly Boss"}', base_image = "andrius.png" },
@@ -162,21 +161,8 @@ entities = [
 [objects]
 name = "Objects"
 entities = [
-    { name = "Common Chest", slug = "treasure-chest-common", description = "A common chest containing minor rewards.", details = '{"type": "Container", "rarity": "Common"}', base_image = "common_chest.png" },
-    { name = "Exquisite Chest", slug = "treasure-chest-exquisite", description = "A more valuable chest.", details = '{"type": "Container", "rarity": "Exquisite"}', base_image = "exquisite_chest.png" },
-    { name = "Precious Chest", slug = "treasure-chest-precious", description = "A chest containing significant rewards.", details = '{"type": "Container", "rarity": "Precious"}', base_image = "precious_chest.png" },
-    { name = "Luxurious Chest", slug = "treasure-chest-luxurious", description = "A rare chest with the best rewards.", details = '{"type": "Container", "rarity": "Luxurious"}', base_image = "luxurious_chest.png" },
-    { name = "Seelie",         slug = "seelie",        description = "A guiding spirit that leads to treasure.", details = '{"type": "World Puzzle"}', base_image = "seelie.png" },
-    { name = "Seelie Court",   slug = "seelie-court",  description = "The resting place for a Seelie.", details = '{"type": "World Puzzle"}', base_image = "seelie_court.png" },
-    { name = "Anemoculus",     slug = "anemoculus",    description = "An elemental collectible found in Mondstadt.", details = '{"type": "Collectible", "region": "Mondstadt"}', base_image = "anemoculus.png" },
-    { name = "Geoculus",       slug = "geoculus",      description = "An elemental collectible found in Liyue.", details = '{"type": "Collectible", "region": "Liyue"}', base_image = "geoculus.png" },
-    { name = "Electroculus",   slug = "electroculus",  description = "An elemental collectible found in Inazuma.", details = '{"type": "Collectible", "region": "Inazuma"}', base_image = "electroculus.png" },
-    { name = "Dendroculus",    slug = "dendroculus",   description = "An elemental collectible found in Sumeru.", details = '{"type": "Collectible", "region": "Sumeru"}', base_image = "dendroculus.png" },
-    { name = "Hydroculus",     slug = "hydroculus",    description = "An elemental collectible found in Fontaine.", details = '{"type": "Collectible", "region": "Fontaine"}', base_image = "hydroculus.png" },
-    { name = "Waverider Waypoint", slug = "waverider-waypoint", description = "A waypoint used to summon the Waverider boat.", details = '{"type": "Interaction Point"}', base_image = "waverider_waypoint.png" },
-    { name = "Fishing Point",  slug = "fishing-point", description = "A designated spot for fishing.", details = '{"type": "Interaction Point"}', base_image = "fishing_point.png" },
-    { name = "Cooking Pot",    slug = "cooking-pot",   description = "Used for cooking food.", details = '{"type": "Interaction Point", "function": "Cooking"}', base_image = "cooking_pot.png" },
-    { name = "Crafting Bench", slug = "crafting-bench", description = "Used for crafting and alchemy.", details = '{"type": "Interaction Point", "function": "Crafting/Alchemy"}', base_image = "crafting_bench.png" },
+    { name = "Chests", slug = "treasure-chest", description = "Chests are scattered around Tevyat, containing rewards.", details = '{"type": "Container"}', base_image = "chest.png" },
+    { name = "Oculus",     slug = "oculus",    description = "An elemental collectible found in Tevyat.", details = '{"type": "Collectible"}', base_image = "oculus.png" },
+    { name = "Waverider", slug = "waverider", description = "Waverider boat.", details = '{"type": "Waverider"}', base_image = "waverider.png" },
     { name = "Statue of The Seven", slug = "statue-of-the-seven", description = "A statue representing an Archon, used for healing, stamina upgrades, and map unlocking.", details = '{"type": "Interaction Point"}', base_image = "statue_of_the_seven.png" },
-    { name = "Teleport Waypoint", slug = "teleport-waypoint", description = "Allows fast travel across Teyvat.", details = '{"type": "Interaction Point"}', base_image = "teleport_waypoint.png" },
 ]
