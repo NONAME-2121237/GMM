@@ -31,7 +31,7 @@ const weaponIconsFA = {
 const RarityIcon = () => <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i>;
 
 // Default placeholder image path (relative to public) - For the main entity avatar
-const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/api/placeholder/260/400?text=No+Image';
+const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.png';
 
 function EntityPage() {
     const { entitySlug } = useParams();

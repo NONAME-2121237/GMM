@@ -5,8 +5,7 @@ import { open } from '@tauri-apps/api/dialog';
 import Select from 'react-select'; // Import react-select
 
 const reactSelectStyles = {
-    control: (baseStyles, state) => ({ /* ... */ }),
-        control: (baseStyles, state) => ({
+    control: (baseStyles, state) => ({
       ...baseStyles,
       backgroundColor: 'rgba(0,0,0,0.2)',
       borderColor: state.isFocused ? 'var(--primary)' : 'rgba(255, 255, 255, 0.1)',

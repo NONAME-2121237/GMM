@@ -21,7 +21,7 @@ const elementIconsFA = {
 const RarityIcon = () => <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i>; // Gold star
 
 // Default placeholder image path (relative to public)
-const DEFAULT_PLACEHOLDER_IMAGE = '/api/placeholder/300/400?text=No+Image';
+const DEFAULT_PLACEHOLDER_IMAGE = '/images/unknown.png';
 
 function EntityCard({ entity }) {
     const details = parseDetails(entity.details);
