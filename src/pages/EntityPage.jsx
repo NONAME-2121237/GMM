@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/tauri';
 import ModCard from '../components/ModCard';
+import ModEditModal from '../components/ModEditModal';
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -38,6 +39,8 @@ function EntityPage() {
     const [assets, setAssets] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [editingAsset, setEditingAsset] = useState(null); // State for the asset being edited
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false); // State for modal visibility
 
     const fetchData = useCallback(async () => {
         console.log(`[EntityPage ${entitySlug}] Fetching data...`);
@@ -118,6 +121,30 @@ function EntityPage() {
              navigate(`/category/${fallbackCategory}`);
          }
     };
+
+    // --- Edit Modal Handlers ---
+    const handleOpenEditModal = useCallback((assetToEdit) => {
+        console.log("Opening edit modal for:", assetToEdit);
+        setEditingAsset(assetToEdit);
+        setIsEditModalOpen(true);
+    }, []);
+
+    const handleCloseEditModal = useCallback(() => {
+        setIsEditModalOpen(false);
+        setEditingAsset(null); // Clear editing state on close
+    }, []);
+
+    const handleSaveEditSuccess = useCallback((updatedAssetData) => {
+         console.log("Saving successful, updating asset in state:", updatedAssetData);
+        // Update the asset list state with the new data
+        setAssets(currentAssets =>
+            currentAssets.map(asset =>
+                asset.id === updatedAssetData.id ? updatedAssetData : asset
+            )
+        );
+        handleCloseEditModal(); // Close the modal on success
+        // Optionally, force ModCard image reload if needed, though changing asset data should trigger its useEffect
+    }, [handleCloseEditModal]);
 
     if (loading) return <div className="placeholder-text">Loading entity details for {entitySlug}... <i className="fas fa-spinner fa-spin"></i></div>;
     if (error) return <div className="placeholder-text" style={{ color: 'var(--danger)' }}>Error: {error}</div>;
@@ -210,11 +237,10 @@ function EntityPage() {
                 </div>
             </div>
 
+            {/* Mods Section */}
             <div className="mods-section">
                 <div className="section-header">
-                    {/* Use assets.length for the count shown here, entity.mod_count for the profile */}
                     <h2 className="section-title">Available Mods ({assets.length})</h2>
-                     {/* Add filter/sort options here later */}
                 </div>
 
                 <div className="mods-grid">
@@ -222,18 +248,28 @@ function EntityPage() {
                         assets.map(asset => (
                             <ModCard
                                 key={asset.id}
-                                asset={asset} // Pass the full asset object with correct is_enabled and folder_name
-                                entitySlug={entitySlug} // Pass slug needed by ModCard
-                                onToggleComplete={handleToggleComplete} // Pass callback
+                                asset={asset}
+                                entitySlug={entitySlug}
+                                onToggleComplete={handleToggleComplete}
+                                onEdit={handleOpenEditModal} // Pass the edit handler
                             />
                         ))
                     ) : (
-                        <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}> {/* Span across grid columns */}
-                            No mods found or added for {entity.name} yet. Scan your mods folder in Settings or add mods matching this entity.
+                        <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
+                           {/* No mods message */}
                         </p>
                     )}
                 </div>
             </div>
+
+            {/* Edit Modal */}
+            {isEditModalOpen && editingAsset && (
+                <ModEditModal
+                    asset={editingAsset}
+                    onClose={handleCloseEditModal}
+                    onSaveSuccess={handleSaveEditSuccess}
+                />
+            )}
         </div>
     );
 }

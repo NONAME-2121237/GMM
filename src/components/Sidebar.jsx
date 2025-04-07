@@ -1,54 +1,96 @@
 // src/components/Sidebar.jsx
-import React, { useState } from 'react'; // Added useState
-import { NavLink, useLocation } from 'react-router-dom';
+import React, { useState, useCallback } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'; // Import useNavigate
 import { invoke } from '@tauri-apps/api/tauri';
-import { useSettings } from '../contexts/SettingsContext'; // Import useSettings
+import { useSettings } from '../contexts/SettingsContext';
+import ImportModModal from './ImportModModal'; // Import the modal
 
 function Sidebar() {
     const location = useLocation();
-    const { quickLaunchPath, isLoading } = useSettings(); // Get path from context
-    const [launchError, setLaunchError] = useState(''); // State for launch errors
+    const navigate = useNavigate(); // Get navigate function
+    const { quickLaunchPath, isLoading, modsFolder } = useSettings(); // Get needed context
+    const [launchError, setLaunchError] = useState('');
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+    const [importAnalysisResult, setImportAnalysisResult] = useState(null);
+    const [importError, setImportError] = useState('');
 
     // Determines active state for sidebar links
     const isNavItemActive = (path) => {
-        // Home is active for '/'
-        if (path === '/') {
-            return location.pathname === '/';
+        if (path === '/') return location.pathname === '/';
+        // Check if current path starts with the nav link path
+        // This handles /category/xxx and /settings etc.
+        // For entities, make sure the corresponding category is active
+        if (location.pathname.startsWith('/entity/')) {
+             // A simple heuristic: activate 'characters' if on any entity page
+             // TODO: Could be improved by knowing the entity's category
+             if (path === '/category/characters') return true;
         }
-        // Characters link is active for its category or any entity page
-        if (path === '/category/characters') {
-           return location.pathname.startsWith('/category/characters') || location.pathname.startsWith('/entity/');
-        }
-         // Other category links are active if path starts with their specific slug
-        if (path.startsWith('/category/')) {
-            return location.pathname.startsWith(path);
-        }
-        // General check for other top-level sections like Settings
         return location.pathname.startsWith(path);
     };
 
     const handleOpenModsFolder = async () => {
-        try {
-            await invoke('open_mods_folder');
-        } catch (error) {
-            console.error("Failed to open mods folder:", error);
-            // TODO: Show user-friendly error
-        }
+        try { await invoke('open_mods_folder'); }
+        catch (error) { console.error("Failed to open mods folder:", error); /* TODO: Show user error */ }
     };
 
     const handleQuickLaunch = async () => {
-        setLaunchError(''); // Clear previous error
-        if (!quickLaunchPath) {
-            setLaunchError("Quick Launch path not set in Settings.");
-            return;
-        }
+        setLaunchError('');
+        if (!quickLaunchPath) { setLaunchError("Quick Launch path not set in Settings."); return; }
+        try { await invoke('launch_executable', { path: quickLaunchPath }); }
+        catch (error) { console.error("Failed to quick launch:", error); setLaunchError(`Launch Failed: ${error}`); }
+    };
+
+    // --- Import Mod Logic ---
+    const handleInitiateImport = async () => {
+        setImportError('');
+        setImportAnalysisResult(null); // Clear previous analysis
         try {
-            await invoke('launch_executable', { path: quickLaunchPath });
-        } catch (error) {
-            console.error("Failed to quick launch:", error);
-            setLaunchError(`Launch Failed: ${error}`); // Show error
+            const selectedPath = await invoke('select_archive_file');
+            if (!selectedPath) { console.log("Import cancelled by user."); return; }
+            console.log("Selected archive:", selectedPath);
+            // Show loading indicator?
+            const analysis = await invoke('analyze_archive', { filePathStr: selectedPath });
+            console.log("Analysis result:", analysis);
+            setImportAnalysisResult(analysis);
+            setIsImportModalOpen(true); // Open modal with analysis results
+        } catch (err) {
+            const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error during import initiation');
+            console.error("Failed to initiate mod import:", errorString);
+            setImportError(`Error: ${errorString}`);
+            setIsImportModalOpen(false);
         }
     };
+
+    const handleCloseImportModal = useCallback(() => {
+        setIsImportModalOpen(false);
+        setImportAnalysisResult(null);
+        setImportError('');
+    }, []);
+
+    // Modified Success Handler for Navigation
+    const handleImportSuccess = useCallback((importedEntitySlug, importedCategorySlug) => {
+        console.log(`Import successful. Navigating to entity: ${importedEntitySlug} in category: ${importedCategorySlug}`);
+        handleCloseImportModal(); // Close modal first
+
+        // Navigate to the entity page to force a refresh
+        if (importedEntitySlug) {
+            // Check if already on the page - might need reload instead?
+             if (location.pathname === `/entity/${importedEntitySlug}`) {
+                 window.location.reload(); // Force reload if already there
+             } else {
+                 navigate(`/entity/${importedEntitySlug}`);
+             }
+        } else if (importedCategorySlug) {
+            // Fallback to category page if entity slug somehow missing
+             navigate(`/category/${importedCategorySlug}`);
+        }
+         else {
+            // Further fallback
+            navigate('/');
+             window.location.reload();
+        }
+    }, [handleCloseImportModal, navigate, location.pathname]);
+
 
     return (
         <div className="sidebar">
@@ -56,8 +98,8 @@ function Sidebar() {
                  <svg width="24" height="24" viewBox="0 0 24 24">
                      <defs>
                          <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                             <stop offset="0%" stopColor="#9c88ff" />
-                             <stop offset="100%" stopColor="#ff9f43" />
+                             <stop offset="0%" stopColor="var(--primary)" />
+                             <stop offset="100%" stopColor="var(--accent)" />
                          </linearGradient>
                      </defs>
                      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="url(#logo-gradient)"></path>
@@ -65,18 +107,29 @@ function Sidebar() {
                  <span>Genshin Modder</span>
             </div>
 
-            {/* Quick Launch Button (Added near top) */}
+            {/* Quick Launch Button */}
             <button
                 className="btn btn-primary"
                 style={{ width: '100%', marginBottom: '15px' }}
                 onClick={handleQuickLaunch}
-                disabled={!quickLaunchPath || isLoading} // Disable if no path or settings loading
+                disabled={!quickLaunchPath || isLoading}
                 title={quickLaunchPath ? `Launch: ${quickLaunchPath}`: "Set Quick Launch path in Settings"}
             >
                  <i className="fas fa-play fa-fw"></i> Quick Launch
              </button>
-             {/* Display launch error below button */}
              {launchError && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{launchError}</p>}
+
+            {/* Import Mod Button */}
+            <button
+                className="btn btn-outline"
+                style={{ width: '100%', marginBottom: '15px' }}
+                onClick={handleInitiateImport}
+                disabled={isLoading || !modsFolder} // Disable if settings loading or no mods folder set
+                title={!modsFolder ? "Set Mods Folder path first" : "Import Mod from Archive"}
+            >
+                 <i className="fas fa-file-import fa-fw"></i> Import Mod
+            </button>
+             {importError && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{importError}</p>}
 
 
             {/* Nav Items */}
@@ -112,14 +165,13 @@ function Sidebar() {
                 style={{ width: '100%', marginBottom: '15px' }}
                 onClick={handleOpenModsFolder}
                 title="Open the configured mods folder"
-                 disabled={isLoading} // Also disable while loading settings
+                 disabled={isLoading}
             >
                  <i className="fas fa-folder-open fa-fw"></i> Open Mods Folder
              </button>
 
             {/* Presets Section */}
             <div className="preset-section">
-                {/* ... preset header and placeholder ... */}
                  <div className="preset-header">
                     <span>Presets</span>
                     <button title="Add New Preset (Not Implemented)">
@@ -130,6 +182,15 @@ function Sidebar() {
                     Preset management coming soon.
                 </div>
             </div>
+
+             {/* Import Modal */}
+            {isImportModalOpen && importAnalysisResult && (
+                 <ImportModModal
+                    analysisResult={importAnalysisResult}
+                    onClose={handleCloseImportModal}
+                    onImportSuccess={handleImportSuccess} // Pass the updated handler
+                 />
+            )}
         </div>
     );
 }

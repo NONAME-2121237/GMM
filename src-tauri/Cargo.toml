@@ -26,6 +26,8 @@ lazy_static = "1.4" # Useful for regex compilation
 regex = "1"
 rust-ini = "0.21.1"
 toml = "0.8.20"
+# --> Add ZIP dependency <--
+zip = "0.6" # Check for latest version
 
 [build-dependencies]
 tauri-build = { version = "1.5", features = [] }

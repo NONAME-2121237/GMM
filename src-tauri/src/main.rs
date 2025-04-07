@@ -12,8 +12,9 @@ use regex::Regex;
 use lazy_static::lazy_static;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params};
 use serde::{Serialize, Deserialize};
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, Arc};
 use tauri::{
     command, generate_context, generate_handler, AppHandle, Manager, State, api::dialog,
@@ -23,20 +24,23 @@ use thiserror::Error;
 use once_cell::sync::Lazy;
 use tauri::async_runtime;
 use toml;
+use tauri::api::file::read_binary;
+use std::io::{Read, Seek, Cursor}; // For reading zip files
+use zip::ZipArchive;
 
 // --- Structs for Deserializing Definitions ---
-#[derive(Deserialize, Debug, Clone)] // Added Clone for potential use later
+#[derive(Deserialize, Debug, Clone)]
 struct EntityDefinition {
     name: String,
     slug: String,
     description: Option<String>,
-    details: Option<String>, // JSON string from TOML
+    details: Option<String>,
     base_image: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
 struct CategoryDefinition {
-    name: String, // Category display name
+    name: String,
     entities: Vec<EntityDefinition>,
 }
 
@@ -47,11 +51,9 @@ type Definitions = HashMap<String, CategoryDefinition>;
 const SETTINGS_KEY_MODS_FOLDER: &str = "mods_folder_path";
 const OTHER_ENTITY_SUFFIX: &str = "-other";
 const OTHER_ENTITY_NAME: &str = "Other/Unknown";
-
-
-// --- Configuration ---
 const DB_NAME: &str = "app_data.sqlite";
 const DISABLED_PREFIX: &str = "DISABLED_";
+const TARGET_IMAGE_FILENAME: &str = "preview.png";
 
 // --- Error Handling ---
 #[derive(Debug, Error)]
@@ -74,6 +76,8 @@ enum AppError {
     UserCancelled,
     #[error("Shell command failed: {0}")]
     ShellCommand(String),
+    #[error("Zip error: {0}")]
+    Zip(#[from] zip::result::ZipError),
 }
 
 // --- Event Payload Struct ---
@@ -81,7 +85,7 @@ enum AppError {
 struct ScanProgress {
   processed: usize,
   total: usize,
-  current_path: Option<String>, // Optional: path being processed
+  current_path: Option<String>,
   message: String,
 }
 
@@ -90,25 +94,19 @@ const SCAN_PROGRESS_EVENT: &str = "scan://progress";
 const SCAN_COMPLETE_EVENT: &str = "scan://complete";
 const SCAN_ERROR_EVENT: &str = "scan://error";
 
-// --- Use String for Command Errors ---
 type CmdResult<T> = Result<T, String>;
 
-// --- Database Setup ---
 struct DbState(Arc<Mutex<Connection>>);
 
 static DB_CONNECTION: Lazy<Mutex<SqlResult<Connection>>> = Lazy::new(|| {
     Mutex::new(Err(rusqlite::Error::InvalidPath("DB not initialized yet".into())))
 });
 
-// --- Add Regex for cleanup ---
 lazy_static! {
-    // Simple regex to remove common prefixes/suffixes used for versioning or status
     static ref MOD_NAME_CLEANUP_REGEX: Regex = Regex::new(r"(?i)(_v\d+(\.\d+)*|_DISABLED|DISABLED_|\(disabled\)|^DISABLED_)").unwrap();
-    // Regex to find potential character names (simple example, needs expansion)
-    static ref CHARACTER_NAME_REGEX: Regex = Regex::new(r"(?i)(Raiden|Shogun|HuTao|Tao|Zhongli|Ganyu|Ayaka|Kazuha|Yelan|Eula|Klee|Nahida)").unwrap(); // Add more known names/aliases
+    static ref CHARACTER_NAME_REGEX: Regex = Regex::new(r"(?i)(Raiden|Shogun|HuTao|Tao|Zhongli|Ganyu|Ayaka|Kazuha|Yelan|Eula|Klee|Nahida)").unwrap();
 }
 
-// --- Helper Structs (Internal) ---
 #[derive(Debug)]
 struct DeducedInfo {
     entity_slug: String,
@@ -117,6 +115,33 @@ struct DeducedInfo {
     author: Option<String>,
     description: Option<String>,
     image_filename: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)] struct Category { id: i64, name: String, slug: String }
+#[derive(Serialize, Deserialize, Debug)] struct Entity { id: i64, category_id: i64, name: String, slug: String, description: Option<String>, details: Option<String>, base_image: Option<String>, mod_count: i32 }
+#[derive(Serialize, Deserialize, Debug, Clone)] struct Asset { id: i64, entity_id: i64, name: String, description: Option<String>, folder_name: String, image_filename: Option<String>, author: Option<String>, category_tag: Option<String>, is_enabled: bool }
+
+// Structs for Import/Analysis
+#[derive(Serialize, Debug, Clone)]
+struct ArchiveEntry {
+    path: String,
+    is_dir: bool,
+    is_likely_mod_root: bool,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ArchiveAnalysisResult {
+    file_path: String,
+    entries: Vec<ArchiveEntry>,
+    deduced_mod_name: Option<String>,
+    deduced_author: Option<String>,
+    deduced_category_slug: Option<String>, // Keep for potential future backend use
+    deduced_entity_slug: Option<String>,   // Keep for potential future backend use
+    // --> Added Raw INI fields <--
+    raw_ini_type: Option<String>,          // e.g., "Character", "Weapon"
+    raw_ini_target: Option<String>,        // e.g., "Nahida", "Raiden Shogun", "Aqua Simulacra"
+    // --------------------------
+    detected_preview_internal_path: Option<String>,
 }
 
 // --- Helper Functions for Deduction ---
@@ -415,14 +440,6 @@ fn get_entity_mods_path(db_state: &DbState, entity_slug: &str) -> Result<PathBuf
     let base_path = get_mods_base_path_from_settings(db_state)?;
     Ok(base_path.join(entity_slug))
 }
-
-
-// --- Data Structures --- (Keep existing structs)
-#[derive(Serialize, Deserialize, Debug)] struct Category { id: i64, name: String, slug: String }
-#[derive(Serialize, Deserialize, Debug)] struct Entity { id: i64, category_id: i64, name: String, slug: String, description: Option<String>, details: Option<String>, base_image: Option<String>, mod_count: i32 }
-// #[serde(skip_deserializing)] removed for is_enabled as we set it now
-#[derive(Serialize, Deserialize, Debug, Clone)] struct Asset { id: i64, entity_id: i64, name: String, description: Option<String>, folder_name: String, image_filename: Option<String>, author: Option<String>, category_tag: Option<String>, is_enabled: bool }
-
 
 // --- Tauri Commands (Return CmdResult<T> = Result<T, String>) ---
 
@@ -1100,6 +1117,604 @@ fn get_total_asset_count(db_state: State<DbState>) -> CmdResult<i64> {
         .map_err(|e| e.to_string())
 }
 
+#[command]
+fn update_asset_info(
+    asset_id: i64,
+    name: String,
+    description: Option<String>,
+    author: Option<String>,
+    category_tag: Option<String>,
+    selected_image_absolute_path: Option<String>,
+    db_state: State<DbState> // Keep state to acquire lock initially
+) -> CmdResult<()> {
+    println!("[update_asset_info] Start for asset ID: {}", asset_id);
+
+    // Acquire the single lock needed for this operation
+    let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let conn = &*conn_guard; // Get a reference to the Connection from the guard
+    println!("[update_asset_info] DB lock acquired.");
+
+    // --- 1. Get Current Asset Info (Uses 'conn') ---
+    let (clean_relative_path_str, current_image_filename): (String, Option<String>) = conn.query_row(
+        "SELECT folder_name, image_filename FROM assets WHERE id = ?1",
+        params![asset_id],
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).map_err(|e| format!("Failed to query current asset info for ID {}: {}", asset_id, e))?;
+    let clean_relative_path_str = clean_relative_path_str.replace("\\", "/");
+    let clean_relative_path = PathBuf::from(&clean_relative_path_str);
+    println!("[update_asset_info] Found clean relative path: {}", clean_relative_path.display());
+
+    // --- 2. Get Base Mods Path (Uses 'conn' via get_setting_value directly) ---
+    let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER) // Pass 'conn' directly
+        .map_err(|e| format!("Failed to query mods folder setting: {}", e))? // Convert AppError to String
+        .ok_or_else(|| "Mods folder path not set".to_string())?; // Convert Option error to String
+    let base_mods_path = PathBuf::from(base_mods_path_str);
+    println!("[update_asset_info] Found base mods path: {}", base_mods_path.display());
+
+    // --- 3. Construct & Check Full Mod Folder Path ---
+    let mod_folder_path = base_mods_path.join(&clean_relative_path);
+    println!("[update_asset_info] Constructed mod folder path: {}", mod_folder_path.display());
+    // **** CRITICAL FIX: Check if the path is actually a directory ****
+    // The path stored is still bad (ends in .rar), so this check MUST fail
+    if !mod_folder_path.is_dir() {
+         // Check if the *parent* exists instead, might be more useful info
+         let parent_dir = mod_folder_path.parent().unwrap_or(&base_mods_path); // Fallback
+          let parent_exists = parent_dir.is_dir();
+         eprintln!("[update_asset_info] Error: Target path is not a directory (Parent exists: {}). Path: {}", parent_exists, mod_folder_path.display());
+         // Inform the user that the stored path is invalid (likely from a bad scan)
+         return Err(format!(
+            "Cannot update mod: The stored path '{}' is not a valid directory. Please rescan the mods folder to correct the database.",
+            clean_relative_path.display()
+        ));
+    }
+    println!("[update_asset_info] Mod folder path confirmed as directory.");
+
+    // --- 4. Handle Image Copying ---
+    let mut image_filename_to_save = current_image_filename;
+    println!("[update_asset_info] Checking if new image was selected...");
+
+    if let Some(source_path_str) = selected_image_absolute_path {
+        println!("[update_asset_info] New image selected: {}", source_path_str);
+        let source_path = PathBuf::from(&source_path_str);
+        println!("[update_asset_info] Checking source image path: {}", source_path.display());
+        if !source_path.is_file() {
+             eprintln!("[update_asset_info] Error: Selected source image file does not exist.");
+             return Err(format!("Selected image file does not exist: {}", source_path.display()));
+        }
+        println!("[update_asset_info] Source image path exists.");
+
+        let target_image_path = mod_folder_path.join(TARGET_IMAGE_FILENAME);
+        println!("[update_asset_info] Target image path: {}", target_image_path.display());
+
+        println!("[update_asset_info] Attempting to copy image...");
+        match fs::copy(&source_path, &target_image_path) {
+            Ok(_) => {
+                println!("[update_asset_info] Image copied successfully.");
+                image_filename_to_save = Some(TARGET_IMAGE_FILENAME.to_string());
+            }
+            Err(e) => {
+                eprintln!("[update_asset_info] Failed to copy image: {}", e);
+                return Err(format!("Failed to copy image to mod folder: {}", e));
+            }
+        }
+    } else {
+         println!("[update_asset_info] No new image selected.");
+    }
+    println!("[update_asset_info] Image handling complete. Filename to save: {:?}", image_filename_to_save);
+
+    // --- 5. Update Database (Uses 'conn') ---
+    println!("[update_asset_info] Attempting DB update for asset ID {}", asset_id);
+    let changes = conn.execute(
+        "UPDATE assets SET name = ?1, description = ?2, author = ?3, category_tag = ?4, image_filename = ?5 WHERE id = ?6",
+        params![
+            name,
+            description,
+            author,
+            category_tag,
+            image_filename_to_save,
+            asset_id
+        ]
+    ).map_err(|e| format!("Failed to update asset info in DB for ID {}: {}", asset_id, e))?;
+    println!("[update_asset_info] DB update executed. Changes: {}", changes);
+
+    if changes == 0 {
+        eprintln!("[update_asset_info] Warning: DB update affected 0 rows for asset ID {}.", asset_id);
+        // Don't necessarily error out, maybe the ID was wrong but flow continued? Log is sufficient.
+    }
+
+    println!("[update_asset_info] Asset ID {} updated successfully. END", asset_id);
+    Ok(()) // Lock ('conn_guard') is released automatically when function returns
+}
+
+#[command]
+async fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
+    println!("[read_binary_file] Reading path: {}", path);
+    // Keep the original path for potential error reporting
+    let path_for_error = path.clone(); // Clone the path *before* it's moved
+
+    read_binary(PathBuf::from(path)) // 'path' is moved here
+        .map_err(|e| {
+            // Use the cloned path 'path_for_error' in the error message
+            eprintln!("[read_binary_file] Error reading file '{}': {}", path_for_error, e);
+            format!("Failed to read file: {}", e)
+        })
+}
+
+#[command]
+async fn select_archive_file() -> CmdResult<Option<PathBuf>> {
+    println!("[select_archive_file] Opening file dialog...");
+    let result = dialog::blocking::FileDialogBuilder::new()
+        .set_title("Select Mod Archive")
+        .add_filter("Archives", &["zip"]) // Start with just zip
+        // .add_filter("Archives", &["zip", "rar", "7z"]) // Add others later if needed
+        .add_filter("All Files", &["*"])
+        .pick_file();
+
+    match result {
+        Some(path) => {
+            println!("[select_archive_file] File selected: {}", path.display());
+            Ok(Some(path))
+        },
+        None => {
+            println!("[select_archive_file] Dialog cancelled.");
+            Ok(None)
+        }, // User cancelled
+    }
+}
+
+#[command]
+fn analyze_archive(file_path_str: String, db_state: State<DbState>) -> CmdResult<ArchiveAnalysisResult> { // Added db_state (currently unused here, but available)
+    println!("[analyze_archive] Analyzing: {}", file_path_str);
+    let file_path = PathBuf::from(&file_path_str);
+    if !file_path.is_file() {
+        return Err(format!("Archive file not found: {}", file_path.display()));
+     }
+
+    let file = fs::File::open(&file_path)
+        .map_err(|e| format!("Failed to open archive file {}: {}", file_path.display(), e))?;
+
+    let mut archive = ZipArchive::new(file)
+        .map_err(|e| format!("Failed to read zip archive {}: {}", file_path.display(), e))?;
+
+    let mut entries = Vec::new();
+    let mut ini_contents: HashMap<String, String> = HashMap::new(); // Store path -> content
+    let preview_candidates = ["preview.png", "icon.png", "thumbnail.png", "preview.jpg", "icon.jpg", "thumbnail.jpg"];
+
+    // --- Pass 1: Collect entries and read INI files ---
+    println!("[analyze_archive] Pass 1: Collecting entries & reading INIs...");
+    for i in 0..archive.len() {
+        let mut file_entry = match archive.by_index(i) {
+            Ok(fe) => fe,
+            Err(e) => {
+                 println!("[analyze_archive] Warn: Failed read entry #{}: {}", i, e);
+                 continue; // Skip this entry if reading fails
+            }
+        };
+        let path_str_opt = file_entry.enclosed_name().map(|p| p.to_string_lossy().replace("\\", "/"));
+        if path_str_opt.is_none() {
+             println!("[analyze_archive] Warning: Entry #{} has invalid path, skipping.", i);
+             continue;
+        }
+        let path_str = path_str_opt.unwrap();
+        let is_dir = file_entry.is_dir();
+
+        // Read content if it's an INI file
+        if !is_dir && path_str.to_lowercase().ends_with(".ini") {
+            let mut content = String::new();
+            if file_entry.read_to_string(&mut content).is_ok() {
+                ini_contents.insert(path_str.clone(), content);
+            } else {
+                 println!("[analyze_archive] Warning: Failed to read content of INI file '{}'", path_str);
+            }
+        }
+
+        entries.push(ArchiveEntry {
+            path: path_str.clone(),
+            is_dir,
+            is_likely_mod_root: false,
+        });
+    }
+    println!("[analyze_archive] Found {} entries. Found {} INI files.", entries.len(), ini_contents.len());
+
+    // --- Pass 2: Find indices of likely roots (based on INI) ---
+    let mut likely_root_indices = HashSet::new();
+    println!("[analyze_archive] Pass 2: Finding roots containing INIs...");
+    for (ini_index, ini_entry) in entries.iter().enumerate() {
+        if !ini_entry.is_dir && ini_entry.path.to_lowercase().ends_with(".ini") {
+            // Find its parent directory path within the archive entries
+            let parent_path_obj = Path::new(&ini_entry.path).parent();
+            if let Some(parent_path_ref) = parent_path_obj {
+                 let parent_path_str_norm = parent_path_ref.to_string_lossy().replace("\\", "/");
+                 if parent_path_str_norm.is_empty() { continue; } // Skip INI in root
+
+                 // Find the index of the parent directory entry in our list.
+                 let found_parent = entries.iter().position(|dir_entry| {
+                      if !dir_entry.is_dir { return false; }
+                      // Normalize directory entry path (remove trailing slash if present)
+                      let dir_entry_path_norm = dir_entry.path.strip_suffix('/').unwrap_or(&dir_entry.path);
+                      dir_entry_path_norm == parent_path_str_norm
+                 });
+
+                 if let Some(parent_index) = found_parent {
+                     println!("[analyze_archive] Found INI '{}' inside potential root '{}' (index {})", ini_entry.path, parent_path_str_norm, parent_index);
+                     likely_root_indices.insert(parent_index);
+                 } else {
+                     println!("[analyze_archive] WARN: Could not find directory entry for parent path '{}' of INI file '{}'", parent_path_str_norm, ini_entry.path);
+                 }
+            } else {
+                  println!("[analyze_archive] WARN: Could not get parent path for INI file '{}'", ini_entry.path);
+             }
+        }
+    }
+    println!("[analyze_archive] Identified {} likely root indices: {:?}", likely_root_indices.len(), likely_root_indices);
+
+
+    // --- Pass 3: Find detected previews inside *potential* roots (Immutable) ---
+    println!("[analyze_archive] Pass 3: Checking for preview images in likely roots...");
+    let mut root_to_preview_map: HashMap<usize, String> = HashMap::new(); // Map root index -> preview path
+    for root_index in likely_root_indices.iter() {
+         if let Some(root_entry) = entries.get(*root_index) { // Get immutable ref to root entry
+             let root_prefix = if root_entry.path.ends_with('/') { root_entry.path.clone() } else { format!("{}/", root_entry.path) };
+             for candidate in preview_candidates.iter() {
+                 let potential_preview_path = format!("{}{}", root_prefix, candidate);
+                 // Check immutably if this preview exists
+                 if entries.iter().any(|e| !e.is_dir && e.path.eq_ignore_ascii_case(&potential_preview_path)) {
+                      println!("[analyze_archive] Found potential preview '{}' inside root index {}.", potential_preview_path, root_index);
+                     root_to_preview_map.insert(*root_index, potential_preview_path);
+                     break; // Found one for this root, move to next root
+                 }
+             }
+         }
+    }
+     println!("[analyze_archive] Found previews for {} roots.", root_to_preview_map.len());
+
+
+    // --- Pass 4: Mark roots & attempt deduction (Mutable + DB Access) ---
+    println!("[analyze_archive] Pass 4: Marking roots and extracting/deducing info...");
+    let mut deduced_mod_name: Option<String> = None;
+    let mut deduced_author: Option<String> = None;
+    let mut deduced_category_slug: Option<String> = None; // <-- Will try to set this
+    let mut deduced_entity_slug: Option<String> = None;   // <-- Will try to set this
+    let mut raw_ini_type_found: Option<String> = None;
+    let mut raw_ini_target_found: Option<String> = None;
+    let mut detected_preview_internal_path : Option<String> = None;
+    let mut first_likely_root_processed = false;
+
+    // Acquire lock *once* if we need DB access for deduction
+    let conn_guard_opt = if !likely_root_indices.is_empty() {
+         Some(db_state.0.lock().map_err(|_| "DB lock poisoned during analysis".to_string())?)
+     } else {
+         None // No roots found, no need to lock/deduce further
+     };
+     let conn_opt = conn_guard_opt.as_deref(); // Get Option<&Connection>
+
+
+    for (index, entry) in entries.iter_mut().enumerate() {
+        if likely_root_indices.contains(&index) {
+            entry.is_likely_mod_root = true;
+             // Only perform deduction using the first likely root encountered
+             if !first_likely_root_processed {
+                 first_likely_root_processed = true;
+                 println!("[analyze_archive] Attempting deduction based on first root: {}", entry.path);
+                 let root_prefix = if entry.path.ends_with('/') { entry.path.clone() } else { format!("{}/", entry.path) };
+
+                 // --- Process INI if found ---
+                 if let Some((ini_path, ini_content)) = ini_contents.iter().find(|(p, _)| p.starts_with(&root_prefix) && p.trim_start_matches(&root_prefix).find('/') == None) {
+                      println!("[analyze_archive] Found INI '{}' inside root for deduction.", ini_path);
+                     if let Ok(ini) = Ini::load_from_str(ini_content) {
+                        for section_name in ["Mod", "Settings", "Info", "General"] {
+                             if let Some(section) = ini.section(Some(section_name)) {
+                                 // Deduce Name/Author
+                                 let name_val = section.get("Name").or_else(|| section.get("ModName"));
+                                 if name_val.is_some() { deduced_mod_name = name_val.map(|s| MOD_NAME_CLEANUP_REGEX.replace_all(s, "").trim().to_string()); }
+                                 let author_val = section.get("Author");
+                                  if author_val.is_some() { deduced_author = author_val.map(String::from); }
+
+                                 // Extract Raw Type/Target
+                                  let target_val = section.get("Target").or_else(|| section.get("Entity")).or_else(|| section.get("Character"));
+                                  if target_val.is_some() { raw_ini_target_found = target_val.map(|s| s.trim().to_string()); }
+                                  let type_val = section.get("Type").or_else(|| section.get("Category"));
+                                  if type_val.is_some() { raw_ini_type_found = type_val.map(|s| s.trim().to_string()); }
+
+                                  // If any relevant field found, break section search
+                                 if deduced_mod_name.is_some() || deduced_author.is_some() || raw_ini_target_found.is_some() || raw_ini_type_found.is_some() { break; }
+                             }
+                         }
+                     }
+                 } // End INI processing
+
+                 // --- DB Deductions (if lock acquired) ---
+                 if let Some(conn) = conn_opt {
+                      // 1. Deduce Category Slug
+                      if let Some(ref raw_type) = raw_ini_type_found {
+                          let lower_raw_type = raw_type.to_lowercase();
+                          println!("[analyze_archive] Querying category for raw type: {}", raw_type);
+                          let query = "SELECT slug FROM categories WHERE LOWER(slug) = ?1 OR LOWER(name) = ?1 LIMIT 1";
+                           match conn.query_row(query, params![lower_raw_type], |row| row.get::<_, String>(0)).optional() {
+                               Ok(Some(slug)) => {
+                                   println!("[analyze_archive] Deduced category slug: {}", slug);
+                                   deduced_category_slug = Some(slug);
+                               }
+                               Ok(None) => { println!("[analyze_archive] Raw type '{}' not found in categories.", raw_type); }
+                               Err(e) => { println!("[analyze_archive] Warn: DB error querying category for type '{}': {}", raw_type, e); } // Log error but continue
+                           }
+                      }
+
+                      // 2. Deduce Entity Slug (only if target and category found)
+                      if let (Some(ref raw_target), Some(ref cat_slug)) = (&raw_ini_target_found, &deduced_category_slug) {
+                           let lower_raw_target = raw_target.to_lowercase();
+                           println!("[analyze_archive] Querying entity for raw target: {} in category: {}", raw_target, cat_slug);
+                            // Query within the specific category first for better accuracy
+                           let query = "SELECT e.slug FROM entities e JOIN categories c ON e.category_id = c.id WHERE c.slug = ?1 AND (LOWER(e.slug) = ?2 OR LOWER(e.name) = ?2) LIMIT 1";
+                            match conn.query_row(query, params![cat_slug, lower_raw_target], |row| row.get::<_, String>(0)).optional() {
+                                Ok(Some(slug)) => {
+                                    println!("[analyze_archive] Deduced entity slug: {}", slug);
+                                    deduced_entity_slug = Some(slug);
+                                }
+                                Ok(None) => { println!("[analyze_archive] Raw target '{}' not found in category '{}'.", raw_target, cat_slug); }
+                                Err(e) => { println!("[analyze_archive] Warn: DB error querying entity for target '{}': {}", raw_target, e); } // Log error but continue
+                            }
+                      }
+                 } // End DB Deductions
+
+                 // Get the pre-calculated preview path for this root index
+                 if let Some(preview_path) = root_to_preview_map.get(&index) {
+                      detected_preview_internal_path = Some(preview_path.clone());
+                 }
+             } // End processing first root
+        } // End if root index found
+    } // End main mutable loop
+
+
+     // Fallback name deduction
+     if deduced_mod_name.is_none() || deduced_mod_name.as_deref() == Some("") {
+         deduced_mod_name = Some(file_path.file_stem().unwrap_or_default().to_string_lossy().to_string());
+     }
+     // Clean final deduced name
+     if let Some(name) = &deduced_mod_name {
+          let cleaned = MOD_NAME_CLEANUP_REGEX.replace_all(name, "").trim().to_string();
+          if !cleaned.is_empty() { deduced_mod_name = Some(cleaned); }
+     }
+
+    println!("[analyze_archive] Final deduction: Name={:?}, Author={:?}, CategorySlug={:?}, EntitySlug={:?}, RawType={:?}, RawTarget={:?}, Preview={:?}",
+        deduced_mod_name, deduced_author, deduced_category_slug, deduced_entity_slug, raw_ini_type_found, raw_ini_target_found, detected_preview_internal_path);
+
+    // Lock guard (conn_guard_opt) goes out of scope here if it was acquired
+
+    Ok(ArchiveAnalysisResult {
+        file_path: file_path_str,
+        entries,
+        deduced_mod_name,
+        deduced_author,
+        deduced_category_slug,
+        deduced_entity_slug,
+        raw_ini_type: raw_ini_type_found,
+        raw_ini_target: raw_ini_target_found,
+        detected_preview_internal_path,
+    })
+}
+
+#[command]
+fn read_archive_file_content(archive_path_str: String, internal_file_path: String) -> CmdResult<Vec<u8>> {
+    println!("[read_archive_file_content] Reading '{}' from archive '{}'", internal_file_path, archive_path_str);
+    let archive_path = PathBuf::from(&archive_path_str);
+    if !archive_path.is_file() {
+        return Err(format!("Archive file not found: {}", archive_path.display()));
+    }
+
+    let file = fs::File::open(&archive_path)
+        .map_err(|e| format!("Failed to open archive file {}: {}", archive_path.display(), e))?;
+
+    let mut archive = ZipArchive::new(file)
+        .map_err(|e| format!("Failed to read zip archive {}: {}", archive_path.display(), e))?;
+
+    let internal_path_normalized = internal_file_path.replace("\\", "/");
+
+    // --- Apply compiler suggestion: Store result in a variable ---
+    let result = match archive.by_name(&internal_path_normalized) {
+        Ok(mut file_in_zip) => {
+            let mut buffer = Vec::with_capacity(file_in_zip.size() as usize);
+            match file_in_zip.read_to_end(&mut buffer) {
+                 Ok(_) => {
+                     println!("[read_archive_file_content] Successfully read {} bytes.", buffer.len());
+                     Ok(buffer) // Ok(Vec<u8>)
+                 }
+                 Err(e) => {
+                      Err(format!("Failed to read internal file content '{}': {}", internal_file_path, e)) // Err(String)
+                 }
+            }
+        },
+        Err(zip::result::ZipError::FileNotFound) => {
+             Err(format!("Internal file '{}' not found in archive.", internal_file_path)) // Err(String)
+        },
+        Err(e) => {
+             Err(format!("Error accessing internal file '{}': {}", internal_file_path, e)) // Err(String)
+        }
+    }; // Semicolon here forces the temporary borrow from by_name to end
+
+    result // Return the stored result
+}
+
+#[command]
+fn import_archive(
+    archive_path_str: String,
+    target_entity_slug: String,
+    selected_internal_root: String,
+    mod_name: String,
+    description: Option<String>,
+    author: Option<String>,
+    category_tag: Option<String>,
+    selected_preview_absolute_path: Option<String>, // Added
+    db_state: State<DbState>
+) -> CmdResult<()> {
+    println!("[import_archive] Importing '{}', internal path '{}' for entity '{}'", archive_path_str, selected_internal_root, target_entity_slug);
+    println!("[import_archive] User provided preview path: {:?}", selected_preview_absolute_path);
+
+     // --- Basic Validation ---
+     if mod_name.trim().is_empty() { return Err("Mod Name cannot be empty.".to_string()); }
+     if target_entity_slug.trim().is_empty() { return Err("Target Entity must be selected.".to_string()); }
+     let archive_path = PathBuf::from(&archive_path_str);
+     if !archive_path.is_file() { return Err(format!("Archive file not found: {}", archive_path.display())); }
+     println!("[import_archive] Validations passed.");
+
+     // --- Acquire Lock and Get DB Info & Paths ---
+     let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+     let conn = &*conn_guard;
+     println!("[import_archive] DB lock acquired.");
+
+     // Get Base Mods Path
+     let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
+         .map_err(|e| format!("Failed to query mods folder setting: {}", e))?
+         .ok_or_else(|| "Mods folder path not set".to_string())?;
+     let base_mods_path = PathBuf::from(base_mods_path_str);
+     println!("[import_archive] Found base mods path: {}", base_mods_path.display());
+
+     // Get Category Slug AND Entity ID
+     let (target_category_slug, target_entity_id): (String, i64) = conn.query_row(
+         "SELECT c.slug, e.id FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = ?1",
+         params![target_entity_slug],
+         |row| Ok((row.get(0)?, row.get(1)?)),
+     ).map_err(|e| match e {
+          rusqlite::Error::QueryReturnedNoRows => format!("Target entity '{}' not found.", target_entity_slug),
+          _ => format!("DB Error getting target entity/category info: {}", e)
+      })?;
+     println!("[import_archive] Found target entity ID: {}, Category Slug: {}", target_entity_id, target_category_slug);
+
+    // Determine target mod folder name
+    let target_mod_folder_name = mod_name.trim().replace(" ", "_").replace(".", "_");
+    if target_mod_folder_name.is_empty() { return Err("Mod Name results in invalid folder name after cleaning.".to_string()); }
+     println!("[import_archive] Target folder name: {}", target_mod_folder_name);
+
+     // Construct the CORRECT final destination path including category
+     let final_mod_dest_path = base_mods_path
+          .join(&target_category_slug) // Add category slug
+          .join(&target_entity_slug)   // Add entity slug
+          .join(&target_mod_folder_name); // Add mod folder name
+
+      // Create the full path including category/entity dirs
+      fs::create_dir_all(&final_mod_dest_path)
+         .map_err(|e| format!("Failed to create destination directory '{}': {}", final_mod_dest_path.display(), e))?;
+
+     println!("[import_archive] Target destination folder created/ensured: {}", final_mod_dest_path.display());
+
+     // --- Extraction Logic (ZIP only) ---
+     println!("[import_archive] Opening archive for extraction...");
+     let file = fs::File::open(&archive_path)
+         .map_err(|e| format!("Failed to open archive file {}: {}", archive_path.display(), e))?;
+     let mut archive = ZipArchive::new(file)
+         .map_err(|e| format!("Failed to read zip archive {}: {}", archive_path.display(), e))?;
+
+     // Normalize the internal root path
+     let prefix_to_extract_norm = selected_internal_root.replace("\\", "/");
+     let prefix_to_extract = prefix_to_extract_norm.strip_suffix('/').unwrap_or(&prefix_to_extract_norm);
+     let prefix_path = Path::new(prefix_to_extract);
+     println!("[import_archive] Normalized internal root prefix: '{}'", prefix_to_extract);
+
+     let mut files_extracted_count = 0;
+     for i in 0..archive.len() {
+        let mut file_in_zip = archive.by_index(i)
+             .map_err(|e| format!("Failed to read entry #{} from zip: {}", i, e))?;
+
+        let internal_path_obj_opt = file_in_zip.enclosed_name().map(|p| p.to_path_buf());
+        if internal_path_obj_opt.is_none() { continue; }
+        let internal_path_obj = internal_path_obj_opt.unwrap();
+
+        let should_extract = if prefix_to_extract.is_empty() {
+             true
+         } else {
+             internal_path_obj.starts_with(prefix_path)
+         };
+
+        if should_extract {
+             let relative_path_to_dest = if prefix_to_extract.is_empty() {
+                 &internal_path_obj
+             } else {
+                 match internal_path_obj.strip_prefix(prefix_path) {
+                     Ok(p) => p,
+                     Err(_) => { continue; } // Skip if prefix stripping fails
+                 }
+             };
+
+            if relative_path_to_dest.as_os_str().is_empty() { continue; } // Skip root itself
+
+            let outpath = final_mod_dest_path.join(relative_path_to_dest);
+
+            if file_in_zip.is_dir() {
+                 fs::create_dir_all(&outpath)
+                     .map_err(|e| format!("Failed to create directory '{}': {}", outpath.display(), e))?;
+            } else {
+                 if let Some(p) = outpath.parent() {
+                     if !p.exists() { fs::create_dir_all(&p).map_err(|e| format!("Failed to create parent dir '{}': {}", p.display(), e))?; }
+                 }
+                 let mut outfile = fs::File::create(&outpath).map_err(|e| format!("Failed to create file '{}': {}", outpath.display(), e))?;
+                 std::io::copy(&mut file_in_zip, &mut outfile).map_err(|e| format!("Failed to copy content to '{}': {}", outpath.display(), e))?;
+                 files_extracted_count += 1;
+            }
+
+             #[cfg(unix)]
+             { /* ... set permissions ... */ }
+        }
+    }
+     println!("[import_archive] Extracted {} files.", files_extracted_count);
+     if files_extracted_count == 0 && archive.len() > 0 && !selected_internal_root.is_empty() {
+          println!("[import_archive] Warning: 0 files extracted. Check if the selected internal root ('{}') was correct.", selected_internal_root);
+     }
+
+
+    // --- Handle Preview Image ---
+    let mut image_filename_for_db: Option<String> = None;
+    if let Some(user_preview_path_str) = selected_preview_absolute_path {
+         let source_path = PathBuf::from(&user_preview_path_str);
+          let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
+          println!("[import_archive] Copying user-selected preview '{}' to '{}'", source_path.display(), target_image_path.display());
+          if source_path.is_file() {
+               fs::copy(&source_path, &target_image_path).map_err(|e| format!("Failed to copy user preview image: {}", e))?;
+                image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+          } else { /* ... warning ... */ }
+    } else {
+         let potential_extracted_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
+         if potential_extracted_image_path.is_file() {
+              println!("[import_archive] Using extracted {} as preview.", TARGET_IMAGE_FILENAME);
+              image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+         } else { /* ... no preview found log ... */ }
+    }
+
+
+   // --- Add to Database ---
+   let relative_path_for_db = Path::new(&target_category_slug)
+        .join(&target_entity_slug)
+        .join(&target_mod_folder_name);
+   let relative_path_for_db_str = relative_path_for_db.to_string_lossy().replace("\\", "/");
+
+   // Check existing
+   let check_existing: Option<i64> = conn.query_row(
+        "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
+        params![target_entity_id, relative_path_for_db_str],
+        |row| row.get(0)
+   ).optional().map_err(|e| format!("DB error checking for existing imported asset '{}': {}", relative_path_for_db_str, e))?;
+
+    if check_existing.is_some() {
+        fs::remove_dir_all(&final_mod_dest_path).ok(); // Attempt cleanup
+        return Err(format!("Database entry already exists for '{}'. Aborting.", relative_path_for_db_str));
+    }
+
+    // Insert new asset
+    println!("[import_archive] Adding asset to DB: entity_id={}, name={}, path={}, image={:?}", target_entity_id, mod_name, relative_path_for_db_str, image_filename_for_db);
+    conn.execute(
+        "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            target_entity_id, mod_name, description, relative_path_for_db_str,
+            image_filename_for_db, author, category_tag
+        ]
+    ).map_err(|e| {
+        fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup on DB error
+        format!("Failed to add imported mod to database: {}", e)
+    })?;
+
+   println!("[import_archive] Import successful for '{}'", mod_name);
+   Ok(()) // Lock released here
+}
+
 // --- Main Function ---
 fn main() {
     let context = generate_context!();
@@ -1118,9 +1733,9 @@ fn main() {
              let conn = Connection::open(&db_path).expect("Failed to open DB for state management");
              app.manage(DbState(Arc::new(Mutex::new(conn))));
              let db_state: State<DbState> = app.state();
-             match get_mods_base_path_from_settings(&db_state) {
-                 Ok(path) => println!("Mods folder configured to: {}", path.display()),
-                 Err(_) => println!("WARN: Mods folder path is not configured yet."),
+             match get_setting_value(&db_state.0.lock().unwrap(), SETTINGS_KEY_MODS_FOLDER) { // Simple unwrap ok in setup
+                 Ok(Some(path)) => println!("Mods folder configured to: {}", path),
+                 _ => println!("WARN: Mods folder path is not configured yet."),
              }
             Ok(())
         })
@@ -1131,9 +1746,16 @@ fn main() {
             get_categories, get_entities_by_category, get_entity_details,
             get_assets_for_entity, toggle_asset_enabled, get_asset_image_path,
             open_mods_folder,
-            // Scan & New Count Command
+            // Scan & Count
             scan_mods_directory,
             get_total_asset_count,
+            // Edit & Import
+            update_asset_info,
+            read_binary_file,
+            select_archive_file,
+            analyze_archive,
+            import_archive,
+            read_archive_file_content,
         ])
         .run(context)
         .expect("error while running tauri application");
