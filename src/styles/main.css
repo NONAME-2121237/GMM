@@ -1,0 +1,879 @@
+/* Paste the entire CSS content from your original genshin-modding-app.html here */
+/* Ensure the CSS icon placeholders (i.fa-home::before { ... }) are REMOVED */
+:root {
+    --primary: #9c88ff;
+    --secondary: #8c7ae6;
+    --dark: #1e1e2e;
+    --darker: #181825;
+    --light: #f5f6fa;
+    --accent: #ff9f43;
+    --danger: #ff6b6b;
+    --success: #1dd1a1;
+    --card-bg: rgba(30, 30, 46, 0.7);
+    --sidebar-width: 260px;
+    --electro: #a757cb; /* Example element color */
+    --pyro: #ff7a3d;
+    --cryo: #99d8f0;
+    --hydro: #4cc2f1;
+    --anemo: #75c4a9;
+    --geo: #f8b63e;
+    --dendro: #a0d73c;
+    --accent-rgb: 255, 159, 67;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: var(--darker);
+    color: var(--light);
+    background-image: url('/api/placeholder/1920/1080'); /* Consider removing if too distracting or make configurable */
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    height: 100vh;
+    overflow: hidden; /* Prevent body scroll */
+}
+
+.app-container {
+    display: flex;
+    height: 100vh;
+    overflow: hidden; /* Ensure container manages overflow */
+    backdrop-filter: blur(10px);
+    background-color: rgba(24, 24, 37, 0.6); /* Darker overlay for readability */
+}
+
+/* Sidebar */
+.sidebar {
+    width: var(--sidebar-width);
+    background-color: var(--dark);
+    height: 100vh; /* Full height */
+    padding: 20px;
+    transition: width 0.3s ease; /* Optional: transition if width changes */
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0; /* Prevent sidebar from shrinking */
+    overflow-y: auto; /* Allow sidebar scrolling if content exceeds height */
+}
+
+.logo {
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--primary);
+    text-align: center;
+    margin-bottom: 30px;
+    letter-spacing: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.logo span {
+    background: linear-gradient(45deg, var(--primary), var(--accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.logo svg {
+    margin-right: 10px;
+    fill: url(#logo-gradient); /* Ensure the gradient ID matches SVG */
+}
+
+.nav-items {
+    list-style: none;
+    margin-bottom: 30px;
+    flex-grow: 1; /* Allow nav items to take up space */
+}
+
+.nav-item {
+    padding: 12px 15px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    color: var(--light);
+    text-decoration: none; /* Remove underline from NavLink */
+}
+
+.nav-item:hover {
+    background-color: rgba(156, 136, 255, 0.1);
+}
+
+.nav-item.active {
+    background-color: var(--primary);
+    color: white;
+    box-shadow: 0 5px 15px rgba(156, 136, 255, 0.4);
+}
+
+.nav-item i {
+    margin-right: 12px; /* Slightly more space */
+    font-size: 16px; /* Consistent icon size */
+    width: 20px; /* Ensure fixed width for alignment */
+    text-align: center;
+}
+
+.separator {
+    height: 1px;
+    background-color: rgba(255, 255, 255, 0.1);
+    margin: 15px 0;
+    flex-shrink: 0;
+}
+
+.preset-section {
+    /* margin-top: auto; */ /* Removed auto margin, let flexbox handle */
+    padding: 15px 0;
+    flex-shrink: 0; /* Prevent shrinking */
+}
+
+.preset-header {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.preset-header button {
+    background-color: var(--primary);
+    border: none;
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.preset-header button:hover {
+    background-color: var(--secondary);
+}
+
+.preset {
+    padding: 10px;
+    background-color: rgba(156, 136, 255, 0.1);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.preset:hover {
+    background-color: rgba(156, 136, 255, 0.2);
+}
+
+.preset.active {
+    border-left: 3px solid var(--primary);
+    padding-left: 7px; /* Adjust padding to account for border */
+}
+
+.preset-actions {
+    display: flex;
+    gap: 8px; /* Slightly more space */
+}
+
+.preset-actions i {
+    opacity: 0.6;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+
+.preset-actions i:hover {
+    opacity: 1;
+    color: var(--primary);
+}
+
+/* Main Content */
+.main-content {
+    flex: 1; /* Allow content to take remaining space */
+    padding: 25px; /* Consistent padding */
+    overflow-y: auto; /* Enable vertical scrolling for content */
+    position: relative;
+    height: 100vh; /* Ensure it tries to take full viewport height */
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+    gap: 15px;
+}
+
+.page-title {
+    font-size: 28px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+}
+
+.page-title i { /* For back arrow etc */
+    margin-right: 15px;
+    cursor: pointer;
+    font-size: 20px;
+    opacity: 0.7;
+    transition: all 0.2s ease;
+}
+
+.page-title i:hover {
+    opacity: 1;
+    color: var(--primary);
+}
+
+
+.tab-navigation {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 25px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 10px;
+    flex-wrap: wrap; /* Allow tabs to wrap */
+}
+
+.tab {
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 6px;
+    white-space: nowrap; /* Prevent tab text wrapping */
+}
+
+.tab:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.tab.active {
+    background-color: var(--primary);
+    color: white;
+}
+
+.search-bar {
+    position: relative;
+    margin-bottom: 25px; /* Consistent spacing */
+}
+
+.search-bar input {
+    width: 100%;
+    padding: 12px 20px;
+    padding-left: 45px; /* More space for icon */
+    background-color: var(--dark);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: var(--light);
+    font-size: 15px; /* Slightly larger font */
+    transition: all 0.2s ease;
+}
+
+.search-bar input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(156, 136, 255, 0.3); /* Larger focus ring */
+}
+
+.search-bar i {
+    position: absolute;
+    left: 18px; /* Adjust icon position */
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 16px;
+}
+
+.cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); /* Slightly wider min card width */
+    gap: 25px; /* Consistent gap */
+    padding-bottom: 30px; /* Space at bottom */
+}
+
+.character-card { /* Reused for EntityCard */
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    cursor: pointer;
+    position: relative;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    text-decoration: none; /* Remove link underline */
+    color: var(--light); /* Ensure text color is inherited correctly */
+    display: flex; /* Use flexbox for better internal control */
+    flex-direction: column; /* Stack image and content vertically */
+}
+
+
+.character-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    border-color: rgba(156, 136, 255, 0.3);
+}
+
+.card-image {
+    height: 220px; /* Slightly taller image */
+    background-size: cover;
+    background-position: center top; /* Often better for character portraits */
+    position: relative;
+    flex-shrink: 0; /* Prevent image shrinking */
+}
+
+.card-image::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 70px; /* Taller gradient */
+    background: linear-gradient(to top, rgba(30, 30, 46, 0.95), transparent); /* Darker gradient */
+}
+
+.card-content {
+    padding: 15px;
+    text-align: center;
+    flex-grow: 1; /* Allow content to take remaining space */
+    display: flex;
+    flex-direction: column;
+    justify-content: center; /* Center content vertically */
+}
+
+.card-name {
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 8px; /* More space */
+}
+
+.card-element {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px; /* Space between icon and text */
+}
+
+.card-element i {
+     /* No margin needed if using gap */
+     /* color: var(--accent); */ /* Color can be dynamic based on element */
+     font-size: 16px; /* Match text size */
+}
+
+.card-badge {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background-color: rgba(29, 209, 161, 0.85); /* Slightly transparent */
+    color: white;
+    font-size: 11px; /* Smaller badge */
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-weight: 600;
+    z-index: 2; /* Ensure badge is above gradient */
+    letter-spacing: 0.5px;
+}
+
+/* Character/Entity Page */
+/* .character-page is just the container, use general styles */
+
+.character-profile {
+    display: flex;
+    gap: 30px;
+    margin-bottom: 30px;
+    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+}
+
+.character-avatar {
+    width: 260px;
+    height: 400px;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background-color: var(--card-bg);
+    background-image: url('/api/placeholder/260/400'); /* Default placeholder */
+    background-size: cover;
+    background-position: center top; /* Adjust as needed */
+    flex-shrink: 0; /* Prevent shrinking */
+}
+
+.character-avatar::after { /* Optional gradient overlay */
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 120px;
+    background: linear-gradient(to top, rgba(30, 30, 46, 0.9), transparent);
+    pointer-events: none; /* Allow clicks through gradient */
+}
+
+.character-info {
+    flex: 1; /* Take remaining space */
+    min-width: 300px; /* Prevent getting too squished */
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 25px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+
+.character-name {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap; /* Allow wrapping */
+    gap: 15px; /* Space between name and icon */
+}
+
+.character-name .element-icon {
+    /* margin-left: 15px; */ /* Use gap instead */
+    /* color: var(--electro); */ /* Color set inline */
+    font-size: 28px; /* Slightly smaller */
+}
+
+.character-details {
+    display: flex;
+    flex-wrap: wrap; /* Allow wrapping */
+    gap: 12px; /* Consistent gap */
+    margin-bottom: 20px;
+}
+
+.character-detail {
+    background-color: rgba(0, 0, 0, 0.2);
+    padding: 8px 14px; /* More padding */
+    border-radius: 8px;
+    font-size: 14px;
+    display: inline-flex; /* Use inline-flex */
+    align-items: center;
+    gap: 8px; /* Space between icon and text */
+    white-space: nowrap;
+}
+
+.character-detail i {
+    /* margin-right: 8px; */ /* Use gap instead */
+    opacity: 0.8; /* Slightly more visible */
+    font-size: 15px;
+}
+
+.character-description {
+    line-height: 1.7; /* More line spacing */
+    color: rgba(255, 255, 255, 0.85); /* Slightly brighter */
+    margin-bottom: 25px; /* More spacing */
+    font-size: 15px;
+}
+
+/* --- Removed Character Stats Section --- */
+/* .character-stats { ... } */
+
+.mods-section {
+    margin-top: 30px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px; /* Consistent spacing */
+    flex-wrap: wrap; /* Allow wrapping */
+    gap: 15px;
+}
+
+.section-title {
+    font-size: 24px; /* Slightly larger */
+    font-weight: 600;
+}
+
+.mods-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Min width for mod cards */
+    gap: 25px; /* Consistent gap */
+}
+
+.mod-card {
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column; /* Stack elements vertically */
+}
+
+.mod-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+    border-color: rgba(156, 136, 255, 0.3);
+}
+
+/* Visual cue for disabled mods */
+.mod-disabled-visual {
+    opacity: 0.65;
+    /* background-color: rgba(40, 40, 56, 0.7); */ /* Optional different background */
+}
+.mod-disabled-visual:hover {
+    opacity: 0.8; /* Slightly less opaque on hover */
+}
+
+.mod-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    gap: 15px; /* Space between title and toggle */
+    flex-shrink: 0;
+}
+
+.mod-title {
+    font-weight: 600;
+    font-size: 17px; /* Slightly larger */
+    flex-grow: 1; /* Allow title to take space */
+    word-break: break-word; /* Prevent long titles overflowing */
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 46px;
+    height: 24px;
+    flex-shrink: 0; /* Prevent toggle shrinking */
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #34495e; /* Darker grey */
+    transition: .4s;
+    border-radius: 24px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: var(--success);
+}
+
+input:focus + .slider {
+    box-shadow: 0 0 1px var(--success);
+}
+
+input:checked + .slider:before {
+    transform: translateX(22px);
+}
+
+/* Disabled toggle style */
+input:disabled + .slider {
+    cursor: not-allowed;
+    background-color: #7f8c8d;
+}
+
+
+.mod-category {
+    display: inline-block;
+    padding: 4px 10px;
+    background-color: rgba(156, 136, 255, 0.15); /* Slightly stronger */
+    color: var(--primary);
+    border-radius: 6px; /* More rounded */
+    font-size: 12px;
+    margin-bottom: 12px;
+    font-weight: 500;
+    align-self: flex-start; /* Align tag to the left */
+}
+
+.mod-description {
+    margin-bottom: 15px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+    line-height: 1.6;
+    flex-grow: 1; /* Allow description to fill space */
+}
+
+.mod-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: auto; /* Push to bottom */
+    padding-top: 10px; /* Space above details */
+    border-top: 1px solid rgba(255, 255, 255, 0.05); /* Subtle separator */
+    gap: 15px;
+    flex-wrap: wrap; /* Allow wrapping */
+    flex-shrink: 0;
+}
+
+.mod-author {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+}
+
+.key-binding {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    background-color: rgba(0, 0, 0, 0.25); /* Darker background */
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    gap: 6px; /* Space between icon and keys */
+}
+
+.key-binding i {
+    /* margin-right: 8px; */ /* Use gap instead */
+    opacity: 0.7;
+}
+
+.key {
+    background-color: rgba(255, 255, 255, 0.1);
+    padding: 3px 8px; /* Slightly more padding */
+    border-radius: 4px;
+    font-family: 'Consolas', 'Monaco', monospace; /* Monospace font */
+    font-weight: 600;
+    font-size: 12px;
+    /* margin: 0 2px; */ /* Use gap instead */
+    transition: all 0.2s ease;
+    display: inline-block; /* Ensure keys are blocks */
+}
+
+.key:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px); /* Subtle lift */
+}
+
+/* Button styles */
+.btn {
+    padding: 9px 18px; /* Slightly larger buttons */
+    border-radius: 8px;
+    font-weight: 500;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    text-decoration: none; /* Remove link underline if used on <a> */
+    gap: 8px; /* Space between icon and text */
+    white-space: nowrap;
+}
+
+.btn-primary {
+    background-color: var(--primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--secondary);
+    box-shadow: 0 5px 15px rgba(156, 136, 255, 0.4);
+}
+
+.btn-outline {
+    background-color: transparent;
+    color: var(--light);
+    border: 1px solid rgba(255, 255, 255, 0.3); /* Slightly more visible border */
+}
+
+.btn-outline:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.btn i {
+    /* margin-right: 8px; */ /* Use gap instead */
+    font-size: 1em; /* Make icon size relative to button font size */
+}
+
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); } /* Smaller distance */
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.fadeIn {
+    animation: fadeIn 0.4s ease forwards; /* Slightly faster */
+}
+
+/* Utility for placeholder text */
+.placeholder-text {
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}
+
+/* Scrollbar styles (optional, for better aesthetics) */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 136, 255, 0.4); /* Use primary color */
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(156, 136, 255, 0.6);
+}
+
+/* Page Header adjustments */
+.page-header {
+    display: flex;
+    justify-content: space-between; /* Key for spacing items */
+    align-items: center;
+    flex-wrap: wrap; /* Allow wrapping */
+    gap: 20px; /* Gap between items (title, filters, search) */
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.page-title {
+    margin-right: auto; /* Push other items to the right */
+    flex-shrink: 0; /* Prevent title shrinking */
+}
+
+/* Element Filters */
+.element-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap; /* Allow filters to wrap */
+    justify-content: center; /* Center filters if they wrap */
+    /* Removed flex-grow, let it size naturally */
+}
+
+.element-filter-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px; /* Pill shape */
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.element-filter-button i {
+    font-size: 14px;
+    color: var(--element-color, var(--light)); /* Use color variable */
+}
+
+.element-filter-button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.element-filter-button.active {
+    background-color: var(--element-color, var(--primary));
+    border-color: var(--element-color, var(--primary));
+    color: var(--darker); /* Dark text on active colored background */
+    font-weight: 600;
+    box-shadow: 0 0 10px rgba(156, 136, 255, 0.3); /* Optional subtle glow */
+}
+.element-filter-button.active i {
+    color: inherit; /* Inherit dark color from button */
+}
+
+/* Hide text on smaller screens if desired */
+.filter-button-name {
+    display: none; /* Hide text by default */
+}
+@media (min-width: 768px) { /* Show text on larger screens */
+    .filter-button-name {
+        display: inline;
+    }
+    .element-filter-button {
+         padding: 6px 14px; /* Slightly more padding when text shown */
+    }
+}
+
+
+/* Search Bar Alignment */
+.search-bar-container {
+    /* No specific styles needed if page-header handles alignment */
+    /* If more control needed: */
+    /* margin-left: auto; */ /* Push to the far right if title takes minimal space */
+    flex-shrink: 0; /* Prevent shrinking */
+    width: 100%; /* Default full width on wrap */
+    max-width: 300px; /* Max width for search bar */
+}
+
+@media (min-width: 992px) { /* Adjust breakpoint as needed */
+    .search-bar-container {
+        width: auto; /* Allow shrinking on larger screens */
+    }
+}
+
+
+.search-bar {
+    position: relative;
+    /* margin-bottom: 0; */ /* Remove bottom margin as it's now in header */
+    width: 100%; /* Ensure search bar fills its container */
+}
+
+.search-bar input {
+    /* Input styles remain largely the same */
+    font-size: 14px; /* Adjust if needed */
+}
+
+.search-bar i {
+    /* Icon styles remain largely the same */
+    left: 15px; /* Adjust if needed */
+    font-size: 15px;
+}
+
+/* Ensure grid column span for placeholder text works */
+.placeholder-text[style*="grid-column"] {
+    width: 100%;
+    text-align: center;
+}

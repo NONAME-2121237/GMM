@@ -1,0 +1,194 @@
+# src-tauri/definitions/base_entities.toml
+
+# ===================
+# ==== Characters ====
+# ===================
+[characters]
+name = "Characters"
+entities = [
+    # === 5 Star ===
+    # Anemo
+    { name = "Jean",         slug = "jean",         description = "The righteous and rigorous Dandelion Knight, and Acting Grand Master of Mondstadt's Knights of Favonius.", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Sword"}', base_image = "jean_base.png" },
+    { name = "Kaedehara Kazuha", slug = "kazuha",       description = "A wandering samurai from Inazuma who is currently with Liyue's Crux Fleet. A gentle and carefree soul.", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Sword"}', base_image = "kazuha_base.png" },
+    { name = "Venti",        slug = "venti",        description = "One of the many bards of Mondstadt, who freely wanders the city's streets and alleys.", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Bow"}', base_image = "venti_base.png" },
+    { name = "Xiao",         slug = "xiao",         description = "One of the mighty and illuminated adepti guarding Liyue, also heralded as the 'Vigilant Yaksha.'", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Polearm"}', base_image = "xiao_base.png" },
+    { name = "Wanderer",     slug = "wanderer",     description = "A wayfaring figure whose identity is a mystery. He dresses like a mountain ascetic, but he certainly does not act the part.", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Catalyst"}', base_image = "wanderer_base.png" },
+    { name = "Xianyun",      slug = "xianyun",      description = "One of the Mighty and Illuminated Adepti of Jueyun Karst, known as 'Cloud Retainer.'", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Catalyst"}', base_image = "xianyun_base.png" },
+    # Cryo
+    { name = "Aloy",         slug = "aloy",         description = "An agile hunter from the Nora tribe. Ready to leap into action at a moment's notice.", details = '{"rarity": "5 Star", "element": "Cryo", "weapon": "Bow"}', base_image = "aloy_base.png" }, # Special Collaboration Character
+    { name = "Kamisato Ayaka", slug = "ayaka",        description = "Daughter of the Yashiro Commission's Kamisato Clan. Dignified and elegant, as well as wise and strong.", details = '{"rarity": "5 Star", "element": "Cryo", "weapon": "Sword"}', base_image = "ayaka_base.png" },
+    { name = "Eula",         slug = "eula",         description = "The Spindrift Knight, a scion of the old aristocracy, and the Captain of the Knights of Favonius Reconnaissance Company.", details = '{"rarity": "5 Star", "element": "Cryo", "weapon": "Claymore"}', base_image = "eula_base.png" },
+    { name = "Ganyu",        slug = "ganyu",        description = "The secretary to the Liyue Qixing. The blood of both human and illuminated beast flows within her veins.", details = '{"rarity": "5 Star", "element": "Cryo", "weapon": "Bow"}', base_image = "ganyu_base.png" },
+    { name = "Qiqi",         slug = "qiqi",         description = "An apprentice and herb gatherer at Bubu Pharmacy. An undead with a forgetful nature.", details = '{"rarity": "5 Star", "element": "Cryo", "weapon": "Sword"}', base_image = "qiqi_base.png" },
+    { name = "Shenhe",       slug = "shenhe",       description = "An exorcist who grew up in the mountains under the tutelage of an adeptus.", details = '{"rarity": "5 Star", "element": "Cryo", "weapon": "Polearm"}', base_image = "shenhe_base.png" },
+    { name = "Wriothesley",  slug = "wriothesley",  description = "Duke of the Fortress of Meropide, Lord Incognito of the murky depths.", details = '{"rarity": "5 Star", "element": "Cryo", "weapon": "Catalyst"}', base_image = "wriothesley_base.png" },
+    # Dendro
+    { name = "Alhaitham",    slug = "alhaitham",    description = "The current scribe of the Sumeru Akademiya, a man of great intelligence and rationality.", details = '{"rarity": "5 Star", "element": "Dendro", "weapon": "Sword"}', base_image = "alhaitham_base.png" },
+    { name = "Baizhu",       slug = "baizhu",       description = "The owner of Bubu Pharmacy and guardian of Qiqi. His knowledge of medicine is extensive.", details = '{"rarity": "5 Star", "element": "Dendro", "weapon": "Catalyst"}', base_image = "baizhu_base.png" },
+    { name = "Nahida",       slug = "nahida",       description = "A caged bird secluded in the Sanctuary of Surasthana who can only see the world in her dreams. The current Dendro Archon.", details = '{"rarity": "5 Star", "element": "Dendro", "weapon": "Catalyst"}', base_image = "nahida_base.png" },
+    { name = "Tighnari",     slug = "tighnari",     description = "A Forest Watcher and botanical scholar who graduated from Amurta. He leads a solitary life in Avidya Forest.", details = '{"rarity": "5 Star", "element": "Dendro", "weapon": "Bow"}', base_image = "tighnari_base.png" },
+    # Electro
+    { name = "Cyno",         slug = "cyno",         description = "The General Mahamatra of Sumeru's Akademiya, leader of the Matra.", details = '{"rarity": "5 Star", "element": "Electro", "weapon": "Polearm"}', base_image = "cyno_base.png" },
+    { name = "Keqing",       slug = "keqing",       description = "The Yuheng of the Liyue Qixing. She has much to say about Rex Lapis' unilateral approach to policymaking in Liyue.", details = '{"rarity": "5 Star", "element": "Electro", "weapon": "Sword"}', base_image = "keqing_base.png" },
+    { name = "Raiden Shogun", slug = "raiden-shogun", description = "Her Excellency, the Almighty Narukami Ogosho, who promised the people of Inazuma an unchanging Eternity. The current Electro Archon.", details = '{"rarity": "5 Star", "element": "Electro", "weapon": "Polearm"}', base_image = "raiden_base.png" },
+    { name = "Yae Miko",     slug = "yae-miko",     description = "The head shrine maiden of the Grand Narukami Shrine and the owner of the Yae Publishing House.", details = '{"rarity": "5 Star", "element": "Electro", "weapon": "Catalyst"}', base_image = "yae_miko_base.png" },
+    { name = "Clorinde",     slug = "clorinde",     description = "Fontaine's strongest Champion Duelist.", details = '{"rarity": "5 Star", "element": "Electro", "weapon": "Sword"}', base_image = "clorinde_base.png" },
+    # Geo
+    { name = "Albedo",       slug = "albedo",       description = "A synthetic human made by the alchemist Rhinedottir. The Chief Alchemist and Captain of the Investigation Team of the Knights of Favonius.", details = '{"rarity": "5 Star", "element": "Geo", "weapon": "Sword"}', base_image = "albedo_base.png" },
+    { name = "Arataki Itto", slug = "itto",         description = "The first and greatest head of the Arataki Gang, famed throughout Inazuma City.", details = '{"rarity": "5 Star", "element": "Geo", "weapon": "Claymore"}', base_image = "itto_base.png" },
+    { name = "Navia",        slug = "navia",        description = "President of the Spina di Rosula.", details = '{"rarity": "5 Star", "element": "Geo", "weapon": "Claymore"}', base_image = "navia_base.png" },
+    { name = "Zhongli",      slug = "zhongli",      description = "A mysterious expert contracted by the Wangsheng Funeral Parlor. Extremely knowledgeable in all things. The former Geo Archon.", details = '{"rarity": "5 Star", "element": "Geo", "weapon": "Polearm"}', base_image = "zhongli_base.png" },
+    { name = "Chiori",       slug = "chiori",       description = "The renowned Inazuman fashion designer and owner of Chioriya Boutique in Fontaine.", details = '{"rarity": "5 Star", "element": "Geo", "weapon": "Sword"}', base_image = "chiori_base.png" },
+    # Hydro
+    { name = "Kamisato Ayato", slug = "ayato",       description = "The young but highly accomplished head of the Yashiro Commission's Kamisato Clan.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Sword"}', base_image = "ayato_base.png" },
+    { name = "Mona",         slug = "mona",         description = "A mysterious young astrologer who proclaims herself to be 'Astrologist Mona Megistus,' and who possesses abilities to match the title.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Catalyst"}', base_image = "mona_base.png" },
+    { name = "Neuvillette",  slug = "neuvillette",  description = "The Iudex of Fontaine, known to the Mélusines as the Ordainer of the Tides of Fontaine.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Catalyst"}', base_image = "neuvillette_base.png" },
+    { name = "Nilou",        slug = "nilou",        description = "The star of the Zubayr Theater. Her dance is elegant and graceful, and her character is pure and kind.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Sword"}', base_image = "nilou_base.png" },
+    { name = "Sangonomiya Kokomi", slug = "kokomi", description = "The Divine Priestess of Watatsumi Island and a descendant of the Sangonomiya Clan.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Catalyst"}', base_image = "kokomi_base.png" },
+    { name = "Tartaglia",    slug = "tartaglia",    description = "No. 11 of The Harbingers, also known as 'Childe.' His name is highly feared on the battlefield.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Bow"}', base_image = "tartaglia_base.png" },
+    { name = "Yelan",        slug = "yelan",        description = "A mysterious person who claims to work for the Ministry of Civil Affairs. Yet she is a 'non-entity' on the Ministry's list.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Bow"}', base_image = "yelan_base.png" },
+    { name = "Furina",       slug = "furina",       description = "The self-proclaimed Hydro Archon of Fontaine.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Sword"}', base_image = "furina_base.png" },
+    { name = "Sigewinne",    slug = "sigewinne",    description = "A Melusine and the head nurse of the Fortress of Meropide's infirmary.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Bow"}', base_image = "sigewinne_base.png" },
+    # Pyro
+    { name = "Arlecchino",   slug = "arlecchino",   description = "The Fourth of the Fatui Harbingers, known as 'The Knave.'", details = '{"rarity": "5 Star", "element": "Pyro", "weapon": "Polearm"}', base_image = "arlecchino_base.png" },
+    { name = "Dehya",        slug = "dehya",        description = "A member of the Eremites, a mercenary organization that roams the sands of Sumeru. Brave, strong, and enjoys a good reputation.", details = '{"rarity": "5 Star", "element": "Pyro", "weapon": "Claymore"}', base_image = "dehya_base.png" },
+    { name = "Diluc",        slug = "diluc",        description = "The tycoon of a winery empire in Mondstadt, peerless in every possible way.", details = '{"rarity": "5 Star", "element": "Pyro", "weapon": "Claymore"}', base_image = "diluc_base.png" },
+    { name = "Hu Tao",       slug = "hu-tao",       description = "The 77th Director of the Wangsheng Funeral Parlor. She walks the line between life and death, carrying burdens unknown to others.", details = '{"rarity": "5 Star", "element": "Pyro", "weapon": "Polearm"}', base_image = "hutao_base.png" },
+    { name = "Klee",         slug = "klee",         description = "An explosives expert and a regular at the Knights of Favonius' confinement room. Also known as Fleeing Sunlight.", details = '{"rarity": "5 Star", "element": "Pyro", "weapon": "Catalyst"}', base_image = "klee_base.png" },
+    { name = "Lyney",        slug = "lyney",        description = "A famed Fontainian magician who possesses great stage presence as well as a knack for the subtle art of performance.", details = '{"rarity": "5 Star", "element": "Pyro", "weapon": "Bow"}', base_image = "lyney_base.png" },
+    { name = "Yoimiya",      slug = "yoimiya",      description = "Owner of Naganohara Fireworks. Known as the 'Queen of the Summer Festival,' she excels in her craft of creating fireworks.", details = '{"rarity": "5 Star", "element": "Pyro", "weapon": "Bow"}', base_image = "yoimiya_base.png" },
+
+    # === 4 Star ===
+    # Anemo
+    { name = "Faruzan",      slug = "faruzan",      description = "A researcher from 'one hundred years ago.' She enjoys seniority in the Akademiya and possesses profound knowledge of ancient scripts and machines.", details = '{"rarity": "4 Star", "element": "Anemo", "weapon": "Bow"}', base_image = "faruzan_base.png" },
+    { name = "Lynette",      slug = "lynette",      description = "A magic assistant of few words, whose emotions are as inscrutable as a cat's.", details = '{"rarity": "4 Star", "element": "Anemo", "weapon": "Sword"}', base_image = "lynette_base.png" },
+    { name = "Sayu",         slug = "sayu",         description = "A ninja from the Shuumatsuban who is struggling with growing taller.", details = '{"rarity": "4 Star", "element": "Anemo", "weapon": "Claymore"}', base_image = "sayu_base.png" },
+    { name = "Shikanoin Heizou", slug = "heizou",   description = "A young prodigy detective from the Tenryou Commission. His senses are sharp and his thoughts are clear.", details = '{"rarity": "4 Star", "element": "Anemo", "weapon": "Catalyst"}', base_image = "heizou_base.png" },
+    { name = "Sucrose",      slug = "sucrose",      description = "An alchemist with an insatiable curiosity towards the world and everything in it.", details = '{"rarity": "4 Star", "element": "Anemo", "weapon": "Catalyst"}', base_image = "sucrose_base.png" },
+    { name = "Sethos",       slug = "sethos",       description = "Heir to the Temple of Silence.", details = '{"rarity": "4 Star", "element": "Electro", "weapon": "Bow"}', base_image = "sethos_base.png" }, # Note: Added Electro 4* here based on later knowledge
+    # Cryo
+    { name = "Charlotte",    slug = "charlotte",    description = "An intrepid reporter from The Steambird.", details = '{"rarity": "4 Star", "element": "Cryo", "weapon": "Catalyst"}', base_image = "charlotte_base.png" },
+    { name = "Chongyun",     slug = "chongyun",     description = "An exorcist from Liyue who was born with excessive yang (positive) energy.", details = '{"rarity": "4 Star", "element": "Cryo", "weapon": "Claymore"}', base_image = "chongyun_base.png" },
+    { name = "Diona",        slug = "diona",        description = "A young lady who has inherited trace amounts of non-human blood. She is the incredibly popular bartender of the Cat's Tail tavern.", details = '{"rarity": "4 Star", "element": "Cryo", "weapon": "Bow"}', base_image = "diona_base.png" },
+    { name = "Freminet",     slug = "freminet",     description = "A reserved young man who is well-versed in diving. He appears indifferent, but in fact has a heart of gold.", details = '{"rarity": "4 Star", "element": "Cryo", "weapon": "Claymore"}', base_image = "freminet_base.png" },
+    { name = "Kaeya",        slug = "kaeya",        description = "An outwardly charismatic and cunning individual. The Cavalry Captain of the Knights of Favonius.", details = '{"rarity": "4 Star", "element": "Cryo", "weapon": "Sword"}', base_image = "kaeya_base.png" },
+    { name = "Layla",        slug = "layla",        description = "A Rtawahist student who specializes in Theoretical Astrology. Heavily burdened with studies, she suffers from chronic insomnia.", details = '{"rarity": "4 Star", "element": "Cryo", "weapon": "Sword"}', base_image = "layla_base.png" },
+    { name = "Mika",         slug = "mika",         description = "A young knight born to an ordinary family. He serves as a Front-Line Surveyor in his company.", details = '{"rarity": "4 Star", "element": "Cryo", "weapon": "Polearm"}', base_image = "mika_base.png" },
+    { name = "Rosaria",      slug = "rosaria",      description = "A sister of the Church of Favonius in Mondstadt. A righteous person, though you wouldn't know it from her sharp, cold words.", details = '{"rarity": "4 Star", "element": "Cryo", "weapon": "Polearm"}', base_image = "rosaria_base.png" },
+    # Dendro
+    { name = "Collei",       slug = "collei",       description = "A Forest Ranger trainee active in Avidya Forest. Behind her passionate words and actions hides a slightly introverted personality.", details = '{"rarity": "4 Star", "element": "Dendro", "weapon": "Bow"}', base_image = "collei_base.png" },
+    { name = "Kaveh",        slug = "kaveh",        description = "A renowned architect from Sumeru known as the Light of Kshahrewar.", details = '{"rarity": "4 Star", "element": "Dendro", "weapon": "Claymore"}', base_image = "kaveh_base.png" },
+    { name = "Kirara",       slug = "kirara",       description = "A courier for Komaniya Express, a delivery company in Inazuma.", details = '{"rarity": "4 Star", "element": "Dendro", "weapon": "Sword"}', base_image = "kirara_base.png" },
+    { name = "Yaoyao",       slug = "yaoyao",       description = "Streetward Rambler's youngest disciple. A gentle and caring 'little adult.'", details = '{"rarity": "4 Star", "element": "Dendro", "weapon": "Polearm"}', base_image = "yaoyao_base.png" },
+    # Electro
+    { name = "Beidou",       slug = "beidou",       description = "Captain of the Crux Fleet. She has quite the reputation in Liyue.", details = '{"rarity": "4 Star", "element": "Electro", "weapon": "Claymore"}', base_image = "beidou_base.png" },
+    { name = "Dori",         slug = "dori",         description = "An elusive merchant who has a fondness for glittering Mora.", details = '{"rarity": "4 Star", "element": "Electro", "weapon": "Claymore"}', base_image = "dori_base.png" },
+    { name = "Fischl",       slug = "fischl",       description = "A mysterious girl who calls herself 'Prinzessin der Verurteilung' and travels with a night raven named Oz.", details = '{"rarity": "4 Star", "element": "Electro", "weapon": "Bow"}', base_image = "fischl_base.png" },
+    { name = "Kujou Sara",   slug = "sara",         description = "A general of the Tenryou Commission. Bold, decisive, and skilled in battle.", details = '{"rarity": "4 Star", "element": "Electro", "weapon": "Bow"}', base_image = "sara_base.png" },
+    { name = "Kuki Shinobu", slug = "shinobu",      description = "The capable and reliable deputy leader of the Arataki Gang.", details = '{"rarity": "4 Star", "element": "Electro", "weapon": "Sword"}', base_image = "shinobu_base.png" },
+    { name = "Lisa",         slug = "lisa",         description = "The languid but knowledgeable Librarian of the Knights of Favonius.", details = '{"rarity": "4 Star", "element": "Electro", "weapon": "Catalyst"}', base_image = "lisa_base.png" },
+    { name = "Razor",        slug = "razor",        description = "A boy who lives among the wolves in Wolvendom of Mondstadt, away from human civilization.", details = '{"rarity": "4 Star", "element": "Electro", "weapon": "Claymore"}', base_image = "razor_base.png" },
+    # Geo
+    { name = "Gorou",        slug = "gorou",        description = "The great general of Watatsumi Island's forces. He is deeply trusted by his subordinates.", details = '{"rarity": "4 Star", "element": "Geo", "weapon": "Bow"}', base_image = "gorou_base.png" },
+    { name = "Ningguang",    slug = "ningguang",    description = "The Tianquan of the Liyue Qixing. Her wealth is unsurpassed in all of Teyvat.", details = '{"rarity": "4 Star", "element": "Geo", "weapon": "Catalyst"}', base_image = "ningguang_base.png" },
+    { name = "Noelle",       slug = "noelle",       description = "A maid in the service of the Knights of Favonius who dreams of joining their ranks someday.", details = '{"rarity": "4 Star", "element": "Geo", "weapon": "Claymore"}', base_image = "noelle_base.png" },
+    { name = "Yun Jin",      slug = "yun-jin",      description = "A renowned Liyue opera singer who is the director of the Yun-Han Opera Troupe.", details = '{"rarity": "4 Star", "element": "Geo", "weapon": "Polearm"}', base_image = "yun_jin_base.png" },
+    # Hydro
+    { name = "Barbara",      slug = "barbara",      description = "The Deaconess of the Church of Favonius and a shining star adored by the people of Mondstadt.", details = '{"rarity": "4 Star", "element": "Hydro", "weapon": "Catalyst"}', base_image = "barbara_base.png" },
+    { name = "Candace",      slug = "candace",      description = "A descendant of King Deshret, she is the guardian of Aaru Village.", details = '{"rarity": "4 Star", "element": "Hydro", "weapon": "Polearm"}', base_image = "candace_base.png" },
+    { name = "Xingqiu",      slug = "xingqiu",      description = "The second son of the Feiyun Commerce Guild, he has a reputation for being studious and polite.", details = '{"rarity": "4 Star", "element": "Hydro", "weapon": "Sword"}', base_image = "xingqiu_base.png" },
+    # Pyro
+    { name = "Amber",        slug = "amber",        description = "Always energetic and full of life, Amber's the Outrider of the Knights of Favonius.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Bow"}', base_image = "amber_base.png" },
+    { name = "Bennett",      slug = "bennett",      description = "A good-natured adventurer from Mondstadt who's sadly plagued by constant bad luck.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Sword"}', base_image = "bennett_base.png" },
+    { name = "Chevreuse",    slug = "chevreuse",    description = "Captain of the Special Security and Surveillance Patrol.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Polearm"}', base_image = "chevreuse_base.png" },
+    { name = "Gaming",       slug = "gaming",       description = "Guard of the Sword and Strongbox Secure Transport Agency, and the head of the 'Mystical Beasts and Wondrous Creatures' Wushou troupe.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Claymore"}', base_image = "gaming_base.png" },
+    { name = "Thoma",        slug = "thoma",        description = "The housekeeper for the Kamisato Clan, and a well-known 'fixer' in Inazuma.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Polearm"}', base_image = "thoma_base.png" },
+    { name = "Xiangling",    slug = "xiangling",    description = "A renowned chef from Liyue. She's extremely passionate about cooking and excels at making her signature hot and spicy dishes.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Polearm"}', base_image = "xiangling_base.png" },
+    { name = "Xinyan",       slug = "xinyan",       description = "Liyue's sole rock 'n' roll musician. She rebels against ossified prejudices using her music and passionate singing.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Claymore"}', base_image = "xinyan_base.png" },
+    { name = "Yanfei",       slug = "yanfei",       description = "A well-known legal adviser active in Liyue Harbor. A brilliant young lady in whose veins runs the blood of an illuminated beast.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Catalyst"}', base_image = "yanfei_base.png" },
+
+    # === Traveler ===
+    # Define a base 'Traveler' and potentially element-specific versions if mods target them differently
+    { name = "Traveler", slug = "traveler", description = "A traveler from another world who had their only kin taken away, forcing them to embark on a journey to find The Seven.", details = '{"rarity": "5 Star", "element": "Adaptive", "weapon": "Sword"}', base_image = "traveler_base.png" },
+    # Example element-specific entries if needed by mods:
+    # { name = "Traveler (Anemo)", slug = "traveler-anemo", description = "Traveler wielding the power of Anemo.", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Sword"}', base_image = "traveler_anemo.png" },
+    # { name = "Traveler (Geo)", slug = "traveler-geo", description = "Traveler wielding the power of Geo.", details = '{"rarity": "5 Star", "element": "Geo", "weapon": "Sword"}', base_image = "traveler_geo.png" },
+    # { name = "Traveler (Electro)", slug = "traveler-electro", description = "Traveler wielding the power of Electro.", details = '{"rarity": "5 Star", "element": "Electro", "weapon": "Sword"}', base_image = "traveler_electro.png" },
+    # { name = "Traveler (Dendro)", slug = "traveler-dendro", description = "Traveler wielding the power of Dendro.", details = '{"rarity": "5 Star", "element": "Dendro", "weapon": "Sword"}', base_image = "traveler_dendro.png" },
+    # { name = "Traveler (Hydro)", slug = "traveler-hydro", description = "Traveler wielding the power of Hydro.", details = '{"rarity": "5 Star", "element": "Hydro", "weapon": "Sword"}', base_image = "traveler_hydro.png" },
+]
+
+
+# ===================
+# ====   NPCs    ====
+# ===================
+[npcs]
+name = "NPCs"
+entities = [
+    { name = "Katheryne", slug = "katheryne", description = "The receptionist of the Adventurers' Guild, found in every major city.", details = '{"location": "Multiple Cities"}', base_image = "katheryne.png" },
+    { name = "Paimon",    slug = "paimon",    description = "A mysterious, energetic companion who guides the Traveler. Loves food.", details = '{"type": "Companion"}', base_image = "paimon.png" },
+]
+
+# ===================
+# ====  Enemies  ====
+# ===================
+[enemies]
+name = "Enemies"
+entities = [
+    # Common
+    { name = "Hilichurl",        slug = "hilichurl",       description = "A common humanoid monster found across Teyvat.", details = '{"type": "Common"}', base_image = "hilichurl.png" },
+    { name = "Slime (Pyro)",     slug = "slime-pyro",      description = "A common elemental life form made of Pyro.", details = '{"type": "Common", "element": "Pyro"}', base_image = "slime_pyro.png" },
+    { name = "Slime (Cryo)",     slug = "slime-cryo",      description = "A common elemental life form made of Cryo.", details = '{"type": "Common", "element": "Cryo"}', base_image = "slime_cryo.png" },
+    { name = "Specter (Hydro)",  slug = "specter-hydro",   description = "A floating elemental creature born from high concentrations of Hydro.", details = '{"type": "Common", "element": "Hydro"}', base_image = "specter_hydro.png" },
+    { name = "Fatui Skirmisher", slug = "fatui-skirmisher", description = "A soldier belonging to the Fatui military force (various elements).", details = '{"type": "Common", "faction": "Fatui"}', base_image = "fatui_skirmisher.png" },
+    { name = "Treasure Hoarder", slug = "treasure-hoarder", description = "A member of a decentralized criminal organization that operates across Teyvat.", details = '{"type": "Common"}', base_image = "treasure_hoarder.png" },
+    # Elite
+    { name = "Ruin Guard",       slug = "ruin-guard",      description = "An ancient humanoid war machine.", details = '{"type": "Elite", "faction": "Automaton"}', base_image = "ruin_guard.png" },
+    { name = "Ruin Hunter",      slug = "ruin-hunter",     description = "A vaguely insectoid ancient war machine.", details = '{"type": "Elite", "faction": "Automaton"}', base_image = "ruin_hunter.png" },
+    { name = "Geovishap Hatchling", slug = "geovishap-hatchling", description = "A young Geovishap.", details = '{"type": "Elite", "element": "Geo"}', base_image = "geovishap_hatchling.png" },
+    { name = "Fatui Agent (Pyro)", slug = "fatui-agent-pyro", description = "An elite operative of the Fatui specializing in stealth and assassination.", details = '{"type": "Elite", "faction": "Fatui", "element": "Pyro"}', base_image = "fatui_agent_pyro.png" },
+    { name = "Abyss Mage (Hydro)", slug = "abyss-mage-hydro", description = "A creature from the Abyss wielding Hydro powers and a protective shield.", details = '{"type": "Elite", "faction": "Abyss Order", "element": "Hydro"}', base_image = "abyss_mage_hydro.png" },
+    { name = "Mirror Maiden",    slug = "mirror-maiden",   description = "A Fatui operative who commands a Hydro Mirror.", details = '{"type": "Elite", "faction": "Fatui", "element": "Hydro"}', base_image = "mirror_maiden.png" },
+    # Bosses (Example)
+    { name = "Andrius",          slug = "andrius",         description = "Lupus Boreas, the Wolf of the North. One of the Four Winds of Mondstadt.", details = '{"type": "Weekly Boss"}', base_image = "andrius.png" },
+    { name = "Azhdaha",          slug = "azhdaha",         description = "An ancient Geo dragon sealed beneath Nantianmen.", details = '{"type": "Weekly Boss"}', base_image = "azhdaha.png" },
+]
+
+# ===================
+# ====  Weapons  ====
+# ===================
+[weapons]
+name = "Weapons"
+entities = [
+    # Representing Weapon TYPES for mods, not specific weapons
+    { name = "Sword",    slug = "sword",    description = "Mods affecting one-handed swords.", details = '{"category": "Weapon Type"}', base_image = "type_sword.png" },
+    { name = "Claymore", slug = "claymore", description = "Mods affecting two-handed claymores.", details = '{"category": "Weapon Type"}', base_image = "type_claymore.png" },
+    { name = "Polearm",  slug = "polearm",  description = "Mods affecting polearms.", details = '{"category": "Weapon Type"}', base_image = "type_polearm.png" },
+    { name = "Bow",      slug = "bow",      description = "Mods affecting bows.", details = '{"category": "Weapon Type"}', base_image = "type_bow.png" },
+    { name = "Catalyst", slug = "catalyst", description = "Mods affecting catalysts.", details = '{"category": "Weapon Type"}', base_image = "type_catalyst.png" },
+]
+
+# ===================
+# ====  Objects  ====
+# ===================
+[objects]
+name = "Objects"
+entities = [
+    { name = "Common Chest", slug = "treasure-chest-common", description = "A common chest containing minor rewards.", details = '{"type": "Container", "rarity": "Common"}', base_image = "common_chest.png" },
+    { name = "Exquisite Chest", slug = "treasure-chest-exquisite", description = "A more valuable chest.", details = '{"type": "Container", "rarity": "Exquisite"}', base_image = "exquisite_chest.png" },
+    { name = "Precious Chest", slug = "treasure-chest-precious", description = "A chest containing significant rewards.", details = '{"type": "Container", "rarity": "Precious"}', base_image = "precious_chest.png" },
+    { name = "Luxurious Chest", slug = "treasure-chest-luxurious", description = "A rare chest with the best rewards.", details = '{"type": "Container", "rarity": "Luxurious"}', base_image = "luxurious_chest.png" },
+    { name = "Seelie",         slug = "seelie",        description = "A guiding spirit that leads to treasure.", details = '{"type": "World Puzzle"}', base_image = "seelie.png" },
+    { name = "Seelie Court",   slug = "seelie-court",  description = "The resting place for a Seelie.", details = '{"type": "World Puzzle"}', base_image = "seelie_court.png" },
+    { name = "Anemoculus",     slug = "anemoculus",    description = "An elemental collectible found in Mondstadt.", details = '{"type": "Collectible", "region": "Mondstadt"}', base_image = "anemoculus.png" },
+    { name = "Geoculus",       slug = "geoculus",      description = "An elemental collectible found in Liyue.", details = '{"type": "Collectible", "region": "Liyue"}', base_image = "geoculus.png" },
+    { name = "Electroculus",   slug = "electroculus",  description = "An elemental collectible found in Inazuma.", details = '{"type": "Collectible", "region": "Inazuma"}', base_image = "electroculus.png" },
+    { name = "Dendroculus",    slug = "dendroculus",   description = "An elemental collectible found in Sumeru.", details = '{"type": "Collectible", "region": "Sumeru"}', base_image = "dendroculus.png" },
+    { name = "Hydroculus",     slug = "hydroculus",    description = "An elemental collectible found in Fontaine.", details = '{"type": "Collectible", "region": "Fontaine"}', base_image = "hydroculus.png" },
+    { name = "Waverider Waypoint", slug = "waverider-waypoint", description = "A waypoint used to summon the Waverider boat.", details = '{"type": "Interaction Point"}', base_image = "waverider_waypoint.png" },
+    { name = "Fishing Point",  slug = "fishing-point", description = "A designated spot for fishing.", details = '{"type": "Interaction Point"}', base_image = "fishing_point.png" },
+    { name = "Cooking Pot",    slug = "cooking-pot",   description = "Used for cooking food.", details = '{"type": "Interaction Point", "function": "Cooking"}', base_image = "cooking_pot.png" },
+    { name = "Crafting Bench", slug = "crafting-bench", description = "Used for crafting and alchemy.", details = '{"type": "Interaction Point", "function": "Crafting/Alchemy"}', base_image = "crafting_bench.png" },
+    { name = "Statue of The Seven", slug = "statue-of-the-seven", description = "A statue representing an Archon, used for healing, stamina upgrades, and map unlocking.", details = '{"type": "Interaction Point"}', base_image = "statue_of_the_seven.png" },
+    { name = "Teleport Waypoint", slug = "teleport-waypoint", description = "Allows fast travel across Teyvat.", details = '{"type": "Interaction Point"}', base_image = "teleport_waypoint.png" },
+]
