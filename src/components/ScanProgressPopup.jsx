@@ -12,7 +12,7 @@ const styles = {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        zIndex: 1000, // Ensure it's on top
+        zIndex: 1050, // Ensure it's on top
         backdropFilter: 'blur(5px)',
     },
     popup: {
@@ -54,14 +54,14 @@ const styles = {
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
     },
-     pathText: {
+    pathText: { // Specific to scan, might be hidden for apply
         fontSize: '12px',
         color: 'rgba(255, 255, 255, 0.6)',
         minHeight: '18px', // Prevent layout shift
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
-     },
+    },
     countsText: {
         fontSize: '13px',
         color: 'rgba(255, 255, 255, 0.7)',
@@ -75,27 +75,48 @@ const styles = {
         color: 'var(--danger)',
         fontWeight: '500',
         marginTop: '15px',
+        whiteSpace: 'pre-wrap', // Allow error newlines
+        textAlign: 'left',
+        maxHeight: '150px', // Limit error display height
+        overflowY: 'auto',
+        background: 'rgba(255,0,0,0.05)',
+        padding: '10px',
+        borderRadius: '4px',
     }
 };
 
-function ScanProgressPopup({ progress, status, error, summary, onClose }) {
-    if (!progress && !status && !error && !summary) {
-        return null; // Don't render if no data (initially hidden)
+function ScanProgressPopup({
+    isOpen, // Control visibility from parent
+    progressData, // Object like { processed, total, message, current_path? }
+    summary,
+    error,
+    onClose,
+    baseTitle = "Processing..." // Generic base title
+}) {
+    if (!isOpen) {
+        return null;
     }
 
-    const percentage = progress?.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0;
+    const percentage = progressData?.total > 0 ? Math.round((progressData.processed / progressData.total) * 100) : 0;
     const isComplete = !!summary || !!error;
+    const displayTitle = error ? "Error" : (summary ? "Complete" : baseTitle);
+    const statusMessage = progressData?.message || (isComplete ? '' : 'Initializing...');
+    const countsText = progressData ? `${progressData.processed} / ${progressData.total}` : '';
+    const pathText = progressData?.current_path ? `...${progressData.current_path.slice(-60)}` : <>​</>; // Use zero-width space for spacing
 
     return (
-        <div style={styles.overlay}>
-            <div style={styles.popup}>
-                <h2 style={styles.title}>{error ? "Scan Error" : (summary ? "Scan Complete" : "Scanning Mods Folder...")}</h2>
+        <div style={styles.overlay} onClick={onClose}> {/* Allow closing by clicking overlay */}
+            <div style={styles.popup} onClick={(e) => e.stopPropagation()}> {/* Prevent closing when clicking popup itself */}
+                <h2 style={styles.title}>{displayTitle}</h2>
 
                 {error ? (
+                    // Display error details if available
                      <p style={styles.errorText}>{error}</p>
                  ) : summary ? (
+                    // Display summary message on completion
                      <p style={styles.statusText}>{summary}</p>
                  ) : (
+                    // Display progress bar and status while running
                     <>
                         <div style={styles.progressBarContainer}>
                             <div
@@ -110,13 +131,14 @@ function ScanProgressPopup({ progress, status, error, summary, onClose }) {
                                 aria-valuemax="100"
                             />
                         </div>
-                         <p style={styles.statusText}>{status || 'Initializing...'}</p>
-                         <p style={styles.pathText} title={progress?.current_path || ''}>
-                             {progress?.current_path ? `...${progress.current_path.slice(-60)}` : <> </>}
-                         </p>
-                         <p style={styles.countsText}>
-                             {progress ? `${progress.processed} / ${progress.total}` : '0 / 0'}
-                         </p>
+                         <p style={styles.statusText} title={statusMessage}>{statusMessage}</p>
+                         {/* Only show path text if present in progressData (useful for scan) */}
+                         {progressData?.current_path &&
+                            <p style={styles.pathText} title={progressData.current_path}>
+                                {pathText}
+                            </p>
+                         }
+                         <p style={styles.countsText}>{countsText}</p>
                      </>
                  )}
 

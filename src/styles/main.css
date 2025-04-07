@@ -88,7 +88,6 @@ body {
 
 .nav-items {
     list-style: none;
-    margin-bottom: 30px;
     flex-grow: 1; /* Allow nav items to take up space */
 }
 
@@ -876,4 +875,13 @@ input:disabled + .slider {
 .placeholder-text[style*="grid-column"] {
     width: 100%;
     text-align: center;
+}
+
+.btn-danger {
+    background-color: var(--danger);
+    color: white;
+}
+.btn-danger:hover {
+    background-color: #d63031; /* A slightly darker red */
+    box-shadow: 0 5px 15px rgba(var(--danger), 0.4);
 }

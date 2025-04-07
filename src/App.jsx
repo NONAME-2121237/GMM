@@ -1,15 +1,14 @@
 // src/App.jsx
-import React, { useEffect } from 'react'; // Import useEffect
+import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
 import Sidebar from './components/Sidebar';
 import HomePage from './pages/HomePage';
 import EntityPage from './pages/EntityPage';
 import SettingsPage from './pages/SettingsPage';
-import PlaceholderPage from './pages/PlaceholderPage';
+import PresetPage from './pages/PresetPage';
 import HomeDashboard from './pages/HomeDashboard';
 import FirstLaunchSetup from './components/FirstLaunchSetup';
-import { invoke } from '@tauri-apps/api/tauri'; // Import invoke
 
 
 function AppContent() {
@@ -37,7 +36,7 @@ function AppContent() {
                     <Route path="/category/:categorySlug" element={<HomePage />} />
                     <Route path="/entity/:entitySlug" element={<EntityPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
-                    {/* Placeholder routes accessed via /category/:slug */}
+                    <Route path="/presets" element={<PresetPage />} />
                     {/* Fallback route */}
                     <Route path="*" element={<HomeDashboard />} />
                 </Routes>

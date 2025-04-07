@@ -1,8 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSettings } from '../contexts/SettingsContext';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
-import ScanProgressPopup from '../components/ScanProgressPopup'; // Import the popup
+import ScanProgressPopup from '../components/ScanProgressPopup';
+
+// Event names constants
+const SCAN_PROGRESS_EVENT = "scan://progress";
+const SCAN_COMPLETE_EVENT = "scan://complete";
+const SCAN_ERROR_EVENT = "scan://error";
+
 
 function SettingsPage() {
     const {
@@ -10,7 +16,7 @@ function SettingsPage() {
         quickLaunchPath,
         updateSetting,
         isLoading,
-        error: contextError, // Rename to avoid conflict
+        error: contextError,
         SETTINGS_KEY_MODS_FOLDER,
         SETTINGS_KEY_QUICK_LAUNCH
     } = useSettings();
@@ -20,12 +26,13 @@ function SettingsPage() {
     const [isChangingFile, setIsChangingFile] = useState(false);
     const [changeError, setChangeError] = useState('');
 
-    // State specifically for the manual scan button and its popup
-    const [isManualScanning, setIsManualScanning] = useState(false);
-    const [showManualScanPopup, setShowManualScanPopup] = useState(false);
-    const [manualScanProgressData, setManualScanProgressData] = useState(null);
-    const [manualScanSummary, setManualScanSummary] = useState('');
-    const [manualScanError, setManualScanError] = useState('');
+    // State for the manual scan button and its popup
+    const [isManualScanning, setIsManualScanning] = useState(false); // Only tracks button disable state
+    const [showScanPopup, setShowScanPopup] = useState(false); // Controls popup visibility
+    const [scanProgressData, setScanProgressData] = useState(null); // Data for the popup
+    const [scanSummary, setScanSummary] = useState(''); // Completion message
+    const [scanError, setScanError] = useState(''); // Error message
+    const scanListenersRef = useRef({ unlistenProgress: null, unlistenComplete: null, unlistenError: null }); // Ref for listeners
 
 
     // --- Path Changing Logic ---
@@ -33,8 +40,9 @@ function SettingsPage() {
         setIsChangingFolder(true);
         setChangeError('');
         // Clear scan status if displayed from a previous manual scan
-        setManualScanSummary('');
-        setManualScanError('');
+        setScanSummary('');
+        setScanError('');
+        closeScanPopup(); // Close popup if open
         try {
             const result = await invoke('select_directory');
             if (result) {
@@ -53,8 +61,9 @@ function SettingsPage() {
     const handleChangeQuickLaunch = async () => {
         setIsChangingFile(true);
         setChangeError('');
-         setManualScanSummary('');
-         setManualScanError('');
+         setScanSummary('');
+         setScanError('');
+         closeScanPopup(); // Close popup if open
         try {
             const result = await invoke('select_file');
             if (result) {
@@ -72,98 +81,77 @@ function SettingsPage() {
     // --- Manual Scan Logic & Event Listeners ---
     const handleManualScan = async () => {
         // Reset state for the manual scan popup
-        setIsManualScanning(true);
-        setShowManualScanPopup(true);
-        setManualScanProgressData(null);
-        setManualScanSummary('');
-        setManualScanError('');
+        setIsManualScanning(true); // Disable button
+        setShowScanPopup(false); // Hide previous results before starting
+        setScanProgressData(null);
+        setScanSummary('');
+        setScanError('');
         setChangeError(''); // Clear path change errors
 
         try {
-            // Invoke the backend command; errors invoking command itself are caught here
             await invoke('scan_mods_directory');
-            // Success/failure/progress is now handled by event listeners below
+            // If invoke succeeds, listeners will handle showing the popup and progress
+            // We show popup immediately on start event now
         } catch (err) {
             console.error("Failed to invoke scan command:", err);
             const errorMessage = typeof err === 'string' ? err : (err.message || 'Failed to start scan');
-            setManualScanError(errorMessage); // Show error in the popup
-            setShowManualScanPopup(true); // Ensure popup shows the error
+            setScanError(errorMessage);
+            setShowScanPopup(true); // Ensure popup shows the invocation error
             setIsManualScanning(false); // Re-enable button on invocation failure
         }
     };
 
     // Event listeners specifically for the manual scan triggered from this page
     useEffect(() => {
-        // These listeners are active whenever the Settings page is mounted.
-        // They will react to *any* scan event, including the automatic initial one
-        // if we don't differentiate the events or disable the initial auto-scan.
-        // For now, let's assume they only matter when `showManualScanPopup` is true.
-
         const setupListeners = async () => {
-             const unlistenProgress = await listen('scan://progress', (event) => {
-                 // Only update the manual popup state if it's currently shown
-                 // This prevents the popup appearing unexpectedly from background scans
-                 setShowManualScanPopup(currentShowState => {
-                     if(currentShowState) {
-                         console.log('Manual Scan Progress:', event.payload);
-                         setManualScanProgressData(event.payload);
-                         setManualScanSummary('');
-                         setManualScanError('');
-                         setIsManualScanning(true); // Keep button disabled
-                     }
-                     return currentShowState; // Maintain current visibility state
-                 });
+             scanListenersRef.current.unlistenProgress = await listen(SCAN_PROGRESS_EVENT, (event) => {
+                 console.log('Manual Scan Progress:', event.payload);
+                 setShowScanPopup(true); // Ensure popup is visible on progress
+                 setScanProgressData(event.payload);
+                 setScanSummary('');
+                 setScanError('');
+                 setIsManualScanning(true); // Keep button disabled during progress
              });
 
-             const unlistenComplete = await listen('scan://complete', (event) => {
-                 setShowManualScanPopup(currentShowState => {
-                     if(currentShowState) {
-                         console.log('Manual Scan Complete:', event.payload);
-                         setManualScanSummary(event.payload || 'Scan completed successfully!');
-                         setManualScanProgressData(null);
-                         setManualScanError('');
-                         setIsManualScanning(false); // Re-enable button
-                     }
-                     return currentShowState;
-                 });
+             scanListenersRef.current.unlistenComplete = await listen(SCAN_COMPLETE_EVENT, (event) => {
+                 console.log('Manual Scan Complete:', event.payload);
+                 setShowScanPopup(true); // Ensure popup visible for summary
+                 setScanSummary(event.payload || 'Scan completed successfully!');
+                 setScanProgressData(null); // Clear progress data
+                 setScanError('');
+                 setIsManualScanning(false); // Re-enable button
              });
 
-             const unlistenError = await listen('scan://error', (event) => {
-                 setShowManualScanPopup(currentShowState => {
-                    if(currentShowState) {
-                         console.error('Manual Scan Error Event:', event.payload);
-                         setManualScanError(event.payload || 'An unknown error occurred during scan.');
-                         setManualScanProgressData(null);
-                         setManualScanSummary('');
-                         setIsManualScanning(false); // Re-enable button
-                    }
-                    return currentShowState;
-                 });
+             scanListenersRef.current.unlistenError = await listen(SCAN_ERROR_EVENT, (event) => {
+                 console.error('Manual Scan Error Event:', event.payload);
+                 setShowScanPopup(true); // Ensure popup visible for error
+                 setScanError(event.payload || 'An unknown error occurred during scan.');
+                 setScanProgressData(null); // Clear progress data
+                 setScanSummary('');
+                 setIsManualScanning(false); // Re-enable button
              });
-
-             // Return a cleanup function that unlistens to all
-             return () => {
-                 console.log("Cleaning up manual scan listeners for Settings page...");
-                 unlistenProgress?.();
-                 unlistenComplete?.();
-                 unlistenError?.();
-             };
         };
 
-        const cleanupPromise = setupListeners();
+        setupListeners();
 
         // Actual cleanup function for useEffect
         return () => {
-            cleanupPromise.then(cleanup => cleanup?.());
+            console.log("Cleaning up manual scan listeners for Settings page...");
+            scanListenersRef.current.unlistenProgress?.();
+            scanListenersRef.current.unlistenComplete?.();
+            scanListenersRef.current.unlistenError?.();
         };
     }, []); // Run only once when the Settings component mounts
 
-    const closeManualScanPopup = () => {
-        setShowManualScanPopup(false);
-        setManualScanProgressData(null);
-        setManualScanSummary('');
-        setManualScanError('');
-        // Keep isManualScanning false, button is already re-enabled by listeners
+    const closeScanPopup = () => {
+        setShowScanPopup(false);
+        setScanProgressData(null);
+        setScanSummary('');
+        setScanError('');
+        // Re-enable button if popup closed manually during scan
+        if (isManualScanning && !scanSummary && !scanError) {
+            setIsManualScanning(false);
+        }
     };
 
 
@@ -189,10 +177,11 @@ function SettingsPage() {
                         <button
                             className="btn btn-outline"
                             onClick={handleChangeModsFolder}
-                            disabled={isChangingFolder || isManualScanning} // Disable if scanning too
+                            disabled={isChangingFolder || isManualScanning} // Also disable if scanning
+                            style={{ minWidth: '110px' }} // Prevent layout shift
                         >
                             {isChangingFolder ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-folder-open fa-fw"></i>}
-                            Change
+                            {' '}Change
                         </button>
                     </div>
                     {/* Quick Launch Setting */}
@@ -202,10 +191,11 @@ function SettingsPage() {
                         <button
                             className="btn btn-outline"
                             onClick={handleChangeQuickLaunch}
-                            disabled={isChangingFile || isManualScanning}
+                            disabled={isChangingFile || isManualScanning} // Also disable if scanning
+                            style={{ minWidth: '110px' }} // Prevent layout shift
                         >
                              {isChangingFile ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-file-arrow-up fa-fw"></i>}
-                            Change
+                             {' '}Change
                         </button>
                     </div>
                      {/* Display path change errors */}
@@ -223,12 +213,12 @@ function SettingsPage() {
                             onClick={handleManualScan} // Trigger manual scan with popup
                             disabled={isManualScanning || !modsFolder} // Disable if scanning or no mods folder set
                             title={!modsFolder ? "Set Mods Folder path first" : "Scan for new mods"}
+                            style={{ minWidth: '120px' }} // Prevent layout shift
                         >
-                            {isManualScanning ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-sync-alt fa-fw"></i>}
-                            {isManualScanning ? 'Scanning...' : 'Scan Now'}
+                            {isManualScanning && !scanSummary && !scanError ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-sync-alt fa-fw"></i>}
+                            {isManualScanning && !scanSummary && !scanError ? ' Scanning...' : ' Scan Now'}
                         </button>
                      </div>
-                     {/* Status text area removed, popup handles feedback */}
 
                     {/* --- Other Options --- */}
                     <h3 style={styles.sectionHeader}>Other Options</h3>
@@ -238,20 +228,19 @@ function SettingsPage() {
             )}
 
             {/* Progress Popup for Manual Scan */}
-            {showManualScanPopup && (
-                <ScanProgressPopup
-                    progress={manualScanProgressData}
-                    status={manualScanProgressData?.message} // Use message from progress data
-                    summary={manualScanSummary}
-                    error={manualScanError}
-                    onClose={closeManualScanPopup} // Function to close the popup
-                />
-            )}
+            <ScanProgressPopup
+                isOpen={showScanPopup}
+                progressData={scanProgressData}
+                summary={scanSummary}
+                error={scanError}
+                onClose={closeScanPopup}
+                baseTitle="Scanning Mods..." // Pass specific title
+            />
         </div>
     );
 }
 
-// Styles for Settings page (ensure these match your previous styles)
+// Styles for Settings page
 const styles = {
     sectionHeader: {
         marginTop: '30px',
@@ -295,9 +284,9 @@ const styles = {
         marginBottom: '10px',
         fontSize: '14px',
         width: '100%',
-        textAlign: 'right',
+        textAlign: 'left', // Align with labels
+        paddingLeft: '165px', // Indent error messages
     },
-    // No statusText style needed here now
 };
 
 export default SettingsPage;

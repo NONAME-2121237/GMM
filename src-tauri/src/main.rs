@@ -54,6 +54,21 @@ struct AssetLocationInfo {
     entity_slug: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Preset {
+    id: i64,
+    name: String,
+    is_favorite: bool,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ApplyProgress {
+  processed: usize,
+  total: usize,
+  current_asset_id: Option<i64>,
+  message: String,
+}
+
 // Type alias for the top-level structure (HashMap: category_slug -> CategoryDefinition)
 type Definitions = HashMap<String, CategoryDefinition>;
 
@@ -103,6 +118,11 @@ struct ScanProgress {
 const SCAN_PROGRESS_EVENT: &str = "scan://progress";
 const SCAN_COMPLETE_EVENT: &str = "scan://complete";
 const SCAN_ERROR_EVENT: &str = "scan://error";
+// Add Preset Apply Event Names
+const PRESET_APPLY_START_EVENT: &str = "preset://apply_start";
+const PRESET_APPLY_PROGRESS_EVENT: &str = "preset://apply_progress";
+const PRESET_APPLY_COMPLETE_EVENT: &str = "preset://apply_complete";
+const PRESET_APPLY_ERROR_EVENT: &str = "preset://apply_error";
 
 type CmdResult<T> = Result<T, String>;
 
@@ -448,17 +468,34 @@ fn initialize_database(app_handle: &AppHandle) -> Result<(), AppError> {
     println!("Database path: {}", db_path.display());
     let conn = Connection::open(&db_path)?;
 
-    // --- Create Tables ---
+    // Enable Foreign Keys if not already default
+    conn.execute("PRAGMA foreign_keys = ON;", [])?;
+
+    // --- Create/Verify Tables ---
     conn.execute_batch(
         "BEGIN;
          CREATE TABLE IF NOT EXISTS categories ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, slug TEXT UNIQUE NOT NULL );
          CREATE TABLE IF NOT EXISTS entities ( id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL, description TEXT, details TEXT, base_image TEXT, FOREIGN KEY (category_id) REFERENCES categories (id) );
-         -- Removed UNIQUE constraint from folder_name temporarily, need better handling for duplicates during scan
          CREATE TABLE IF NOT EXISTS assets ( id INTEGER PRIMARY KEY AUTOINCREMENT, entity_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, folder_name TEXT NOT NULL, image_filename TEXT, author TEXT, category_tag TEXT, FOREIGN KEY (entity_id) REFERENCES entities (id) );
          CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL );
+
+         -- Preset Tables --
+         CREATE TABLE IF NOT EXISTS presets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            is_favorite INTEGER NOT NULL DEFAULT 0 -- 0=false, 1=true
+         );
+         CREATE TABLE IF NOT EXISTS preset_assets (
+            preset_id INTEGER NOT NULL,
+            asset_id INTEGER NOT NULL,
+            is_enabled INTEGER NOT NULL, -- 0=false, 1=true
+            PRIMARY KEY (preset_id, asset_id),
+            FOREIGN KEY (preset_id) REFERENCES presets(id) ON DELETE CASCADE, -- Delete entries when preset is deleted
+            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE   -- Delete entries if asset is deleted (optional but good practice)
+         );
          COMMIT;",
     )?;
-    println!("Database tables verified/created.");
+    println!("Database tables verified/created (including presets).");
 
     // --- Load and Parse Definitions ---
     println!("Loading base entity definitions...");
@@ -528,7 +565,7 @@ fn initialize_database(app_handle: &AppHandle) -> Result<(), AppError> {
 
     // --- Finalize DB Connection Setup for State ---
     let mut db_lock = DB_CONNECTION.lock().expect("Failed to lock DB mutex during init");
-    *db_lock = Ok(conn); // Store the connection we used
+    *db_lock = Ok(conn);
 
     println!("Database initialization and definition sync complete.");
     Ok(())
@@ -2028,6 +2065,299 @@ fn import_archive(
    Ok(()) // Lock released here
 }
 
+#[command]
+fn create_preset(name: String, db_state: State<DbState>) -> CmdResult<Preset> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Preset name cannot be empty.".to_string());
+    }
+    println!("[create_preset] Attempting to create preset: '{}'", name);
+
+    let base_mods_path = get_mods_base_path_from_settings(&db_state)
+        .map_err(|e| format!("Cannot create preset: {}", e))?;
+
+    let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let mut conn = conn_guard;
+
+    // Use a block scope for the transaction
+    let preset_id = { // Start block scope for tx
+        let tx = conn.transaction().map_err(|e| format!("Failed to start transaction: {}", e))?;
+
+        // Check if name exists
+        let existing_count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM presets WHERE LOWER(name) = LOWER(?1)",
+            params![name],
+            |row| row.get(0),
+        ).map_err(|e| format!("DB error checking preset name: {}", e))?;
+
+        if existing_count > 0 {
+            // Rollback happens automatically when tx is dropped on error return
+            return Err(format!("Preset name '{}' already exists.", name));
+        }
+
+        // Insert new preset
+        tx.execute("INSERT INTO presets (name) VALUES (?1)", params![name])
+            .map_err(|e| format!("Failed to insert preset: {}", e))?;
+        let new_preset_id = tx.last_insert_rowid();
+        println!("[create_preset] Inserted preset with ID: {}", new_preset_id);
+
+        // Use another block scope for the statement and iteration
+        { // Start block scope for stmt
+            let mut stmt = tx.prepare("SELECT id, folder_name FROM assets")
+                .map_err(|e| format!("Failed to prepare asset fetch: {}", e))?;
+            let asset_iter_result = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?.replace("\\", "/"),
+                ))
+            });
+
+            match asset_iter_result {
+                Ok(asset_iter) => {
+                    for asset_result in asset_iter {
+                        match asset_result {
+                            Ok((asset_id, clean_relative_path_str)) => {
+                                let clean_relative_path = PathBuf::from(&clean_relative_path_str);
+                                let filename_osstr = clean_relative_path.file_name().unwrap_or_default();
+                                let filename_str = filename_osstr.to_string_lossy();
+                                if filename_str.is_empty() { continue; }
+
+                                let disabled_filename = format!("{}{}", DISABLED_PREFIX, filename_str);
+                                let relative_parent_path = clean_relative_path.parent();
+
+                                let full_path_if_enabled = base_mods_path.join(&clean_relative_path);
+                                let full_path_if_disabled = match relative_parent_path {
+                                    Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
+                                    _ => base_mods_path.join(&disabled_filename),
+                                };
+
+                                let is_currently_enabled = if full_path_if_enabled.is_dir() { 1 }
+                                                            else if full_path_if_disabled.is_dir() { 0 }
+                                                            else {
+                                                                println!("[create_preset] Warning: Asset ID {} folder not found on disk during preset save (path: {}). Skipping.", asset_id, clean_relative_path_str);
+                                                                continue;
+                                                            };
+
+                                tx.execute(
+                                    "INSERT INTO preset_assets (preset_id, asset_id, is_enabled) VALUES (?1, ?2, ?3)",
+                                    params![new_preset_id, asset_id, is_currently_enabled],
+                                ).map_err(|e| format!("Failed to save state for asset {}: {}", asset_id, e))?;
+                            }
+                            Err(e) => return Err(format!("Error fetching asset row: {}", e)), // Rollbacks on return
+                        }
+                    }
+                }
+                Err(e) => return Err(format!("Error preparing asset iterator: {}", e)), // Rollbacks on return
+            }
+        } // End block scope for stmt - stmt is dropped here, releasing borrow on tx
+
+        // Commit the transaction
+        tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
+        new_preset_id // Return the ID from the block
+    }; // End block scope for tx
+
+    println!("[create_preset] Preset '{}' created successfully.", name);
+
+    Ok(Preset { id: preset_id, name: name.to_string(), is_favorite: false })
+}
+
+
+#[command]
+fn get_presets(db_state: State<DbState>) -> CmdResult<Vec<Preset>> {
+    let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let mut stmt = conn.prepare("SELECT id, name, is_favorite FROM presets ORDER BY name ASC")
+        .map_err(|e| e.to_string())?;
+    let preset_iter = stmt.query_map([], |row| {
+        Ok(Preset {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            is_favorite: row.get::<_, i64>(2)? == 1,
+        })
+    }).map_err(|e| e.to_string())?;
+    preset_iter.collect::<SqlResult<Vec<Preset>>>().map_err(|e| e.to_string())
+}
+
+#[command]
+fn get_favorite_presets(db_state: State<DbState>) -> CmdResult<Vec<Preset>> {
+    let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, is_favorite FROM presets WHERE is_favorite = 1 ORDER BY name ASC LIMIT 3"
+    ).map_err(|e| e.to_string())?;
+    let preset_iter = stmt.query_map([], |row| {
+        Ok(Preset {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            is_favorite: row.get::<_, i64>(2)? == 1,
+        })
+    }).map_err(|e| e.to_string())?;
+    preset_iter.collect::<SqlResult<Vec<Preset>>>().map_err(|e| e.to_string())
+}
+
+#[command]
+async fn apply_preset(preset_id: i64, db_state: State<'_, DbState>, app_handle: AppHandle) -> CmdResult<()> {
+    println!("[apply_preset] Applying preset ID: {}", preset_id);
+
+    // Clone app_handle for potential use in error emission later
+    let app_handle_clone = app_handle.clone();
+
+    // --- Get base path first ---
+    let base_mods_path = get_mods_base_path_from_settings(&db_state)
+        .map_err(|e| format!("Cannot apply preset: {}", e))?;
+
+    // --- Fetch preset assets ---
+    let preset_assets_to_apply = { // Use block scope for connection lock
+        let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT pa.asset_id, pa.is_enabled, a.folder_name, a.name
+             FROM preset_assets pa
+             JOIN assets a ON pa.asset_id = a.id
+             WHERE pa.preset_id = ?1"
+        ).map_err(|e| format!("Failed to prepare fetch for preset assets: {}", e))?;
+
+        let preset_assets_iter_result = stmt.query_map(params![preset_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,                   // asset_id
+                row.get::<_, i64>(1)? == 1,              // desired_is_enabled (bool)
+                row.get::<_, String>(2)?.replace("\\", "/"), // clean_relative_path
+                row.get::<_, String>(3)?,               // asset_name
+            ))
+        });
+
+        match preset_assets_iter_result {
+             Ok(iter) => iter.collect::<SqlResult<Vec<(i64, bool, String, String)>>>() // Include name
+                              .map_err(|e| format!("Failed to collect preset assets: {}", e))?,
+             Err(e) => return Err(format!("Error preparing preset asset iterator: {}", e)),
+        }
+    }; // Connection lock released here
+
+    let total_assets = preset_assets_to_apply.len();
+    println!("[apply_preset] Found {} assets in preset.", total_assets);
+
+    // --- Emit START event ---
+    app_handle.emit_all(PRESET_APPLY_START_EVENT, total_assets).ok();
+
+    let mut processed_count = 0;
+    let mut errors = Vec::new();
+
+    for (asset_id, desired_is_enabled, clean_relative_path_str, asset_name) in preset_assets_to_apply {
+        processed_count += 1;
+
+        // --- Emit PROGRESS event ---
+        let progress_message = format!("Processing: {} ({}/{})", asset_name, processed_count, total_assets);
+        app_handle.emit_all(PRESET_APPLY_PROGRESS_EVENT, &ApplyProgress {
+            processed: processed_count,
+            total: total_assets,
+            current_asset_id: Some(asset_id),
+            message: progress_message.clone(),
+        }).ok();
+        println!("[apply_preset] {}", progress_message); // Also log to console
+
+        // --- Filesystem logic ---
+        let clean_relative_path = PathBuf::from(&clean_relative_path_str);
+        let filename_osstr = clean_relative_path.file_name().unwrap_or_default();
+        let filename_str = filename_osstr.to_string_lossy();
+        if filename_str.is_empty() {
+            let err_msg = format!("Skipping asset ID {}: Invalid folder name '{}'.", asset_id, clean_relative_path_str);
+            println!("[apply_preset] {}", err_msg);
+            errors.push(err_msg);
+            continue;
+        }
+
+        let enabled_filename = filename_str.to_string();
+        let disabled_filename = format!("{}{}", DISABLED_PREFIX, filename_str);
+        let relative_parent_path = clean_relative_path.parent();
+
+        let construct_full_path = |name: &str| -> PathBuf {
+            match relative_parent_path {
+                Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(name),
+                _ => base_mods_path.join(name),
+            }
+        };
+
+        let full_path_if_enabled = construct_full_path(&enabled_filename);
+        let full_path_if_disabled = construct_full_path(&disabled_filename);
+
+        let current_path_on_disk: Option<PathBuf>;
+        let current_is_enabled: bool;
+
+        if full_path_if_enabled.is_dir() {
+            current_path_on_disk = Some(full_path_if_enabled);
+            current_is_enabled = true;
+        } else if full_path_if_disabled.is_dir() {
+            current_path_on_disk = Some(full_path_if_disabled);
+            current_is_enabled = false;
+        } else {
+            let err_msg = format!("Skipping asset '{}' (ID {}): Folder not found on disk (path: '{}').", asset_name, asset_id, clean_relative_path_str);
+            println!("[apply_preset] {}", err_msg);
+            errors.push(err_msg);
+            continue;
+        }
+
+        if current_is_enabled != desired_is_enabled {
+            let target_path = if desired_is_enabled {
+                construct_full_path(&enabled_filename)
+            } else {
+                construct_full_path(&disabled_filename)
+            };
+            let source_path = current_path_on_disk.unwrap();
+            println!("[apply_preset] Renaming '{}' -> '{}' (Desired Enabled: {})", source_path.display(), target_path.display(), desired_is_enabled);
+            match fs::rename(&source_path, &target_path) {
+                Ok(_) => { /* Success */ }
+                Err(e) => {
+                     let err_msg = format!("Failed to rename asset '{}' (ID {}): {}", asset_name, asset_id, e);
+                     println!("[apply_preset] Error: {}", err_msg);
+                     errors.push(err_msg);
+                }
+            }
+        }
+        // Optional: Short delay for UI updates if needed
+        // tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    } // End loop
+
+    println!("[apply_preset] Finished applying preset ID {}. Errors: {}", preset_id, errors.len());
+
+    if errors.is_empty() {
+        // --- Emit COMPLETE event ---
+        let summary = format!("Successfully applied preset ({} mods processed).", total_assets);
+        app_handle.emit_all(PRESET_APPLY_COMPLETE_EVENT, &summary).ok();
+        Ok(())
+    } else {
+        // --- Emit ERROR event ---
+        let combined_errors = errors.join("\n");
+        let error_summary = format!("Preset application completed with {} error(s).", errors.len());
+        // You might want to send the full errors separately or just the summary
+        app_handle_clone.emit_all(PRESET_APPLY_ERROR_EVENT, &error_summary).ok();
+        Err(format!("{}\nDetails:\n{}", error_summary, combined_errors)) // Return error details too
+    }
+}
+
+
+#[command]
+fn toggle_preset_favorite(preset_id: i64, is_favorite: bool, db_state: State<DbState>) -> CmdResult<()> {
+    let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let fav_value = if is_favorite { 1 } else { 0 };
+    conn.execute(
+        "UPDATE presets SET is_favorite = ?1 WHERE id = ?2",
+        params![fav_value, preset_id],
+    )
+    .map_err(|e| format!("Failed to update favorite status: {}", e))?;
+    Ok(())
+}
+
+#[command]
+fn delete_preset(preset_id: i64, db_state: State<DbState>) -> CmdResult<()> {
+    let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    // Foreign key cascade should delete from preset_assets automatically
+    let changes = conn.execute("DELETE FROM presets WHERE id = ?1", params![preset_id])
+                      .map_err(|e| format!("Failed to delete preset: {}", e))?;
+    if changes == 0 {
+        Err(format!("Preset with ID {} not found.", preset_id))
+    } else {
+        Ok(())
+    }
+}
+
 // --- Main Function ---
 fn main() {
     let context = generate_context!();
@@ -2056,22 +2386,18 @@ fn main() {
             // Settings
             get_setting, set_setting, select_directory, select_file, launch_executable,
             // Core
-            get_categories,
-            get_category_entities, // Added
-            get_entities_by_category, get_entity_details,
-            get_assets_for_entity, toggle_asset_enabled, get_asset_image_path,
-            open_mods_folder,
+            get_categories, get_category_entities, get_entities_by_category,
+            get_entity_details, get_assets_for_entity, toggle_asset_enabled,
+            get_asset_image_path, open_mods_folder,
             // Scan & Count
-            scan_mods_directory,
-            get_total_asset_count,
-            // Edit, Import, Delete
-            update_asset_info,
-            delete_asset, // Added
-            read_binary_file,
-            select_archive_file,
-            analyze_archive,
-            import_archive,
+            scan_mods_directory, get_total_asset_count,
+            // Edit, Import, Delete (Assets)
+            update_asset_info, delete_asset, read_binary_file,
+            select_archive_file, analyze_archive, import_archive,
             read_archive_file_content,
+            // Presets
+            create_preset, get_presets, get_favorite_presets, apply_preset,
+            toggle_preset_favorite, delete_preset
         ])
         .run(context)
         .expect("error while running tauri application");
