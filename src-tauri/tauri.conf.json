@@ -56,8 +56,8 @@
       {
         "label": "main",
         "title": "Genshin Mod Manager",
-        "width": 1280,
-        "height": 768,
+        "width": 1500,
+        "height": 900,
         "minWidth": 900,
         "minHeight": 650,
         "resizable": true,

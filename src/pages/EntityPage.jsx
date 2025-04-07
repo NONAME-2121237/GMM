@@ -1,9 +1,10 @@
-// src/pages/EntityPage.jsx
+// --- START OF FILE src/pages/EntityPage.jsx ---
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/tauri';
 import ModCard from '../components/ModCard';
 import ModEditModal from '../components/ModEditModal';
+import ConfirmationModal from '../components/ConfirmationModal'; // Import confirmation modal
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -39,8 +40,15 @@ function EntityPage() {
     const [assets, setAssets] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [editingAsset, setEditingAsset] = useState(null); // State for the asset being edited
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false); // State for modal visibility
+    // Edit Modal State
+    const [editingAsset, setEditingAsset] = useState(null);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    // Delete Modal State
+    const [assetToDelete, setAssetToDelete] = useState(null);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false); // Loading state for delete operation
+    const [deleteError, setDeleteError] = useState(''); // Error state for delete operation
+
 
     const fetchData = useCallback(async () => {
         console.log(`[EntityPage ${entitySlug}] Fetching data...`);
@@ -88,7 +96,19 @@ function EntityPage() {
                     const isCurrentlyDisabledPrefixed = currentFolderName.startsWith('DISABLED_');
                     const baseFolderName = isCurrentlyDisabledPrefixed ? currentFolderName.substring(9) : currentFolderName; // Remove 'DISABLED_' prefix (9 chars)
 
-                    const updatedFolderName = newIsEnabledState ? baseFolderName : `DISABLED_${baseFolderName}`;
+                    // --- FIX: Handle potential nested paths during toggle renaming ---
+                    const parts = baseFolderName.split('/');
+                    const filename = parts.pop() || ''; // Get the last part (filename)
+                    const parentPath = parts.join('/'); // Get the preceding path parts
+
+                    let updatedFolderName;
+                    if (newIsEnabledState) {
+                        updatedFolderName = baseFolderName; // Enabled state uses the clean base name
+                    } else {
+                        const disabledFilename = `DISABLED_${filename}`;
+                        updatedFolderName = parentPath ? `${parentPath}/${disabledFilename}` : disabledFilename; // Reconstruct path with disabled prefix
+                    }
+
                     const updatedAsset = { ...asset, is_enabled: newIsEnabledState, folder_name: updatedFolderName };
                     console.log(`[EntityPage ${entitySlug}] Updated asset ${assetId} state:`, updatedAsset);
                     return updatedAsset;
@@ -96,11 +116,7 @@ function EntityPage() {
                 return asset;
             })
         );
-        // This state update might not be immediately reflected if we try to read `assets` right after this line.
-        // Updating mod count based on this state change directly is difficult.
-        // Option 1: Simple +/- 1 (might drift if initial state was wrong)
-        // Option 2: Refetch entity details (reliable but slower)
-        // Let's try Option 2 for reliability.
+        // Refetch entity details (includes mod_count)
          invoke('get_entity_details', { entitySlug })
             .then(updatedEntityDetails => {
                 console.log(`[EntityPage ${entitySlug}] Refetched entity details after toggle:`, updatedEntityDetails);
@@ -108,7 +124,7 @@ function EntityPage() {
             })
             .catch(err => console.error(`[EntityPage ${entitySlug}] Failed to refetch entity details after toggle:`, err));
 
-    }, [entitySlug]); // Add entitySlug dependency because we refetch
+    }, [entitySlug]);
 
 
     const goBack = () => {
@@ -116,8 +132,7 @@ function EntityPage() {
             navigate(-1);
          } else {
              // Fallback to default category if no history
-             // Determine default based on current entity? Or just always characters?
-             const fallbackCategory = entity?.category_id === 1 ? 'characters' : 'characters'; // Example logic, needs refinement based on category IDs
+             const fallbackCategory = entity?.category_id === 1 ? 'characters' : 'characters'; // Example logic
              navigate(`/category/${fallbackCategory}`);
          }
     };
@@ -134,17 +149,57 @@ function EntityPage() {
         setEditingAsset(null); // Clear editing state on close
     }, []);
 
-    const handleSaveEditSuccess = useCallback((updatedAssetData) => {
-         console.log("Saving successful, updating asset in state:", updatedAssetData);
-        // Update the asset list state with the new data
-        setAssets(currentAssets =>
-            currentAssets.map(asset =>
-                asset.id === updatedAssetData.id ? updatedAssetData : asset
-            )
-        );
+    const handleSaveEditSuccess = useCallback((originalAssetId, newTargetEntitySlug) => {
+        console.log("Save successful, processing result for asset ID:", originalAssetId, "New Slug:", newTargetEntitySlug);
         handleCloseEditModal(); // Close the modal on success
-        // Optionally, force ModCard image reload if needed, though changing asset data should trigger its useEffect
-    }, [handleCloseEditModal]);
+
+        if (newTargetEntitySlug && newTargetEntitySlug !== entitySlug) {
+             // Relocation occurred, remove from current list
+             console.log(`Asset ${originalAssetId} relocated from ${entitySlug} to ${newTargetEntitySlug}. Removing from list.`);
+             setAssets(currentAssets => currentAssets.filter(asset => asset.id !== originalAssetId));
+              // Decrement mod count locally for immediate feedback (will be corrected on next full fetch)
+              setEntity(currentEntity => ({ ...currentEntity, mod_count: Math.max(0, (currentEntity?.mod_count || 0) - 1) }));
+        } else {
+            // No relocation, just refresh data for this entity to get updated info
+            console.log(`Asset ${originalAssetId} updated within ${entitySlug}. Refreshing data.`);
+            fetchData(); // Refetch all data for the current entity
+        }
+    }, [handleCloseEditModal, entitySlug, fetchData]);
+
+    // --- Delete Modal Handlers ---
+    const handleOpenDeleteModal = useCallback((asset) => {
+        setAssetToDelete(asset);
+        setIsDeleteModalOpen(true);
+        setDeleteError(''); // Clear previous errors
+    }, []);
+
+    const handleCloseDeleteModal = useCallback(() => {
+        setIsDeleteModalOpen(false);
+        setAssetToDelete(null);
+        setIsDeleting(false); // Ensure loading state is reset
+        setDeleteError('');
+    }, []);
+
+    const handleConfirmDelete = useCallback(async () => {
+        if (!assetToDelete) return;
+        setIsDeleting(true);
+        setDeleteError('');
+        try {
+            await invoke('delete_asset', { assetId: assetToDelete.id });
+            console.log(`Asset ${assetToDelete.id} deleted successfully.`);
+            // Remove from state
+            setAssets(currentAssets => currentAssets.filter(asset => asset.id !== assetToDelete.id));
+            // Update mod count in entity state (will be corrected on next full fetch if needed)
+             setEntity(currentEntity => ({ ...currentEntity, mod_count: Math.max(0, (currentEntity?.mod_count || 0) - 1) }));
+             handleCloseDeleteModal();
+        } catch (err) {
+            const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown delete error');
+            console.error(`Failed to delete asset ${assetToDelete.id}:`, errorString);
+            setDeleteError(`Failed to delete: ${errorString}`);
+             setIsDeleting(false); // Keep modal open to show error
+        }
+    }, [assetToDelete, handleCloseDeleteModal]);
+
 
     if (loading) return <div className="placeholder-text">Loading entity details for {entitySlug}... <i className="fas fa-spinner fa-spin"></i></div>;
     if (error) return <div className="placeholder-text" style={{ color: 'var(--danger)' }}>Error: {error}</div>;
@@ -157,9 +212,6 @@ function EntityPage() {
     const weapon = details?.weapon;
     const weaponIconClass = weapon ? (weaponIconsFA[weapon] || 'fas fa-question-circle') : null;
 
-    // Construct avatar URL - CHECKING THIS LOGIC
-    // If base_image exists, construct path relative to public/images/entities/
-    // Otherwise use the placeholder API/text-based placeholder
      const avatarUrl = entity.base_image
         ? `/images/entities/${entity.base_image}` // Assumes images are in public/images/entities/
         : DEFAULT_ENTITY_PLACEHOLDER_IMAGE; // Fallback placeholder
@@ -188,29 +240,15 @@ function EntityPage() {
                     ></i>
                     {entity.name} Mods
                 </h1>
-                {/* Button group removed for brevity, can be added back if needed */}
             </div>
 
             <div className="character-profile">
-                {/* Entity Avatar */}
                 <div
                     className="character-avatar"
                     style={{ backgroundImage: `url('${avatarUrl}')` }}
-                    // onError doesn't work reliably for background images.
-                    // We might need an inner <img> tag or rely on the fallback in the URL construction.
-                    // Let's assume the URL construction handles the fallback for now.
                 >
-                 {/* If using an img tag instead: */}
-                 {/* <img
-                     src={avatarUrl}
-                     alt={`${entity.name} Avatar`}
-                     onError={handleAvatarError}
-                     style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }}
-                     loading="lazy"
-                 /> */}
                 </div>
 
-                {/* Entity Info */}
                 <div className="character-info">
                     <h2 className="character-name">
                         {entity.name}
@@ -251,12 +289,13 @@ function EntityPage() {
                                 asset={asset}
                                 entitySlug={entitySlug}
                                 onToggleComplete={handleToggleComplete}
-                                onEdit={handleOpenEditModal} // Pass the edit handler
+                                onEdit={handleOpenEditModal}
+                                onDelete={handleOpenDeleteModal} // Pass delete handler
                             />
                         ))
                     ) : (
                         <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
-                           {/* No mods message */}
+                           No mods found for {entity.name}. You can import mods via the sidebar.
                         </p>
                     )}
                 </div>
@@ -266,10 +305,28 @@ function EntityPage() {
             {isEditModalOpen && editingAsset && (
                 <ModEditModal
                     asset={editingAsset}
+                    currentEntitySlug={entitySlug} // Pass current slug for comparison logic in modal
                     onClose={handleCloseEditModal}
-                    onSaveSuccess={handleSaveEditSuccess}
+                    onSaveSuccess={(newTargetSlug) => handleSaveEditSuccess(editingAsset.id, newTargetSlug)} // Pass original ID and new slug
                 />
             )}
+
+             {/* Delete Confirmation Modal */}
+            {isDeleteModalOpen && assetToDelete && (
+                 <ConfirmationModal
+                    isOpen={isDeleteModalOpen}
+                    onClose={handleCloseDeleteModal}
+                    onConfirm={handleConfirmDelete}
+                    title="Confirm Deletion"
+                    confirmText="Delete"
+                    confirmButtonVariant="danger" // Style the confirm button as danger
+                    isLoading={isDeleting}
+                    errorMessage={deleteError}
+                 >
+                    Are you sure you want to permanently delete the mod "{assetToDelete.name}"?
+                    This action will remove the mod files from your disk and cannot be undone.
+                 </ConfirmationModal>
+             )}
         </div>
     );
 }

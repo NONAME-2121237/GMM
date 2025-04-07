@@ -1,4 +1,4 @@
-// src/components/ModCard.jsx
+// --- START OF FILE src/components/ModCard.jsx ---
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 
@@ -14,7 +14,7 @@ const parseTags = (tagString) => {
 const FALLBACK_MOD_IMAGE = '/api/placeholder/100/60?text=No+Preview';
 const FALLBACK_MOD_IMAGE_BG = `url('${FALLBACK_MOD_IMAGE}')`;
 
-function ModCard({ asset, entitySlug, onToggleComplete, onEdit }) {
+function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete }) { // Added onDelete prop
     // --- State ---
     const isEnabled = asset.is_enabled; // Derived from props
     const folderNameOnDisk = asset.folder_name; // Derived from props, reflects disk state
@@ -44,6 +44,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit }) {
         setImageBgCss(FALLBACK_MOD_IMAGE_BG);
         setImageError(false);
         setImageLoading(false);
+        setToggleError(null); // Reset toggle error on asset change too
         cleanupObjectUrl(); // Clean up previous URL before starting
 
         if (asset.image_filename && folderNameOnDisk) {
@@ -156,6 +157,14 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit }) {
         onEdit(asset); // Call parent's edit handler
     }, [asset, onEdit]);
 
+    // Delete Handler
+    const handleDeleteClick = useCallback((e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onDelete(asset); // Call parent's delete handler
+    }, [asset, onDelete]);
+
+
     // --- Style for Image Container ---
     const imageContainerStyle = useMemo(() => ({
         marginBottom: '15px',
@@ -192,29 +201,44 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit }) {
             {/* Mod Header */}
              <div className="mod-header">
                 <div className="mod-title">{asset.name}</div>
-                {/* Edit Button */}
-                <button
-                    onClick={handleEditClick}
-                    className="btn-icon" // Add a style for icon buttons if needed
-                    title="Edit Mod Info"
-                    style={{ background:'none', border:'none', color:'var(--light)', cursor:'pointer', fontSize:'16px', padding:'5px', marginLeft:'10px', opacity: 0.7 }}
-                    onMouseOver={(e) => e.currentTarget.style.opacity = 1}
-                    onMouseOut={(e) => e.currentTarget.style.opacity = 0.7}
-                    disabled={isToggling} // Disable edit while toggling
-                >
-                    <i className="fas fa-pencil-alt fa-fw"></i>
-                </button>
-                {/* Toggle Switch */}
-                <label className="toggle-switch">
-                    <input
-                        type="checkbox"
-                        checked={isEnabled}
-                        onChange={handleToggle}
+                 {/* Action Buttons Container */}
+                 <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', gap: '5px' }}>
+                    {/* Edit Button */}
+                    <button
+                        onClick={handleEditClick}
+                        className="btn-icon" // Add a style for icon buttons if needed
+                        title="Edit Mod Info"
+                        style={{ background:'none', border:'none', color:'var(--light)', cursor:'pointer', fontSize:'15px', padding:'5px', opacity: 0.7 }}
+                        onMouseOver={(e) => e.currentTarget.style.opacity = 1}
+                        onMouseOut={(e) => e.currentTarget.style.opacity = 0.7}
+                        disabled={isToggling} // Disable edit while toggling
+                    >
+                        <i className="fas fa-pencil-alt fa-fw"></i>
+                    </button>
+                    {/* Delete Button */}
+                    <button
+                        onClick={handleDeleteClick}
+                        className="btn-icon"
+                        title="Delete Mod"
+                        style={{ background:'none', border:'none', color:'var(--danger)', cursor:'pointer', fontSize:'15px', padding:'5px', opacity: 0.7 }}
+                        onMouseOver={(e) => e.currentTarget.style.opacity = 1}
+                        onMouseOut={(e) => e.currentTarget.style.opacity = 0.7}
                         disabled={isToggling}
-                        aria-label={`Enable/Disable ${asset.name} mod`}
-                    />
-                    <span className="slider"></span>
-                </label>
+                    >
+                        <i className="fas fa-trash-alt fa-fw"></i>
+                    </button>
+                    {/* Toggle Switch */}
+                    <label className="toggle-switch" style={{ marginLeft: '5px' }}>
+                        <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={handleToggle}
+                            disabled={isToggling}
+                            aria-label={`Enable/Disable ${asset.name} mod`}
+                        />
+                        <span className="slider"></span>
+                    </label>
+                 </div>
             </div>
 
             {/* Tags */}

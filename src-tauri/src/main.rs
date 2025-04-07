@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, Arc};
 use tauri::{
     command, generate_context, generate_handler, AppHandle, Manager, State, api::dialog,
-    api::process::Command
+    api::process::Command, Window
 };
 use thiserror::Error;
 use once_cell::sync::Lazy;
@@ -42,6 +42,16 @@ struct EntityDefinition {
 struct CategoryDefinition {
     name: String,
     entities: Vec<EntityDefinition>,
+}
+
+// Struct to hold asset info needed for delete/relocate
+#[derive(Debug)]
+struct AssetLocationInfo {
+    id: i64,
+    clean_relative_path: String, // Stored relative path (e.g., category/entity/mod_name)
+    entity_id: i64,
+    category_slug: String,
+    entity_slug: String,
 }
 
 // Type alias for the top-level structure (HashMap: category_slug -> CategoryDefinition)
@@ -145,6 +155,30 @@ struct ArchiveAnalysisResult {
 }
 
 // --- Helper Functions for Deduction ---
+
+fn get_asset_location_info(conn: &Connection, asset_id: i64) -> Result<AssetLocationInfo, AppError> {
+    conn.query_row(
+        "SELECT a.id, a.folder_name, a.entity_id, c.slug, e.slug
+         FROM assets a
+         JOIN entities e ON a.entity_id = e.id
+         JOIN categories c ON e.category_id = c.id
+         WHERE a.id = ?1",
+        params![asset_id],
+        |row| {
+            Ok(AssetLocationInfo {
+                id: row.get(0)?,
+                // Ensure forward slashes when reading
+                clean_relative_path: row.get::<_, String>(1)?.replace("\\", "/"),
+                entity_id: row.get(2)?,
+                category_slug: row.get(3)?,
+                entity_slug: row.get(4)?,
+            })
+        }
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Asset with ID {} not found", asset_id)),
+        _ => AppError::Sqlite(e),
+    })
+}
 
 fn has_ini_file(dir_path: &PathBuf) -> bool {
     if !dir_path.is_dir() { return false; }
@@ -556,6 +590,40 @@ fn get_categories(db_state: State<DbState>) -> CmdResult<Vec<Category>> {
         })
     }).map_err(|e| e.to_string())?; // Convert error
     category_iter.collect::<SqlResult<Vec<Category>>>().map_err(|e| e.to_string()) // Convert error
+}
+
+#[command]
+fn get_category_entities(category_slug: String, db_state: State<DbState>) -> CmdResult<Vec<Entity>> {
+    // This is almost identical to get_entities_by_category, could be combined later if needed
+    let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+     let category_id: i64 = conn.query_row(
+        "SELECT id FROM categories WHERE slug = ?1",
+        params![category_slug],
+        |row| row.get(0),
+    ).map_err(|e| match e { // Map specific internal errors to String
+        rusqlite::Error::QueryReturnedNoRows => format!("Category '{}' not found", category_slug),
+        _ => e.to_string(),
+    })?;
+
+     // Only fetch fields needed for the dropdown (id, name, slug)
+     let mut stmt = conn.prepare(
+        "SELECT id, name, slug FROM entities WHERE category_id = ?1 ORDER BY name"
+    ).map_err(|e| e.to_string())?;
+
+    let entity_iter = stmt.query_map(params![category_id], |row| {
+        // Return a simplified struct or tuple if Entity struct is too heavy
+        Ok(Entity {
+            id: row.get(0)?,
+            category_id: category_id, // We know this
+            name: row.get(1)?,
+            slug: row.get(2)?,
+            description: None, // Not needed for dropdown
+            details: None,     // Not needed for dropdown
+            base_image: None,  // Not needed for dropdown
+            mod_count: 0       // Not needed for dropdown
+        })
+    }).map_err(|e| e.to_string())?;
+    entity_iter.collect::<SqlResult<Vec<Entity>>>().map_err(|e| e.to_string())
 }
 
 #[command]
@@ -1125,68 +1193,182 @@ fn update_asset_info(
     author: Option<String>,
     category_tag: Option<String>,
     selected_image_absolute_path: Option<String>,
-    db_state: State<DbState> // Keep state to acquire lock initially
+    new_target_entity_slug: Option<String>, // Added for relocation
+    db_state: State<DbState>
 ) -> CmdResult<()> {
-    println!("[update_asset_info] Start for asset ID: {}", asset_id);
+    println!("[update_asset_info] Start for asset ID: {}. Relocate to: {:?}", asset_id, new_target_entity_slug);
 
-    // Acquire the single lock needed for this operation
     let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
-    let conn = &*conn_guard; // Get a reference to the Connection from the guard
+    let conn = &*conn_guard;
     println!("[update_asset_info] DB lock acquired.");
 
-    // --- 1. Get Current Asset Info (Uses 'conn') ---
-    let (clean_relative_path_str, current_image_filename): (String, Option<String>) = conn.query_row(
-        "SELECT folder_name, image_filename FROM assets WHERE id = ?1",
-        params![asset_id],
-        |row| Ok((row.get(0)?, row.get(1)?))
-    ).map_err(|e| format!("Failed to query current asset info for ID {}: {}", asset_id, e))?;
-    let clean_relative_path_str = clean_relative_path_str.replace("\\", "/");
-    let clean_relative_path = PathBuf::from(&clean_relative_path_str);
-    println!("[update_asset_info] Found clean relative path: {}", clean_relative_path.display());
+    // --- 1. Get Current Asset Location Info ---
+    let current_info = get_asset_location_info(conn, asset_id)
+        .map_err(|e| format!("Failed to get current asset info: {}", e))?; // Use internal error type mapping
+    println!("[update_asset_info] Current Info: {:?}", current_info);
 
-    // --- 2. Get Base Mods Path (Uses 'conn' via get_setting_value directly) ---
-    let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER) // Pass 'conn' directly
-        .map_err(|e| format!("Failed to query mods folder setting: {}", e))? // Convert AppError to String
-        .ok_or_else(|| "Mods folder path not set".to_string())?; // Convert Option error to String
-    let base_mods_path = PathBuf::from(base_mods_path_str);
-    println!("[update_asset_info] Found base mods path: {}", base_mods_path.display());
+    // --- 2. Check if Relocation is Requested ---
+    // FIX 1: Borrow `current_info.entity_slug`
+    let needs_relocation = new_target_entity_slug.is_some() && new_target_entity_slug.as_deref() != Some(&current_info.entity_slug);
 
-    // --- 3. Construct & Check Full Mod Folder Path ---
-    let mod_folder_path = base_mods_path.join(&clean_relative_path);
-    println!("[update_asset_info] Constructed mod folder path: {}", mod_folder_path.display());
-    // **** CRITICAL FIX: Check if the path is actually a directory ****
-    // The path stored is still bad (ends in .rar), so this check MUST fail
-    if !mod_folder_path.is_dir() {
-         // Check if the *parent* exists instead, might be more useful info
-         let parent_dir = mod_folder_path.parent().unwrap_or(&base_mods_path); // Fallback
-          let parent_exists = parent_dir.is_dir();
-         eprintln!("[update_asset_info] Error: Target path is not a directory (Parent exists: {}). Path: {}", parent_exists, mod_folder_path.display());
-         // Inform the user that the stored path is invalid (likely from a bad scan)
-         return Err(format!(
-            "Cannot update mod: The stored path '{}' is not a valid directory. Please rescan the mods folder to correct the database.",
-            clean_relative_path.display()
-        ));
-    }
-    println!("[update_asset_info] Mod folder path confirmed as directory.");
+    let mut final_entity_id = current_info.entity_id;
+    let mut final_relative_path_str = current_info.clean_relative_path.clone();
 
-    // --- 4. Handle Image Copying ---
-    let mut image_filename_to_save = current_image_filename;
-    println!("[update_asset_info] Checking if new image was selected...");
+    if needs_relocation {
+        let target_slug = new_target_entity_slug.unwrap(); // Safe unwrap due to check above
+        println!("[update_asset_info] Relocation requested to '{}'", target_slug);
+
+        // --- 3a. Get New Category/Entity Info ---
+        let (new_entity_id, new_category_slug): (i64, String) = conn.query_row(
+            "SELECT e.id, c.slug FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = ?1",
+            params![target_slug],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("New target entity '{}' not found.", target_slug),
+            _ => format!("DB Error getting new target entity info: {}", e)
+        })?;
+        println!("[update_asset_info] New target Entity ID: {}, Category Slug: {}", new_entity_id, new_category_slug);
+
+        // --- 3b. Get Base Mods Path ---
+        // FIX 2: Map AppError before using `?` on Option
+        let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
+            .map_err(|e| e.to_string())? // Map AppError -> String
+            .ok_or_else(|| "Mods folder path not set".to_string())?;
+        let base_mods_path = PathBuf::from(base_mods_path_str);
+        println!("[update_asset_info] Base mods path: {}", base_mods_path.display());
+
+        // --- 3c. Determine Current Full Path (Check Enabled/Disabled) ---
+        let current_relative_path_buf = PathBuf::from(&current_info.clean_relative_path);
+        let current_filename_osstr = current_relative_path_buf.file_name().ok_or_else(|| format!("Could not extract filename from current DB path: {}", current_info.clean_relative_path))?;
+        let current_filename_str = current_filename_osstr.to_string_lossy();
+        if current_filename_str.is_empty() { return Err("Current filename is empty".to_string()); }
+        let disabled_filename = format!("{}{}", DISABLED_PREFIX, current_filename_str);
+        let relative_parent_path = current_relative_path_buf.parent();
+
+        let full_path_if_enabled = base_mods_path.join(&current_relative_path_buf);
+        let full_path_if_disabled = match relative_parent_path {
+           Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
+           _ => base_mods_path.join(&disabled_filename),
+        };
+
+        let current_full_path = if full_path_if_enabled.is_dir() {
+            full_path_if_enabled
+        } else if full_path_if_disabled.is_dir() {
+            full_path_if_disabled
+        } else {
+            return Err(format!(
+                "Cannot relocate mod '{}': Source folder not found at expected locations derived from DB path '{}' (Checked {} and {}).",
+                current_info.id,
+                current_info.clean_relative_path,
+                full_path_if_enabled.display(),
+                full_path_if_disabled.display()
+            ));
+        };
+        println!("[update_asset_info] Current full path on disk: {}", current_full_path.display());
+
+
+        // --- 3d. Construct New Relative and Full Paths ---
+        let mod_base_name = current_filename_str.trim_start_matches(DISABLED_PREFIX); // Use the clean name for the new path
+        let new_relative_path_buf = PathBuf::new()
+            .join(&new_category_slug)
+            .join(&target_slug) // Use the new entity slug provided
+            .join(mod_base_name);
+        final_relative_path_str = new_relative_path_buf.to_string_lossy().replace("\\", "/"); // Store with forward slashes
+
+        // Construct the new *full* destination path. Respect the original enabled/disabled state by using the base name or prefixed name.
+        let new_filename_to_use = if current_full_path.file_name().map_or(false, |name| name.to_string_lossy().starts_with(DISABLED_PREFIX)) {
+            disabled_filename // Keep disabled prefix if it was disabled
+        } else {
+            mod_base_name.to_string() // Use clean name if it was enabled
+        };
+
+        let new_full_dest_path = base_mods_path
+             .join(&new_category_slug)
+             .join(&target_slug)
+             .join(&new_filename_to_use); // Use the potentially prefixed name
+
+        println!("[update_asset_info] New relative path for DB: {}", final_relative_path_str);
+        println!("[update_asset_info] New full destination path on disk: {}", new_full_dest_path.display());
+
+        // --- 3e. Create Parent Directory for Destination ---
+        if let Some(parent) = new_full_dest_path.parent() {
+             fs::create_dir_all(parent)
+                 .map_err(|e| format!("Failed to create destination parent directory '{}': {}", parent.display(), e))?;
+        } else { return Err(format!("Could not determine parent directory for new path: {}", new_full_dest_path.display())); }
+
+
+        // --- 3f. Perform Filesystem Move ---
+        if new_full_dest_path.exists() {
+            // This should ideally not happen if mod folder names are unique enough within an entity scope
+            // but moving across entities could cause collision. Error out for safety.
+             eprintln!("[update_asset_info] Error: Target relocation path already exists: {}", new_full_dest_path.display());
+             return Err(format!("Cannot relocate: Target path '{}' already exists.", new_full_dest_path.display()));
+        }
+        fs::rename(&current_full_path, &new_full_dest_path)
+            .map_err(|e| format!("Failed to move mod folder from '{}' to '{}': {}", current_full_path.display(), new_full_dest_path.display(), e))?;
+        println!("[update_asset_info] Successfully moved mod folder.");
+
+        // Update final_entity_id for the DB update later
+        final_entity_id = new_entity_id;
+
+    } // --- End Relocation Block ---
+
+
+    // --- 4. Handle Image Copying (Common Logic) ---
+    // Get Base Mods Path (if not already fetched during relocation)
+    let base_mods_path = if needs_relocation {
+         // Already fetched and checked
+         PathBuf::from(get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER).map_err(|e|e.to_string())?.ok_or_else(|| "Mods folder path not set".to_string())?)
+    } else {
+         // FIX 2: Map AppError before using `?` on Option
+         PathBuf::from(get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER).map_err(|e|e.to_string())?.ok_or_else(|| "Mods folder path not set".to_string())?)
+    };
+
+    // Determine the correct mod folder path *after* potential relocation
+    // We use final_relative_path_str which now points to the new location if moved
+    let final_mod_folder_path = base_mods_path.join(&final_relative_path_str);
+    println!("[update_asset_info] Final mod folder path for image handling: {}", final_mod_folder_path.display());
+
+    // Sanity check: the folder should exist after move/or initially
+    // Need to check both potential enabled/disabled states at the *new* location
+    let final_filename_osstr = final_mod_folder_path.file_name().ok_or_else(|| format!("Could not extract filename from final path: {}", final_mod_folder_path.display()))?;
+    let final_filename_str = final_filename_osstr.to_string_lossy();
+    let final_clean_filename = final_filename_str.trim_start_matches(DISABLED_PREFIX);
+    let final_disabled_filename = format!("{}{}", DISABLED_PREFIX, final_clean_filename);
+    let final_parent_path = final_mod_folder_path.parent().ok_or_else(|| format!("Cannot get parent of final path: {}", final_mod_folder_path.display()))?;
+
+    let final_path_enabled_check = final_parent_path.join(final_clean_filename);
+    let final_path_disabled_check = final_parent_path.join(final_disabled_filename);
+
+    let final_path_on_disk = if final_path_enabled_check.is_dir() {
+        final_path_enabled_check
+    } else if final_path_disabled_check.is_dir() {
+        final_path_disabled_check
+    } else {
+         // If neither exists after the move (or initially if no move), something is wrong
+         eprintln!("[update_asset_info] Critical Error: Final mod folder not found on disk after potential move. Checked {} and {}", final_path_enabled_check.display(), final_path_disabled_check.display());
+         return Err(format!("Mod folder not found at final destination '{}' after update/move.", final_parent_path.display()));
+    };
+    println!("[update_asset_info] Confirmed final path on disk for image copy: {}", final_path_on_disk.display());
+
+
+    let mut image_filename_to_save = current_info.clean_relative_path.split('/').last().map(|s| s.to_string()); // Use existing filename initially
 
     if let Some(source_path_str) = selected_image_absolute_path {
         println!("[update_asset_info] New image selected: {}", source_path_str);
         let source_path = PathBuf::from(&source_path_str);
-        println!("[update_asset_info] Checking source image path: {}", source_path.display());
         if !source_path.is_file() {
              eprintln!("[update_asset_info] Error: Selected source image file does not exist.");
              return Err(format!("Selected image file does not exist: {}", source_path.display()));
         }
-        println!("[update_asset_info] Source image path exists.");
 
-        let target_image_path = mod_folder_path.join(TARGET_IMAGE_FILENAME);
+        // Use the confirmed path on disk
+        let target_image_path = final_path_on_disk.join(TARGET_IMAGE_FILENAME);
         println!("[update_asset_info] Target image path: {}", target_image_path.display());
 
-        println!("[update_asset_info] Attempting to copy image...");
+        // Ensure parent directory exists (it must if we found final_path_on_disk)
+        // fs::create_dir_all(final_path_on_disk.parent().unwrap()) ... // Not needed
+
         match fs::copy(&source_path, &target_image_path) {
             Ok(_) => {
                 println!("[update_asset_info] Image copied successfully.");
@@ -1199,19 +1381,23 @@ fn update_asset_info(
         }
     } else {
          println!("[update_asset_info] No new image selected.");
+         // Get existing filename from the current info
+         image_filename_to_save = conn.query_row::<Option<String>, _, _>("SELECT image_filename FROM assets WHERE id=?1", params![asset_id], |r|r.get(0)).ok().flatten();
     }
     println!("[update_asset_info] Image handling complete. Filename to save: {:?}", image_filename_to_save);
 
-    // --- 5. Update Database (Uses 'conn') ---
-    println!("[update_asset_info] Attempting DB update for asset ID {}", asset_id);
+    // --- 5. Update Database (Common Logic) ---
+    println!("[update_asset_info] Attempting DB update for asset ID {} with final_entity_id {} and final_relative_path {}", asset_id, final_entity_id, final_relative_path_str);
     let changes = conn.execute(
-        "UPDATE assets SET name = ?1, description = ?2, author = ?3, category_tag = ?4, image_filename = ?5 WHERE id = ?6",
+        "UPDATE assets SET name = ?1, description = ?2, author = ?3, category_tag = ?4, image_filename = ?5, entity_id = ?6, folder_name = ?7 WHERE id = ?8",
         params![
             name,
             description,
             author,
             category_tag,
             image_filename_to_save,
+            final_entity_id,         // Use the potentially updated entity ID
+            final_relative_path_str, // Use the potentially updated relative path
             asset_id
         ]
     ).map_err(|e| format!("Failed to update asset info in DB for ID {}: {}", asset_id, e))?;
@@ -1219,11 +1405,77 @@ fn update_asset_info(
 
     if changes == 0 {
         eprintln!("[update_asset_info] Warning: DB update affected 0 rows for asset ID {}.", asset_id);
-        // Don't necessarily error out, maybe the ID was wrong but flow continued? Log is sufficient.
     }
 
     println!("[update_asset_info] Asset ID {} updated successfully. END", asset_id);
-    Ok(()) // Lock ('conn_guard') is released automatically when function returns
+    Ok(())
+}
+
+#[command]
+fn delete_asset(asset_id: i64, db_state: State<DbState>) -> CmdResult<()> {
+     println!("[delete_asset] Attempting to delete asset ID: {}", asset_id);
+
+    let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let conn = &*conn_guard;
+    println!("[delete_asset] DB lock acquired.");
+
+    // --- 1. Get Asset Info ---
+    let asset_info = get_asset_location_info(conn, asset_id)
+        .map_err(|e| format!("Failed to get asset info for deletion: {}", e))?;
+    println!("[delete_asset] Asset info found: {:?}", asset_info);
+
+    // --- 2. Get Base Mods Path ---
+    let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
+        .map_err(|e| format!("Failed to query mods folder setting: {}", e))?
+        .ok_or_else(|| "Mods folder path not set".to_string())?;
+    let base_mods_path = PathBuf::from(base_mods_path_str);
+
+    // --- 3. Determine Full Path on Disk (Check Enabled/Disabled) ---
+     let relative_path_buf = PathBuf::from(&asset_info.clean_relative_path);
+     let filename_osstr = relative_path_buf.file_name().ok_or_else(|| format!("Could not extract filename from DB path: {}", asset_info.clean_relative_path))?;
+     let filename_str = filename_osstr.to_string_lossy();
+     let disabled_filename = format!("{}{}", DISABLED_PREFIX, filename_str);
+     let relative_parent_path = relative_path_buf.parent();
+
+     let full_path_if_enabled = base_mods_path.join(&relative_path_buf);
+     let full_path_if_disabled = match relative_parent_path {
+        Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
+        _ => base_mods_path.join(&disabled_filename),
+     };
+
+    let path_to_delete = if full_path_if_enabled.is_dir() {
+        Some(full_path_if_enabled)
+    } else if full_path_if_disabled.is_dir() {
+        Some(full_path_if_disabled)
+    } else {
+         // Folder not found, maybe already deleted? Log a warning but proceed to DB deletion.
+         eprintln!("[delete_asset] Warning: Mod folder not found on disk for asset ID {}. Checked {} and {}. Proceeding with DB deletion.",
+             asset_id, full_path_if_enabled.display(), full_path_if_disabled.display());
+         None
+    };
+
+    // --- 4. Delete Folder from Filesystem ---
+    if let Some(path) = path_to_delete {
+         println!("[delete_asset] Deleting folder: {}", path.display());
+         fs::remove_dir_all(&path)
+            .map_err(|e| format!("Failed to delete mod folder '{}': {}", path.display(), e))?;
+         println!("[delete_asset] Folder deleted successfully.");
+    }
+
+    // --- 5. Delete from Database ---
+    println!("[delete_asset] Deleting asset ID {} from database.", asset_id);
+    let changes = conn.execute("DELETE FROM assets WHERE id = ?1", params![asset_id])
+        .map_err(|e| format!("Failed to delete asset ID {} from database: {}", asset_id, e))?;
+
+     if changes == 0 {
+         // This shouldn't happen if get_asset_location_info succeeded, but good to log.
+         eprintln!("[delete_asset] Warning: Database delete affected 0 rows for asset ID {}.", asset_id);
+     } else {
+         println!("[delete_asset] Database entry deleted successfully.");
+     }
+
+    println!("[delete_asset] Asset ID {} deleted successfully. END", asset_id);
+    Ok(())
 }
 
 #[command]
@@ -1743,14 +1995,17 @@ fn main() {
             // Settings
             get_setting, set_setting, select_directory, select_file, launch_executable,
             // Core
-            get_categories, get_entities_by_category, get_entity_details,
+            get_categories,
+            get_category_entities, // Added
+            get_entities_by_category, get_entity_details,
             get_assets_for_entity, toggle_asset_enabled, get_asset_image_path,
             open_mods_folder,
             // Scan & Count
             scan_mods_directory,
             get_total_asset_count,
-            // Edit & Import
+            // Edit, Import, Delete
             update_asset_info,
+            delete_asset, // Added
             read_binary_file,
             select_archive_file,
             analyze_archive,
