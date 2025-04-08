@@ -13,7 +13,8 @@ use lazy_static::lazy_static;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params};
 use serde::{Serialize, Deserialize};
 use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{self, BufReader, BufRead, Read, Seek, Cursor};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, Arc};
 use tauri::{
@@ -25,7 +26,6 @@ use once_cell::sync::Lazy;
 use tauri::async_runtime;
 use toml;
 use tauri::api::file::read_binary;
-use std::io::{Read, Seek, Cursor}; // For reading zip files
 use zip::ZipArchive;
 
 // --- Structs for Deserializing Definitions ---
@@ -76,6 +76,12 @@ struct DashboardStats {
     disabled_mods: i64,
     uncategorized_mods: i64, // Mods in entities ending with "-other"
     category_counts: HashMap<String, i64>, // Category Name -> Count
+}
+
+#[derive(Serialize, Debug, Clone)] // Add Serialize
+struct KeybindInfo {
+    title: String,
+    key: String,
 }
 
 // Type alias for the top-level structure (HashMap: category_slug -> CategoryDefinition)
@@ -213,6 +219,52 @@ struct ArchiveAnalysisResult {
 }
 
 // --- Helper Functions for Deduction ---
+
+fn find_asset_ini_paths(conn: &Connection, asset_id: i64, base_mods_path: &PathBuf) -> Result<Vec<PathBuf>, AppError> {
+    println!("[find_asset_ini_paths] CALLED for asset ID: {}", asset_id);
+    let asset_info = get_asset_location_info(conn, asset_id)?;
+
+    let relative_path_buf = PathBuf::from(&asset_info.clean_relative_path);
+    let filename_osstr = relative_path_buf.file_name().ok_or_else(|| AppError::ModOperation(format!("Could not extract filename from DB path: {}", asset_info.clean_relative_path)))?;
+    let filename_str = filename_osstr.to_string_lossy();
+    if filename_str.is_empty() {
+        println!("[find_asset_ini_paths] ERROR: Filename extracted from DB path is empty: {}", asset_info.clean_relative_path);
+        return Err(AppError::ModOperation("Current filename is empty".to_string()));
+     }
+    let disabled_filename = format!("{}{}", DISABLED_PREFIX, filename_str);
+    let relative_parent_path = relative_path_buf.parent();
+
+    let full_path_if_enabled = base_mods_path.join(&relative_path_buf);
+    let full_path_if_disabled = match relative_parent_path {
+        Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
+        _ => base_mods_path.join(&disabled_filename),
+    };
+
+    let mod_folder_path = if full_path_if_enabled.is_dir() {
+        println!("[find_asset_ini_paths] Found enabled path: {}", full_path_if_enabled.display());
+        full_path_if_enabled
+    } else if full_path_if_disabled.is_dir() {
+        println!("[find_asset_ini_paths] Found disabled path: {}", full_path_if_disabled.display());
+        full_path_if_disabled
+    } else {
+        println!("[find_asset_ini_paths] Mod folder not found for asset ID {}. Checked {} and {}", asset_id, full_path_if_enabled.display(), full_path_if_disabled.display());
+        return Ok(Vec::new()); // Return empty vec if folder not found
+    };
+
+    // --- Collect all .ini files ---
+    let mut ini_paths = Vec::new();
+    for entry in WalkDir::new(&mod_folder_path).max_depth(1).min_depth(1).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            if let Some(ext) = entry.path().extension() {
+                if ext.to_ascii_lowercase() == "ini" {
+                    ini_paths.push(entry.path().to_path_buf());
+                }
+            }
+        }
+    }
+    println!("[find_asset_ini_paths] Found {} INI files in {}: {:?}", ini_paths.len(), mod_folder_path.display(), ini_paths);
+    Ok(ini_paths) // Return the collected paths
+}
 
 fn fetch_deduction_maps(conn: &Connection) -> SqlResult<DeductionMaps> {
     let mut category_slug_to_id = HashMap::new();
@@ -2663,6 +2715,333 @@ fn get_entities_by_category_with_counts(category_slug: String, db_state: State<D
     Ok(results)
 }
 
+#[command]
+fn overwrite_preset(preset_id: i64, db_state: State<DbState>) -> CmdResult<()> {
+    println!("[overwrite_preset] Attempting to overwrite preset ID: {}", preset_id);
+
+    let base_mods_path = get_mods_base_path_from_settings(&db_state)
+        .map_err(|e| format!("Cannot overwrite preset (failed to get mods path): {}", e))?;
+
+    let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let mut conn = conn_guard; // Get mutable access to the MutexGuard content
+
+    // Use a transaction for atomicity
+    let tx = conn.transaction().map_err(|e| format!("Failed to start transaction: {}", e))?;
+
+    // 1. Delete existing asset states for this preset
+    println!("[overwrite_preset] Deleting old asset states for preset {}", preset_id);
+    let delete_count = tx.execute("DELETE FROM preset_assets WHERE preset_id = ?1", params![preset_id])
+        .map_err(|e| format!("Failed to delete old preset asset states: {}", e))?;
+    println!("[overwrite_preset] Deleted {} old entries.", delete_count);
+
+    // 2. Fetch all current assets from the main assets table
+    let mut assets_to_save = Vec::<(i64, String)>::new(); // (asset_id, clean_relative_path)
+    { // Scope for the statement
+        let mut stmt = tx.prepare("SELECT id, folder_name FROM assets")
+           .map_err(|e| format!("Failed to prepare asset fetch statement: {}", e))?;
+        let asset_iter = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+                             .map_err(|e| format!("Failed to create asset query iterator: {}", e))?;
+
+        for row_result in asset_iter {
+            match row_result {
+                Ok((asset_id, folder_name)) => {
+                    assets_to_save.push((asset_id, folder_name.replace("\\", "/")));
+                }
+                Err(e) => {
+                    // Log error for the specific row but continue fetching others
+                    eprintln!("[overwrite_preset] Error fetching asset row from DB: {}", e);
+                    // Optionally rollback transaction and return error
+                    // tx.rollback().ok(); // Attempt rollback // Don't rollback here, let the error propagate
+                    // return Err(format!("Error fetching asset row from DB: {}", e)); // Let caller handle rollback on error
+                }
+            }
+        }
+    }
+    println!("[overwrite_preset] Fetched {} assets to check for saving.", assets_to_save.len());
+
+
+    // --- FIX: Add block scope for insert_stmt ---
+    let mut saved_count = 0;
+    let mut not_found_count = 0;
+    { // Start scope for insert_stmt
+        // 3. Iterate through fetched assets, check disk state, and insert into preset_assets
+        let mut insert_stmt = tx.prepare(
+            "INSERT INTO preset_assets (preset_id, asset_id, is_enabled) VALUES (?1, ?2, ?3)"
+        ).map_err(|e| format!("Failed to prepare insert statement for preset assets: {}", e))?;
+
+
+        for (asset_id, clean_relative_path_str) in assets_to_save {
+            let clean_relative_path = PathBuf::from(&clean_relative_path_str);
+            let filename_osstr = clean_relative_path.file_name().unwrap_or_default();
+            let filename_str = filename_osstr.to_string_lossy();
+            if filename_str.is_empty() { continue; }
+
+            // Check enabled state on disk
+            let full_path_if_enabled = base_mods_path.join(&clean_relative_path);
+            let is_currently_enabled_on_disk = if full_path_if_enabled.is_dir() {
+                1 // Enabled
+            } else {
+                // Check disabled state only to confirm it exists somewhere, otherwise skip saving
+                let disabled_filename = format!("{}{}", DISABLED_PREFIX, filename_str);
+                let relative_parent_path = clean_relative_path.parent();
+                let full_path_if_disabled = match relative_parent_path {
+                    Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
+                    _ => base_mods_path.join(&disabled_filename),
+                };
+                if full_path_if_disabled.is_dir() {
+                    0 // Disabled
+                } else {
+                    // Folder not found in either state - skip saving its state for this preset
+                    println!("[overwrite_preset] Warning: Asset ID {} folder not found on disk during preset save (path: {}). Skipping.", asset_id, clean_relative_path_str);
+                    not_found_count += 1;
+                    continue; // Skip to next asset
+                }
+            };
+
+            // Insert the current state into the preset
+            insert_stmt.execute(params![preset_id, asset_id, is_currently_enabled_on_disk])
+                .map_err(|e| format!("Failed to save state for asset {}: {}", asset_id, e))?;
+            saved_count += 1;
+        }
+    } // --- End scope for insert_stmt --- `insert_stmt` is dropped here, releasing the borrow on `tx`
+
+
+    // 4. Commit the transaction (Now safe as insert_stmt is out of scope)
+    tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
+    println!("[overwrite_preset] Preset ID {} overwritten successfully. Saved state for {} assets (skipped {} not found).", preset_id, saved_count, not_found_count);
+    Ok(())
+}
+
+#[command]
+fn get_ini_keybinds(asset_id: i64, db_state: State<DbState>) -> Result<Vec<KeybindInfo>, String> { // CmdResult is Result<T, String>
+    println!("[get_ini_keybinds] COMMAND START for asset ID: {}", asset_id);
+
+    let result: Result<Vec<KeybindInfo>, String> = (|| {
+        println!("[get_ini_keybinds] Attempting to acquire DB lock...");
+        let conn_guard = db_state.0.lock().map_err(|_| {
+            eprintln!("[get_ini_keybinds] ERROR: DB lock poisoned!");
+            "DB lock poisoned".to_string()
+        })?;
+        println!("[get_ini_keybinds] DB lock acquired.");
+        let conn = &*conn_guard; // Dereference the guard to get the connection
+
+        println!("[get_ini_keybinds] Attempting to get base mods path setting directly...");
+        // --- FIX: Provide arguments to query_row ---
+        let mods_folder_path_str_opt: Option<String> = conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1", // SQL query
+            params![SETTINGS_KEY_MODS_FOLDER],          // Parameters
+            |row| row.get(0),                           // Mapping closure
+        ).optional().map_err(|e| format!("DB error fetching mods folder setting: {}", e))?;
+        // --- End Fix ---
+
+        let base_mods_path = mods_folder_path_str_opt
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                eprintln!("[get_ini_keybinds] ERROR: Mods folder path not set in settings.");
+                "Mods folder path not set".to_string()
+            })?;
+        println!("[get_ini_keybinds] Base mods path obtained directly: {}", base_mods_path.display());
+
+
+        println!("[get_ini_keybinds] Calling find_asset_ini_paths...");
+        let ini_paths = find_asset_ini_paths(conn, asset_id, &base_mods_path)
+            .map_err(|e| {
+                eprintln!("[get_ini_keybinds] ERROR from find_asset_ini_paths: {}", e);
+                format!("Error finding INI paths: {}", e)
+            })?;
+        println!("[get_ini_keybinds] find_asset_ini_paths returned {} paths.", ini_paths.len());
+
+        // --- Release the lock explicitly before file I/O ---
+        drop(conn_guard);
+        println!("[get_ini_keybinds] DB lock released before file parsing.");
+
+        if ini_paths.is_empty() {
+             println!("[get_ini_keybinds] No INI files found for asset ID {}", asset_id);
+             return Ok(Vec::new()); // Return empty early if no INIs exist
+        }
+
+        let mut found_keybinds: Vec<KeybindInfo> = Vec::new();
+
+        for ini_path in ini_paths {
+            println!("[get_ini_keybinds] Parsing INI at: {}", ini_path.display());
+
+            let file = match File::open(&ini_path) {
+                 Ok(f) => f,
+                 Err(e) => {
+                     eprintln!("[get_ini_keybinds] ERROR: Failed to open INI file {}: {}. Skipping.", ini_path.display(), e);
+                     continue; // Skip to the next file if this one can't be opened
+                 }
+            };
+            let reader = BufReader::new(file);
+
+            let mut current_section_title: Option<String> = None;
+            let mut found_constants_tag = false; // Track if we are past '; Constants'
+
+            for line_result in reader.lines() {
+                let line_raw = match line_result {
+                    Ok(l) => l,
+                    Err(_) => {
+                         println!("[get_ini_keybinds] Warning: Skipping unreadable line in {}", ini_path.display());
+                         continue;
+                    }
+                };
+                let line = line_raw.trim(); // Trimmed version for processing
+
+                // Check for '; Constants' tag
+                 if !found_constants_tag && line.starts_with(';') && line[1..].trim_start().to_lowercase().contains("constants") {
+                    println!("[get_ini_keybinds] Found '; Constants' marker in {}", ini_path.display());
+                    found_constants_tag = true;
+                    continue; // Move to next line after finding the marker
+                }
+
+                // Only process sections/keys if constants tag was found
+                if found_constants_tag {
+                    if line.starts_with('[') && line.ends_with(']') {
+                        let section_name = line[1..line.len()-1].trim().to_string();
+                        // Check if it's a keybind section
+                        if section_name.to_lowercase().starts_with("key") {
+                            current_section_title = Some(section_name); // Store the title
+                        } else {
+                            current_section_title = None; // Reset title if not a keybind section
+                        }
+                    } else if current_section_title.is_some() && line.to_lowercase().starts_with("key") && line.contains('=') {
+                         // Only process 'key =' lines if we are inside a valid [Key...] section *after* '; Constants'
+                         if let Some(value_part) = line.splitn(2, '=').nth(1) {
+                             let keybind_value = value_part.trim().to_string();
+                             if !keybind_value.is_empty() {
+                                  // .unwrap() is safe because we checked is_some()
+                                  found_keybinds.push(KeybindInfo {
+                                      title: current_section_title.clone().unwrap(),
+                                      key: keybind_value,
+                                  });
+                             }
+                         }
+                    }
+                }
+            } // End line loop
+
+             // Check if keybinds were found in *this* file (after Constants)
+             if !found_keybinds.is_empty() {
+                println!("[get_ini_keybinds] SUCCESS: Found {} keybinds (after Constants) in {}. Returning.", found_keybinds.len(), ini_path.display());
+                return Ok(found_keybinds); // Found binds, return them
+            } else {
+                 println!("[get_ini_keybinds] No keybinds found (after Constants) in {}. Checking next file.", ini_path.display());
+             }
+        } // --- End loop through INI paths ---
+
+        // If loop finishes, no keybinds were found in any file
+        println!("[get_ini_keybinds] No keybinds found (after Constants) after checking all INI files for asset ID {}", asset_id);
+        Ok(Vec::new()) // Return empty Vec<KeybindInfo>
+
+    })(); // Execute the closure
+
+    println!("[get_ini_keybinds] COMMAND END for asset ID: {}", asset_id);
+    result // Return the result of the closure (Result<Vec<KeybindInfo>, String>)
+}
+
+#[command]
+fn open_asset_folder(asset_id: i64, db_state: State<DbState>) -> CmdResult<()> {
+    println!("[open_asset_folder] COMMAND START for asset ID: {}", asset_id);
+    let result = (|| {
+        // ... (Lock acquisition, base path fetch, asset info fetch - remain the same) ...
+        println!("[open_asset_folder] Attempting to acquire DB lock...");
+        let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+        println!("[open_asset_folder] DB lock acquired.");
+        let conn = &*conn_guard;
+
+        println!("[open_asset_folder] Attempting to get base mods path setting directly...");
+        let mods_folder_path_str_opt: Option<String> = conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![SETTINGS_KEY_MODS_FOLDER],
+            |row| row.get(0),
+        ).optional().map_err(|e| format!("DB error fetching mods folder setting: {}", e))?;
+
+        let base_mods_path = mods_folder_path_str_opt
+            .map(PathBuf::from)
+            .ok_or_else(|| "Mods folder path not set".to_string())?;
+        println!("[open_asset_folder] Base path obtained directly: {}", base_mods_path.display());
+
+        println!("[open_asset_folder] Getting asset location info...");
+        let asset_info = get_asset_location_info(conn, asset_id)
+         .map_err(|e| format!("Failed to get asset info for opening folder: {}", e))?;
+         println!("[open_asset_folder] Asset info found: {:?}", asset_info);
+
+
+        // --- Determine the actual mod folder path on disk ---
+        // Ensure clean_relative_path uses OS-specific separators when joining with base_mods_path
+        // PathBuf::join handles this, but let's be explicit if needed later.
+        // For now, assume PathBuf construction is correct.
+        let relative_path_buf = PathBuf::from(&asset_info.clean_relative_path.replace("/", std::path::MAIN_SEPARATOR_STR)); // Ensure DB path uses native sep before join? Less critical usually.
+
+        let filename_osstr = relative_path_buf.file_name().ok_or_else(|| format!("Could not extract filename from DB path: {}", asset_info.clean_relative_path))?;
+        let filename_str = filename_osstr.to_string_lossy();
+        let disabled_filename = format!("{}{}", DISABLED_PREFIX, filename_str);
+        let relative_parent_path = relative_path_buf.parent();
+
+        let full_path_if_enabled = base_mods_path.join(&relative_path_buf);
+        let full_path_if_disabled = match relative_parent_path {
+            Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
+            _ => base_mods_path.join(&disabled_filename),
+        };
+
+        let mod_folder_path_on_disk = if full_path_if_enabled.is_dir() {
+            Some(full_path_if_enabled)
+        } else if full_path_if_disabled.is_dir() {
+            Some(full_path_if_disabled)
+        } else {
+            None
+        };
+
+        drop(conn_guard);
+        println!("[open_asset_folder] DB lock released.");
+
+        match mod_folder_path_on_disk {
+            Some(mod_path) => {
+                println!("[open_asset_folder] Target mod folder: {}", mod_path.display());
+
+                let command_name;
+                let arg;
+
+                // --- FIX: Ensure backslashes for Windows explorer ---
+                if cfg!(target_os = "windows") {
+                    command_name = "explorer";
+                    // Convert to string and explicitly replace forward slashes
+                    arg = mod_path.to_string_lossy().replace("/", "\\");
+                } else if cfg!(target_os = "macos") {
+                    command_name = "open";
+                    arg = mod_path.to_str().ok_or("Invalid UTF-8 path string for macOS")?.to_string();
+                } else {
+                    command_name = "xdg-open";
+                    arg = mod_path.to_str().ok_or("Invalid UTF-8 path string for Linux")?.to_string();
+                }
+                // --- End Fix ---
+
+                println!("Executing: {} \"{}\"", command_name, arg);
+
+                match Command::new(command_name).args(&[arg]).spawn() {
+                    Ok((_, _child)) => {
+                        println!("File explorer command spawned successfully.");
+                        Ok(())
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to spawn file explorer command '{}': {}", command_name, e);
+                        Err(format!("Failed to open folder using '{}': {}", command_name, e))
+                    }
+                }
+            }
+            None => {
+                 println!("[open_asset_folder] Mod folder not found on disk for asset ID {}", asset_id);
+                 Err(format!("Mod folder not found for asset ID {}", asset_id))
+            }
+        }
+
+    })(); // Execute closure
+
+    println!("[open_asset_folder] COMMAND END for asset ID: {}", asset_id);
+    result
+}
+
 // --- Main Function ---
 fn main() {
     let context = generate_context!();
@@ -2703,9 +3082,11 @@ fn main() {
             read_archive_file_content,
             // Presets
             create_preset, get_presets, get_favorite_presets, apply_preset,
-            toggle_preset_favorite, delete_preset,
+            toggle_preset_favorite, delete_preset, overwrite_preset,
             // Dashboard & Version
-            get_dashboard_stats, get_app_version
+            get_dashboard_stats, get_app_version,
+            // Keybinds
+            get_ini_keybinds, open_asset_folder
         ])
         .run(context)
         .expect("error while running tauri application");

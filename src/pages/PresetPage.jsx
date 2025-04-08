@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
+import { useNavigate } from 'react-router-dom';
 import ConfirmationModal from '../components/ConfirmationModal';
 import ScanProgressPopup from '../components/ScanProgressPopup';
+
+// Event names constants
+const PRESET_APPLY_START_EVENT = "preset://apply_start";
+const PRESET_APPLY_PROGRESS_EVENT = "preset://apply_progress";
+const PRESET_APPLY_COMPLETE_EVENT = "preset://apply_complete";
+const PRESET_APPLY_ERROR_EVENT = "preset://apply_error";
 
 // Simple inline styles for PresetPage
 const styles = {
@@ -28,44 +35,50 @@ const styles = {
         background: 'var(--card-bg)', padding: '15px 20px', borderRadius: '8px',
         marginBottom: '10px', transition: 'background-color 0.2s ease',
     },
-    presetName: { flexGrow: 1, fontWeight: '500' },
-    presetActions: { display: 'flex', gap: '10px', alignItems: 'center' },
+    presetName: { flexGrow: 1, fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+    presetActions: { display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }, // Adjusted gap
     iconButton: {
         background: 'none', border: 'none', color: 'var(--light)',
         cursor: 'pointer', fontSize: '16px', padding: '5px', opacity: 0.7,
-        transition: 'opacity 0.2s ease',
+        transition: 'opacity 0.2s ease, color 0.2s ease', // Added color transition
+        display: 'flex', // Added for better icon centering
+        alignItems: 'center', // Added for better icon centering
+        justifyContent: 'center', // Added for better icon centering
+        width: '30px', // Give buttons a fixed width
+        height: '30px', // Give buttons a fixed height
     },
-    iconButtonHover: { // Can't use pseudo-class inline easily
-        opacity: 1,
-    },
+    // Removed iconButtonHover as pseudo-classes work better in CSS
     errorText: { color: 'var(--danger)', fontSize: '14px', marginTop: '10px', textAlign: 'center' },
     placeholderText: { color: 'rgba(255, 255, 255, 0.6)', textAlign: 'center', padding: '20px' },
 };
 
-// Event names constants (consider moving to a shared file)
-const PRESET_APPLY_START_EVENT = "preset://apply_start";
-const PRESET_APPLY_PROGRESS_EVENT = "preset://apply_progress";
-const PRESET_APPLY_COMPLETE_EVENT = "preset://apply_complete";
-const PRESET_APPLY_ERROR_EVENT = "preset://apply_error";
 
 function PresetPage() {
+    const navigate = useNavigate();
     const [presets, setPresets] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
     const [newPresetName, setNewPresetName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
     const [applyingPresetId, setApplyingPresetId] = useState(null);
+    // Delete State
     const [presetToDelete, setPresetToDelete] = useState(null);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState('');
-    // State for the progress popup
+    // Overwrite State
+    const [presetToOverwrite, setPresetToOverwrite] = useState(null);
+    const [isOverwriteModalOpen, setIsOverwriteModalOpen] = useState(false);
+    const [isOverwriting, setIsOverwriting] = useState(false);
+    const [overwriteError, setOverwriteError] = useState('');
+    // Apply Popup state
     const [showApplyPopup, setShowApplyPopup] = useState(false);
     const [applyProgressData, setApplyProgressData] = useState(null);
     const [applySummary, setApplySummary] = useState('');
     const [applyError, setApplyError] = useState('');
     const applyListenersRef = useRef({ unlistenStart: null, unlistenProgress: null, unlistenComplete: null, unlistenError: null });
 
+    // Fetch Presets
     const fetchPresets = useCallback(async () => {
         setIsLoading(true);
         setError('');
@@ -84,39 +97,44 @@ function PresetPage() {
         fetchPresets();
     }, [fetchPresets]);
 
-    // --- Listener Effect for Apply Progress ---
+    // Listener Effect for Apply Progress
     useEffect(() => {
         const setupListeners = async () => {
             applyListenersRef.current.unlistenStart = await listen(PRESET_APPLY_START_EVENT, (event) => {
-                console.log("Preset Apply Start:", event.payload);
-                setApplyProgressData({ processed: 0, total: event.payload || 0, message: 'Starting...' });
-                setApplySummary('');
-                setApplyError('');
-                setShowApplyPopup(true);
+                if (applyingPresetId !== null) { // Check if an apply was actually initiated
+                    console.log("Preset Apply Start:", event.payload);
+                    setApplyProgressData({ processed: 0, total: event.payload || 0, message: 'Starting...' });
+                    setApplySummary('');
+                    setApplyError('');
+                    setShowApplyPopup(true);
+                }
             });
             applyListenersRef.current.unlistenProgress = await listen(PRESET_APPLY_PROGRESS_EVENT, (event) => {
-                console.log("Preset Apply Progress:", event.payload);
-                // Ensure popup is shown if progress arrives
-                setShowApplyPopup(true);
-                setApplyProgressData(event.payload);
-                setApplySummary('');
-                setApplyError('');
+                 // Only update if the popup is meant to be shown (i.e., an apply is in progress)
+                if (applyingPresetId !== null && showApplyPopup) {
+                    console.log("Preset Apply Progress:", event.payload);
+                    setApplyProgressData(event.payload);
+                }
             });
             applyListenersRef.current.unlistenComplete = await listen(PRESET_APPLY_COMPLETE_EVENT, (event) => {
-                console.log("Preset Apply Complete:", event.payload);
-                setApplySummary(event.payload || 'Preset applied successfully!');
-                setApplyProgressData(null); // Clear progress data on complete
-                setApplyError('');
-                setShowApplyPopup(true); // Ensure popup shows completion
-                setApplyingPresetId(null); // Re-enable button
+                 if (applyingPresetId !== null) { // Only process if related to an ongoing apply
+                    console.log("Preset Apply Complete:", event.payload);
+                    setApplySummary(event.payload || 'Preset applied successfully!');
+                    setApplyProgressData(null);
+                    setApplyError('');
+                    setShowApplyPopup(true); // Ensure popup shows completion
+                    setApplyingPresetId(null); // Re-enable button
+                 }
             });
             applyListenersRef.current.unlistenError = await listen(PRESET_APPLY_ERROR_EVENT, (event) => {
-                console.error("Preset Apply Error:", event.payload);
-                setApplyError(event.payload || 'An unknown error occurred during preset application.');
-                setApplyProgressData(null); // Clear progress data on error
-                setApplySummary('');
-                setShowApplyPopup(true); // Ensure popup shows error
-                setApplyingPresetId(null); // Re-enable button
+                if (applyingPresetId !== null) { // Only process if related to an ongoing apply
+                    console.error("Preset Apply Error:", event.payload);
+                    setApplyError(event.payload || 'An unknown error occurred during preset application.');
+                    setApplyProgressData(null);
+                    setApplySummary('');
+                    setShowApplyPopup(true); // Ensure popup shows error
+                    setApplyingPresetId(null); // Re-enable button
+                }
             });
         };
 
@@ -129,8 +147,10 @@ function PresetPage() {
             applyListenersRef.current.unlistenComplete?.();
             applyListenersRef.current.unlistenError?.();
         };
-    }, []);
+    }, [applyingPresetId, showApplyPopup]); // Rerun setup if applyingPresetId changes (to ensure correct handling) or showApplyPopup
 
+
+    // Handle Create Preset
     const handleCreatePreset = async (e) => {
         e.preventDefault();
         if (!newPresetName.trim()) return;
@@ -138,8 +158,9 @@ function PresetPage() {
         setError('');
         try {
             await invoke('create_preset', { name: newPresetName.trim() });
+            console.log(`Preset '${newPresetName.trim()}' created successfully.`);
             setNewPresetName('');
-            await fetchPresets();
+            window.location.reload(); // Reload to fetch new preset list
         } catch (err) {
             console.error("Failed to create preset:", err);
             setError(typeof err === 'string' ? err : 'Failed to create preset.');
@@ -148,10 +169,11 @@ function PresetPage() {
         }
     };
 
+    // Apply Preset Logic
     const handleApplyPreset = async (presetId) => {
         setApplyingPresetId(presetId);
-        setError('');
-        setApplyError(''); // Clear previous apply error before starting
+        setError(''); // Clear general errors
+        setApplyError(''); // Clear specific apply error
         setShowApplyPopup(false); // Hide previous popup if any
         setApplyProgressData(null);
         setApplySummary('');
@@ -179,20 +201,27 @@ function PresetPage() {
         }
     };
 
+    // Toggle Favorite Logic
     const handleToggleFavorite = async (preset) => {
         setError('');
         const newFavState = !preset.is_favorite;
         try {
             await invoke('toggle_preset_favorite', { presetId: preset.id, isFavorite: newFavState });
+            // Update local state immediately for responsiveness
             setPresets(current => current.map(p =>
                 p.id === preset.id ? { ...p, is_favorite: newFavState } : p
             ));
         } catch (err) {
              console.error("Failed to toggle favorite:", err);
              setError(typeof err === 'string' ? err : 'Failed to update favorite status.');
+             // Optionally revert local state change on error
+             setPresets(current => current.map(p =>
+                 p.id === preset.id ? { ...p, is_favorite: preset.is_favorite } : p // Revert to original
+             ));
         }
     };
 
+    // Delete Logic
     const openDeleteModal = (preset) => {
         setPresetToDelete(preset);
         setIsDeleteModalOpen(true);
@@ -210,19 +239,52 @@ function PresetPage() {
         if (!presetToDelete) return;
         setIsDeleting(true);
         setDeleteError('');
+        setError(''); // Clear general errors
         try {
             await invoke('delete_preset', { presetId: presetToDelete.id });
-            await fetchPresets();
+            await fetchPresets(); // Refetch list after deleting
             closeDeleteModal();
         } catch (err) {
              console.error("Failed to delete preset:", err);
              setDeleteError(typeof err === 'string' ? err : 'Failed to delete preset.');
-             setIsDeleting(false);
+             setIsDeleting(false); // Keep modal open
         }
     };
 
-    // Determine if *any* preset application is running
-    const isApplyingAnyPreset = showApplyPopup && !applySummary && !applyError;
+    // Overwrite Logic
+    const openOverwriteModal = (preset) => {
+        setPresetToOverwrite(preset);
+        setIsOverwriteModalOpen(true);
+        setOverwriteError('');
+    };
+
+    const closeOverwriteModal = () => {
+        setPresetToOverwrite(null);
+        setIsOverwriteModalOpen(false);
+        setIsOverwriting(false);
+        setOverwriteError('');
+    };
+
+    const confirmOverwritePreset = async () => {
+        if (!presetToOverwrite) return;
+        setIsOverwriting(true);
+        setOverwriteError('');
+        setError('');
+        try {
+            await invoke('overwrite_preset', { presetId: presetToOverwrite.id });
+            console.log(`Preset ${presetToOverwrite.id} overwritten successfully.`);
+            closeOverwriteModal();
+            // Add a user feedback mechanism here (e.g., toast notification) if desired
+        } catch (err) {
+             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown overwrite error');
+             console.error(`Failed to overwrite preset ${presetToOverwrite.id}:`, errorString);
+             setOverwriteError(`Failed to overwrite: ${errorString}`);
+             setIsOverwriting(false); // Keep modal open
+        }
+    };
+
+    // Disable buttons if any action is running
+    const isOtherActionRunning = isCreating || applyingPresetId !== null || isDeleting || isOverwriting;
 
     return (
         <div style={styles.container} className="fadeIn">
@@ -238,12 +300,12 @@ function PresetPage() {
                     onChange={(e) => setNewPresetName(e.target.value)}
                     placeholder="Enter new preset name..."
                     aria-label="New preset name"
-                    disabled={isCreating || isApplyingAnyPreset}
+                    disabled={isOtherActionRunning}
                 />
                 <button
                     type="submit"
                     className="btn btn-primary"
-                    disabled={!newPresetName.trim() || isCreating || isApplyingAnyPreset}
+                    disabled={!newPresetName.trim() || isOtherActionRunning}
                 >
                     {isCreating ? (
                         <><i className="fas fa-spinner fa-spin fa-fw"></i> Saving...</>
@@ -266,43 +328,73 @@ function PresetPage() {
                             <li key={preset.id} style={styles.presetItem}>
                                 <span style={styles.presetName}>{preset.name}</span>
                                 <div style={styles.presetActions}>
+                                    {/* Apply Button */}
                                     <button
                                         style={styles.iconButton}
-                                        onMouseOver={(e) => e.currentTarget.style.opacity = 1} onMouseOut={(e) => e.currentTarget.style.opacity = 0.7}
+                                        className="preset-action-btn apply" // Add class for CSS hover styling
                                         title="Apply Preset"
                                         onClick={() => handleApplyPreset(preset.id)}
-                                        disabled={applyingPresetId === preset.id || isApplyingAnyPreset}
+                                        disabled={applyingPresetId === preset.id || isOtherActionRunning}
                                     >
                                         {applyingPresetId === preset.id ? (
                                              <i className="fas fa-spinner fa-spin fa-fw"></i>
                                         ) : (
-                                             <i className="fas fa-play-circle fa-fw" style={{ color: 'var(--success)' }}></i>
+                                             <i className="fas fa-play-circle fa-fw" /* style={{ color: 'var(--success)' }} - Handled by CSS */ ></i>
                                          )}
                                     </button>
-                                    <button
+                                     {/* Overwrite Button */}
+                                     <button
+                                         style={styles.iconButton}
+                                         className="preset-action-btn overwrite" // Add class for CSS hover styling
+                                         title="Overwrite with Current Setup"
+                                         onClick={() => openOverwriteModal(preset)}
+                                         disabled={isOtherActionRunning}
+                                     >
+                                          <i className="fas fa-save fa-fw" /* style={{ color: 'var(--primary)' }} - Handled by CSS */ ></i>
+                                      </button>
+                                     {/* Favorite Button */}
+                                     <button
+                                         style={styles.iconButton}
+                                         className="preset-action-btn favorite" // Add class for CSS hover styling
+                                         title={preset.is_favorite ? "Remove from Favorites" : "Add to Favorites"}
+                                         onClick={() => handleToggleFavorite(preset)}
+                                         disabled={isOtherActionRunning}
+                                     >
+                                          <i className={`fas fa-star fa-fw`} style={{ color: preset.is_favorite ? 'var(--accent)' : 'inherit' }}></i>
+                                      </button>
+                                     {/* Delete Button */}
+                                     <button
                                         style={styles.iconButton}
-                                        onMouseOver={(e) => e.currentTarget.style.opacity = 1} onMouseOut={(e) => e.currentTarget.style.opacity = 0.7}
-                                        title={preset.is_favorite ? "Remove from Favorites" : "Add to Favorites"}
-                                        onClick={() => handleToggleFavorite(preset)}
-                                        disabled={isApplyingAnyPreset}
-                                    >
-                                         <i className={`fas fa-star fa-fw`} style={{ color: preset.is_favorite ? 'var(--accent)' : 'inherit' }}></i>
-                                     </button>
-                                    <button
-                                        style={{...styles.iconButton, color: 'var(--danger)'}}
-                                        onMouseOver={(e) => e.currentTarget.style.opacity = 1} onMouseOut={(e) => e.currentTarget.style.opacity = 0.7}
+                                        className="preset-action-btn delete" // Add class for CSS hover styling
                                         title="Delete Preset"
                                         onClick={() => openDeleteModal(preset)}
-                                        disabled={isApplyingAnyPreset}
-                                    >
-                                         <i className="fas fa-trash-alt fa-fw"></i>
-                                     </button>
+                                        disabled={isOtherActionRunning}
+                                     >
+                                          <i className="fas fa-trash-alt fa-fw" /* style={{ color: 'var(--danger)' }} - Handled by CSS */ ></i>
+                                      </button>
                                 </div>
                             </li>
                         ))}
                     </ul>
                 )}
             </div>
+
+             {/* Overwrite Confirmation Modal */}
+            {isOverwriteModalOpen && presetToOverwrite && (
+                 <ConfirmationModal
+                    isOpen={isOverwriteModalOpen}
+                    onClose={closeOverwriteModal}
+                    onConfirm={confirmOverwritePreset}
+                    title="Confirm Overwrite"
+                    confirmText="Overwrite"
+                    confirmButtonVariant="primary" // Keep primary for save-like action
+                    isLoading={isOverwriting}
+                    errorMessage={overwriteError}
+                 >
+                    Are you sure you want to overwrite the preset "{presetToOverwrite.name}"
+                    with your current mod enabled/disabled states? This cannot be undone.
+                 </ConfirmationModal>
+             )}
 
              {/* Delete Confirmation Modal */}
             {isDeleteModalOpen && presetToDelete && (
@@ -322,13 +414,13 @@ function PresetPage() {
              )}
 
              {/* Apply Progress Popup */}
-            <ScanProgressPopup // Using the same component
+            <ScanProgressPopup
                 isOpen={showApplyPopup}
                 progressData={applyProgressData}
                 summary={applySummary}
                 error={applyError}
                 onClose={closeApplyPopup}
-                baseTitle="Applying Preset..." // Pass specific title
+                baseTitle="Applying Preset..."
             />
         </div>
     );

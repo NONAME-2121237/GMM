@@ -1,5 +1,6 @@
 // --- START OF FILE src/components/ConfirmationModal.jsx ---
 import React from 'react';
+import ReactDOM from 'react-dom';
 
 const styles = {
     overlay: {
@@ -49,7 +50,7 @@ function ConfirmationModal({
     const confirmButtonClass = confirmButtonVariant === 'danger' ? 'btn-danger' : 'btn-primary';
     const titleColor = confirmButtonVariant === 'danger' ? 'var(--danger)' : 'var(--primary)';
 
-    return (
+    return ReactDOM.createPortal(
         <div style={styles.overlay} onClick={onClose}>
             <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
                 <h2 style={{ ...styles.title, color: titleColor }}>{title}</h2>
@@ -79,7 +80,8 @@ function ConfirmationModal({
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
 

@@ -31,21 +31,21 @@
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
 body {
     background-color: var(--darker);
     color: var(--light);
-    background-size: cover;
-    background-position: center;
-    background-attachment: fixed;
-    height: 100vh;
-    overflow: hidden;
 }
 
 .app-container {
     display: flex;
     height: 100vh;
-    overflow: hidden;
-    backdrop-filter: blur(10px);
     background-color: rgba(24, 24, 37, 0.6);
 }
 
@@ -90,7 +90,7 @@ body {
 .sidebar {
     width: var(--sidebar-width);
     background-color: var(--dark);
-    height: 100vh;
+    height: 100%;
     padding: 20px;
     transition: width 0.3s ease;
     border-right: 1px solid rgba(255, 255, 255, 0.1);
@@ -238,11 +238,11 @@ body {
 
 /* Main Content */
 .main-content {
-    flex: 1;
+    flex: 1; /* Take remaining space */
     padding: 25px;
-    overflow-y: auto;
-    position: relative;
-    height: 100vh;
+    overflow-y: auto; /* THIS should be the primary scrollbar */
+    position: relative; /* Needed for potential absolutely positioned children */
+    height: 100%; /* Fill the flex parent height */
 }
 
 /* Page Header */
@@ -1213,4 +1213,69 @@ input:disabled + .slider {
     .stats-charts {
         grid-template-columns: 1fr;
     }
+}
+
+/* Style for the keybind button in the grid view */
+.mod-card-grid .keybind-button {
+    /* Inherits base styles from gridButtonBase via inline style */
+}
+
+.mod-card-grid .keybind-button:hover {
+    opacity: 1;
+    color: var(--primary); /* Optional: change color on hover */
+}
+
+.mod-card-grid .keybind-button:disabled,
+.mod-card-list .keybind-button:disabled { /* Add list view disabled style too */
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Add hover for list view compact buttons if not already defined */
+.mod-list-actions .compact-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.mod-list-actions .compact-btn.danger:hover {
+    background-color: rgba(var(--danger-rgb), 0.15);
+    color: var(--danger);
+}
+
+.modal-overlay-style { /* Example class, apply to inline style or add class */
+    position: fixed; /* Fixed relative to viewport */
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center; /* Center horizontally */
+    align-items: center;    /* Center vertically */
+    z-index: 1050;          /* Ensure high z-index */
+    backdrop-filter: blur(5px);
+    padding: 20px; /* Add padding for smaller viewports */
+}
+
+/* Ensure modals themselves don't cause overflow issues initially */
+.modal-content-style { /* Example class, apply to the actual modal box */
+     background: var(--dark);
+     padding: 30px 40px;
+     border-radius: 12px;
+     box-shadow: 0 5px 25px rgba(0, 0, 0, 0.4);
+     color: var(--light);
+     min-width: 350px; /* Example minimum */
+     max-width: 90%; /* Max width relative to viewport */
+     max-height: 90%; /* Max height relative to viewport */
+     display: flex;
+     flex-direction: column;
+     overflow: hidden; /* Prevent modal box itself from overflowing initially */
+}
+
+/* Make the *content area* within the modal scrollable if needed */
+.modal-scrollable-content {
+    overflow-y: auto;
+    flex-grow: 1; /* Allow content to take space */
+    padding-right: 10px; /* Space for scrollbar if it appears */
+    margin-bottom: 15px; /* Space before footer */
 }

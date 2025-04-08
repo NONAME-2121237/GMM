@@ -1,5 +1,7 @@
+// src/components/ModCard.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri';
+import KeybindsPopup from './KeybindsPopup'; // Import the new popup
 
 // Helper to split tags, trimming whitespace and filtering empty ones
 const parseTags = (tagString) => {
@@ -9,7 +11,6 @@ const parseTags = (tagString) => {
                     .filter(tag => tag.length > 0);
 };
 
-// API placeholder for fallback background image
 const FALLBACK_MOD_IMAGE = '/images/placeholder.jpg';
 const FALLBACK_MOD_IMAGE_BG = `url('${FALLBACK_MOD_IMAGE}')`;
 const OTHER_ENTITY_SUFFIX = '-other'; // Define suffix constant
@@ -26,6 +27,11 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
     const objectUrlRef = useRef(null); // Ref to store temporary blob URL for cleanup
     const isOtherEntity = entitySlug?.endsWith(OTHER_ENTITY_SUFFIX);
     const tags = useMemo(() => parseTags(asset.category_tag), [asset.category_tag]);
+
+    const [isKeybindsPopupOpen, setIsKeybindsPopupOpen] = useState(false);
+    const [keybinds, setKeybinds] = useState([]);
+    const [keybindsLoading, setKeybindsLoading] = useState(false);
+    const [keybindsError, setKeybindsError] = useState('');
 
     // Cleanup function
     const cleanupObjectUrl = useCallback(() => {
@@ -65,6 +71,34 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
         e.preventDefault();
         onDelete(asset);
     }, [asset, onDelete]);
+
+    // --- NEW Keybinds Popup Handlers ---
+    const handleOpenKeybindsPopup = useCallback(async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        setIsKeybindsPopupOpen(true);
+        setKeybindsLoading(true);
+        setKeybindsError('');
+        setKeybinds([]);
+        try {
+            const fetchedKeybinds = await invoke('get_ini_keybinds', { assetId: asset.id });
+            setKeybinds(fetchedKeybinds || []);
+        } catch (err) {
+            const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+            console.error(`Failed to fetch keybinds for asset ${asset.id}:`, errorString);
+            setKeybindsError(`Failed to load keybinds: ${errorString}`);
+        } finally {
+            setKeybindsLoading(false);
+        }
+    }, [asset.id]);
+
+    const handleCloseKeybindsPopup = useCallback(() => {
+        setIsKeybindsPopupOpen(false);
+        setKeybindsLoading(false);
+        setKeybindsError('');
+        setKeybinds([]);
+    }, []);
+    // --- END NEW Keybinds Popup Handlers ---
 
 
     // Effect to load image data (only relevant for grid view display)
@@ -171,83 +205,122 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
     // Compact List View Structure
     if (viewMode === 'list') {
         return (
-            <div
-                className={`mod-card-list ${!isEnabled ? 'mod-disabled-visual' : ''}`}
-                title={`Folder: ${folderNameOnDisk}\n${asset.description || ''}`}
-            >
-                 <label className="toggle-switch compact-toggle">
-                     <input type="checkbox" checked={isEnabled} onChange={handleToggle} disabled={isToggling} aria-label={`Enable/Disable ${asset.name} mod`} />
-                     <span className="slider"></span>
-                 </label>
-                <div className="mod-list-name">
-                    {asset.name}
-                 </div>
-                 {asset.author && (
-                    <div className="mod-list-author" title={`Author: ${asset.author}`}>
-                         By: {asset.author}
-                     </div>
-                 )}
-                 {toggleError && <div className="mod-list-error" title={toggleError}> <i className="fas fa-exclamation-triangle"></i> </div>}
-                 <div className="mod-list-actions">
-                    <button onClick={handleEditClick} className="btn-icon compact-btn" title="Edit Mod Info" disabled={isToggling}>
-                        <i className="fas fa-pencil-alt fa-fw"></i>
-                    </button>
-                    <button onClick={handleDeleteClick} className="btn-icon compact-btn danger" title="Delete Mod" disabled={isToggling}>
-                        <i className="fas fa-trash-alt fa-fw"></i>
-                    </button>
-                 </div>
-            </div>
+            <>
+                <div
+                    className={`mod-card-list ${!isEnabled ? 'mod-disabled-visual' : ''}`}
+                    title={`Folder: ${folderNameOnDisk}\n${asset.description || ''}`}
+                >
+                    <label className="toggle-switch compact-toggle">
+                        <input type="checkbox" checked={isEnabled} onChange={handleToggle} disabled={isToggling} aria-label={`Enable/Disable ${asset.name} mod`} />
+                        <span className="slider"></span>
+                    </label>
+                    <div className="mod-list-name">
+                        {asset.name}
+                    </div>
+                    {asset.author && (
+                        <div className="mod-list-author" title={`Author: ${asset.author}`}>
+                            By: {asset.author}
+                        </div>
+                    )}
+                    {toggleError && <div className="mod-list-error" title={toggleError}> <i className="fas fa-exclamation-triangle"></i> </div>}
+                    <div className="mod-list-actions">
+                        <button onClick={handleOpenKeybindsPopup} className="btn-icon compact-btn" title="View Keybinds" disabled={isToggling}>
+                            <i className="fas fa-keyboard fa-fw"></i>
+                        </button>
+                        <button onClick={handleEditClick} className="btn-icon compact-btn" title="Edit Mod Info" disabled={isToggling}>
+                            <i className="fas fa-pencil-alt fa-fw"></i>
+                        </button>
+                        <button onClick={handleDeleteClick} className="btn-icon compact-btn danger" title="Delete Mod" disabled={isToggling}>
+                            <i className="fas fa-trash-alt fa-fw"></i>
+                        </button>
+                    </div>
+                </div>
+                {/* Popup is rendered outside the list item structure for proper overlay */}
+                <KeybindsPopup
+                    isOpen={isKeybindsPopupOpen}
+                    onClose={handleCloseKeybindsPopup}
+                    assetId={asset.id}
+                    assetName={asset.name}
+                    keybinds={keybinds}
+                    isLoading={keybindsLoading}
+                    error={keybindsError}
+                />
+            </>
         );
     }
 
     // Default Grid View Structure
     return (
-        <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Folder: ${folderNameOnDisk}`}>
-            {viewMode !== "list" && (
-                <div style={imageContainerStyle}>
-                     {imageLoading && ( <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i> )}
-                     {!imageLoading && imageBgCss === FALLBACK_MOD_IMAGE_BG && (
-                        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', padding: '5px', background: 'rgba(0,0,0,0.3)', borderRadius: '3px' }}>
-                            {imageError ? 'Preview failed' : 'No preview'}
-                        </span>
-                     )}
+        <>
+            <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Folder: ${folderNameOnDisk}`}>
+                {viewMode !== "list" && (
+                    <div style={imageContainerStyle}>
+                        {imageLoading && ( <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i> )}
+                        {!imageLoading && imageBgCss === FALLBACK_MOD_IMAGE_BG && (
+                            <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', padding: '5px', background: 'rgba(0,0,0,0.3)', borderRadius: '3px' }}>
+                                {imageError ? 'Preview failed' : 'No preview'}
+                            </span>
+                        )}
+                    </div>
+                )}
+                <div className="mod-header">
+                    <div className="mod-title">{asset.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', gap: '5px' }}>
+                        <button onClick={handleEditClick} className="btn-icon" title="Edit Mod Info" style={gridButtonStyles.edit} onMouseOver={(e) => e.currentTarget.style.opacity = 1} onMouseOut={(e) => e.currentTarget.style.opacity = 0.7} disabled={isToggling} >
+                            <i className="fas fa-pencil-alt fa-fw"></i>
+                        </button>
+                        <button onClick={handleDeleteClick} className="btn-icon" title="Delete Mod" style={gridButtonStyles.delete} onMouseOver={(e) => e.currentTarget.style.opacity = 1} onMouseOut={(e) => e.currentTarget.style.opacity = 0.7} disabled={isToggling} >
+                            <i className="fas fa-trash-alt fa-fw"></i>
+                        </button>
+                        <label className="toggle-switch" style={{ marginLeft: '5px' }}>
+                            <input type="checkbox" checked={isEnabled} onChange={handleToggle} disabled={isToggling} aria-label={`Enable/Disable ${asset.name} mod`} />
+                            <span className="slider"></span>
+                        </label>
+                    </div>
                 </div>
-            )}
-             <div className="mod-header">
-                <div className="mod-title">{asset.name}</div>
-                 <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', gap: '5px' }}>
-                    <button onClick={handleEditClick} className="btn-icon" title="Edit Mod Info" style={gridButtonStyles.edit} onMouseOver={(e) => e.currentTarget.style.opacity = 1} onMouseOut={(e) => e.currentTarget.style.opacity = 0.7} disabled={isToggling} >
-                        <i className="fas fa-pencil-alt fa-fw"></i>
+                {tags.length > 0 && (
+                    <div className="mod-tags-container" style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                        {tags.map((tag, index) => ( <span key={index} className="mod-category">{tag}</span> ))}
+                    </div>
+                )}
+                {asset.description ? ( <p className="mod-description">{asset.description}</p> ) : ( <p className="mod-description placeholder-text" style={{padding:0, textAlign:'left', fontStyle:'italic'}}>(No description)</p> )}
+                {toggleError && <p style={gridStyles.errorTextGrid}>{toggleError}</p>}
+                <div className="mod-details">
+                    <div className="mod-author">{asset.author ? `By: ${asset.author}` : '(Unknown author)'}</div>
+                    {/* --- Replace static keybind div with a button --- */}
+                    <button
+                        className="btn-icon keybind-button" // Add a class for potential specific styling
+                        onClick={handleOpenKeybindsPopup}
+                        title="View Keybinds"
+                        style={gridButtonStyles.keybind} // Use a new style or adapt existing
+                        disabled={isToggling}
+                        aria-label={`View keybinds for ${asset.name}`}
+                    >
+                        <i className="fas fa-keyboard fa-fw"></i>
                     </button>
-                    <button onClick={handleDeleteClick} className="btn-icon" title="Delete Mod" style={gridButtonStyles.delete} onMouseOver={(e) => e.currentTarget.style.opacity = 1} onMouseOut={(e) => e.currentTarget.style.opacity = 0.7} disabled={isToggling} >
-                        <i className="fas fa-trash-alt fa-fw"></i>
-                    </button>
-                    <label className="toggle-switch" style={{ marginLeft: '5px' }}>
-                        <input type="checkbox" checked={isEnabled} onChange={handleToggle} disabled={isToggling} aria-label={`Enable/Disable ${asset.name} mod`} />
-                        <span className="slider"></span>
-                    </label>
-                 </div>
-            </div>
-             {tags.length > 0 && (
-                <div className="mod-tags-container" style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                    {tags.map((tag, index) => ( <span key={index} className="mod-category">{tag}</span> ))}
+                    {/* --- End replacement --- */}
                 </div>
-             )}
-             {asset.description ? ( <p className="mod-description">{asset.description}</p> ) : ( <p className="mod-description placeholder-text" style={{padding:0, textAlign:'left', fontStyle:'italic'}}>(No description)</p> )}
-             {toggleError && <p style={gridStyles.errorTextGrid}>{toggleError}</p>}
-            <div className="mod-details">
-                <div className="mod-author">{asset.author ? `By: ${asset.author}` : '(Unknown author)'}</div>
-                 <div className="key-binding" title="Keybinding (Not Implemented)"><i className="fas fa-keyboard fa-fw"></i></div>
             </div>
-        </div>
+             {/* Popup is rendered outside the card structure for proper overlay */}
+             <KeybindsPopup
+                 isOpen={isKeybindsPopupOpen}
+                 onClose={handleCloseKeybindsPopup}
+                 assetId={asset.id}
+                 assetName={asset.name}
+                 keybinds={keybinds}
+                 isLoading={keybindsLoading}
+                 error={keybindsError}
+             />
+         </>
     );
 }
 
 // Styles specifically for grid buttons
-const gridButtonBase = { background:'none', border:'none', cursor:'pointer', fontSize:'15px', padding:'5px', opacity: 0.7 };
+const gridButtonBase = { background:'none', border:'none', cursor:'pointer', fontSize:'15px', padding:'5px', opacity: 0.7, transition: 'opacity 0.2s ease', color: 'var(--light)' };
 const gridButtonStyles = {
-    edit: { ...gridButtonBase, color:'var(--light)' },
+    edit: { ...gridButtonBase },
     delete: { ...gridButtonBase, color:'var(--danger)' },
+    keybind: { ...gridButtonBase } // Style for the keybind button
 };
 // Style for grid toggle error
 const gridStyles = {

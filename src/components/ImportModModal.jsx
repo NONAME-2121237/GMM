@@ -1,5 +1,6 @@
 // src/components/ImportModModal.jsx
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { invoke } from '@tauri-apps/api/tauri';
 import { open } from '@tauri-apps/api/dialog';
 import Select from 'react-select';
@@ -433,7 +434,7 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
         );
     }
 
-    return (
+    return ReactDOM.createPortal(
         <div style={styles.overlay} onClick={onClose}>
             <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
                 {/* Header */}
@@ -559,7 +560,8 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                     </button>
                 </div>
             </div> {/* End Modal */}
-        </div> // End Overlay
+        </div>, // End Overlay
+        document.body
     );
 }
 

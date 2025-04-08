@@ -29,22 +29,23 @@ function Sidebar() {
     const [applySummarySidebar, setApplySummarySidebar] = useState('');
     const applyListenersSidebarRef = useRef({ unlistenStart: null, unlistenProgress: null, unlistenComplete: null, unlistenError: null });
 
-    const isNavItemActive = (path) => {
-        if (path === '/') return location.pathname === '/';
-        if (path === '/presets') return location.pathname === '/presets';
-        if (path === '/settings') return location.pathname === '/settings'; // Explicit check for settings
-        if (location.pathname.startsWith('/entity/')) {
-             // Example: Activate 'Characters' if viewing any character entity
-             // This logic might need refinement based on your category structure
-             if (path === '/category/characters') {
-                 // Ideally, check the actual category of the current entity
-                 // For now, just assume any entity might relate to characters
-                 return true;
-             }
+    const isNavItemActive = useCallback((navPath) => {
+        const currentPath = location.pathname;
+
+        // Handle exact matches first for non-category pages
+        if (['/', '/presets', '/settings'].includes(navPath)) {
+            return currentPath === navPath;
         }
-        // General check for category pages
-        return location.pathname.startsWith(path);
-    };
+
+        // Handle category pages: Only active if the *current path* is *exactly* this category path.
+        // This prevents highlighting a category when viewing an entity page.
+        if (navPath.startsWith('/category/')) {
+            return currentPath === navPath;
+        }
+
+        // Default: not active
+        return false;
+    }, [location.pathname]);
 
     const fetchFavorites = useCallback(async () => {
         if (isLoading || !modsFolder) {
@@ -172,7 +173,7 @@ function Sidebar() {
         }
      }, [handleCloseImportModal, navigate, location.pathname]);
 
-    const handleApplyPresetSidebar = async (presetId) => {
+     const handleApplyPresetSidebar = async (presetId) => {
         setApplyingPresetIdSidebar(presetId);
         setApplyErrorSidebar('');
         setShowApplyPopupSidebar(false);
@@ -180,12 +181,14 @@ function Sidebar() {
         setApplySummarySidebar('');
         try {
             await invoke('apply_preset', { presetId });
+            window.location.reload();
+            // The listeners will still handle the popup display/updates
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Failed to start preset application');
             console.error(`Failed to invoke apply_preset ${presetId} from sidebar:`, errorString);
             setApplyErrorSidebar(`Error: ${errorString}`);
-            setShowApplyPopupSidebar(true);
-            setApplyingPresetIdSidebar(null);
+            setShowApplyPopupSidebar(true); // Show error immediately
+            setApplyingPresetIdSidebar(null); // Reset button state on immediate failure
         }
     };
 
@@ -220,12 +223,12 @@ function Sidebar() {
 
             {/* === Nav Items Section 1 === */}
             <ul className="nav-items">
-                 <NavLink to="/" end className={() => `nav-item ${isNavItemActive('/') ? 'active' : ''}`}> <i className="fas fa-home fa-fw"></i> Home </NavLink>
-                 <NavLink to="/category/characters" className={() => `nav-item ${isNavItemActive('/category/characters') ? 'active' : ''}`}><i className="fas fa-user fa-fw"></i> Characters</NavLink>
-                 <NavLink to="/category/npcs" className={() => `nav-item ${isNavItemActive('/category/npcs') ? 'active' : ''}`}><i className="fas fa-users fa-fw"></i> NPCs</NavLink>
-                 <NavLink to="/category/objects" className={() => `nav-item ${isNavItemActive('/category/objects') ? 'active' : ''}`}><i className="fas fa-cube fa-fw"></i> Objects</NavLink>
-                 <NavLink to="/category/enemies" className={() => `nav-item ${isNavItemActive('/category/enemies') ? 'active' : ''}`}><i className="fas fa-ghost fa-fw"></i> Enemies</NavLink>
-                 <NavLink to="/category/weapons" className={() => `nav-item ${isNavItemActive('/category/weapons') ? 'active' : ''}`}><i className="fas fa-shield-halved fa-fw"></i> Weapons</NavLink>
+            <NavLink to="/" end className={({ isActive }) => `nav-item ${isNavItemActive('/') ? 'active' : ''}`}> <i className="fas fa-home fa-fw"></i> Home </NavLink>
+                 <NavLink to="/category/characters" className={({ isActive }) => `nav-item ${isNavItemActive('/category/characters') ? 'active' : ''}`}><i className="fas fa-user fa-fw"></i> Characters</NavLink>
+                 <NavLink to="/category/npcs" className={({ isActive }) => `nav-item ${isNavItemActive('/category/npcs') ? 'active' : ''}`}><i className="fas fa-users fa-fw"></i> NPCs</NavLink>
+                 <NavLink to="/category/objects" className={({ isActive }) => `nav-item ${isNavItemActive('/category/objects') ? 'active' : ''}`}><i className="fas fa-cube fa-fw"></i> Objects</NavLink>
+                 <NavLink to="/category/enemies" className={({ isActive }) => `nav-item ${isNavItemActive('/category/enemies') ? 'active' : ''}`}><i className="fas fa-ghost fa-fw"></i> Enemies</NavLink>
+                 <NavLink to="/category/weapons" className={({ isActive }) => `nav-item ${isNavItemActive('/category/weapons') ? 'active' : ''}`}><i className="fas fa-shield-halved fa-fw"></i> Weapons</NavLink>
             </ul>
 
             {/* === Separator === */}
@@ -233,8 +236,8 @@ function Sidebar() {
 
             {/* === Nav Items Section 2 === */}
              <ul className="nav-items" style={{paddingTop:0}}> {/* Remove default top padding */}
-                 <NavLink to="/presets" className={() => `nav-item ${isNavItemActive('/presets') ? 'active' : ''}`}> <i className="fas fa-layer-group fa-fw"></i> Presets </NavLink>
-                 <NavLink to="/settings" className={() => `nav-item ${isNavItemActive('/settings') ? 'active' : ''}`}> <i className="fas fa-cog fa-fw"></i> Settings </NavLink>
+                <NavLink to="/presets" className={({ isActive }) => `nav-item ${isNavItemActive('/presets') ? 'active' : ''}`}> <i className="fas fa-layer-group fa-fw"></i> Presets </NavLink>
+                <NavLink to="/settings" className={({ isActive }) => `nav-item ${isNavItemActive('/settings') ? 'active' : ''}`}> <i className="fas fa-cog fa-fw"></i> Settings </NavLink>
             </ul>
 
 

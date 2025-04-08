@@ -1,5 +1,6 @@
 // --- START OF FILE src/components/ModEditModal.jsx ---
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import ReactDOM from 'react-dom';
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri';
 import { open } from '@tauri-apps/api/dialog';
 import Select from 'react-select'; // Import react-select
@@ -382,7 +383,7 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
 
     if (!asset) return null; // Don't render if no asset provided
 
-    return (
+    return ReactDOM.createPortal(
         <div style={styles.overlay} onClick={onClose}>
             <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
                 <h2 style={styles.title}>Edit Mod: {asset.name}</h2>
@@ -476,7 +477,8 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
 
