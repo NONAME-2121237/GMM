@@ -10,7 +10,7 @@ const parseTags = (tagString) => {
 };
 
 // API placeholder for fallback background image
-const FALLBACK_MOD_IMAGE = '/api/placeholder/100/60?text=No+Preview';
+const FALLBACK_MOD_IMAGE = '/images/placeholder.jpg';
 const FALLBACK_MOD_IMAGE_BG = `url('${FALLBACK_MOD_IMAGE}')`;
 const OTHER_ENTITY_SUFFIX = '-other'; // Define suffix constant
 

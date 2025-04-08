@@ -175,6 +175,20 @@ struct DeductionMaps {
 #[derive(Serialize, Deserialize, Debug)] struct Entity { id: i64, category_id: i64, name: String, slug: String, description: Option<String>, details: Option<String>, base_image: Option<String>, mod_count: i32 }
 #[derive(Serialize, Deserialize, Debug, Clone)] struct Asset { id: i64, entity_id: i64, name: String, description: Option<String>, folder_name: String, image_filename: Option<String>, author: Option<String>, category_tag: Option<String>, is_enabled: bool }
 
+#[derive(Serialize, Debug, Clone)]
+struct EntityWithCounts {
+    // Include all fields from Entity that the frontend card needs
+    id: i64,
+    category_id: i64,
+    name: String,
+    slug: String,
+    details: Option<String>, // JSON string
+    base_image: Option<String>,
+    // Counts
+    total_mods: i64,
+    enabled_mods: i64,
+}
+
 // Structs for Import/Analysis
 #[derive(Serialize, Debug, Clone)]
 struct ArchiveEntry {
@@ -2545,6 +2559,110 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+#[command]
+fn get_entities_by_category_with_counts(category_slug: String, db_state: State<DbState>) -> CmdResult<Vec<EntityWithCounts>> {
+    println!("[get_entities_with_counts] Fetching for category: {}", category_slug);
+
+    let base_mods_path = match get_mods_base_path_from_settings(&db_state) {
+        Ok(p) => p,
+        Err(_) => {
+            println!("[get_entities_with_counts] Mods folder not set. Returning empty list.");
+            return Ok(Vec::new());
+        }
+    };
+
+    let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+
+    // 1. Get Category ID
+    let category_id: i64 = conn.query_row(
+        "SELECT id FROM categories WHERE slug = ?1",
+        params![category_slug],
+        |row| row.get(0),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => format!("Category '{}' not found", category_slug),
+        _ => format!("DB Error getting category ID: {}", e),
+    })?;
+
+    // 2. Get Entities for the Category
+    let mut entity_stmt = conn.prepare(
+         "SELECT e.id, e.category_id, e.name, e.slug, e.details, e.base_image
+          FROM entities e
+          WHERE e.category_id = ?1
+          ORDER BY CASE WHEN e.slug LIKE '%-other' THEN 0 ELSE 1 END ASC, e.name ASC"
+     ).map_err(|e| format!("Failed to prepare entity query: {}", e))?;
+
+    let entity_rows_iter = entity_stmt.query_map(params![category_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
+        ))
+    }).map_err(|e| format!("Failed to query entities: {}", e))?;
+
+    let mut results: Vec<EntityWithCounts> = Vec::new();
+
+    // *** FIX: Apply .map_err() to the prepare call ***
+    let mut asset_folder_stmt = conn.prepare("SELECT folder_name FROM assets WHERE entity_id = ?1")
+                                     .map_err(|e| format!("Failed to prepare asset folder query: {}", e))?; // Prepare asset query once
+
+    for entity_result in entity_rows_iter {
+        match entity_result {
+            Ok((id, cat_id, name, slug, details, base_image)) => {
+                // 3. For each entity, get its assets and check disk status
+                let mut total_mods_for_entity = 0;
+                let mut enabled_mods_for_entity = 0;
+
+                // Map potential errors when querying assets for *this specific* entity
+                let asset_folder_rows_result = asset_folder_stmt.query_map(params![id], |row| row.get::<_, String>(0));
+
+                match asset_folder_rows_result {
+                     Ok(rows) => {
+                        for folder_result in rows {
+                            match folder_result {
+                                Ok(clean_relative_path_str) => {
+                                    total_mods_for_entity += 1;
+
+                                    let clean_relative_path = PathBuf::from(clean_relative_path_str.replace("\\", "/"));
+                                    let filename_osstr = clean_relative_path.file_name().unwrap_or_default();
+                                    let filename_str = filename_osstr.to_string_lossy();
+                                    if filename_str.is_empty() { continue; }
+
+                                    // Check only enabled state path
+                                    let full_path_if_enabled = base_mods_path.join(&clean_relative_path);
+                                    if full_path_if_enabled.is_dir() {
+                                        enabled_mods_for_entity += 1;
+                                    }
+                                }
+                                Err(e) => eprintln!("[get_entities_with_counts] Error fetching asset folder row for entity {}: {}", id, e),
+                            }
+                        }
+                    }
+                    // Log the error but don't stop the whole process for one entity's assets failing
+                    Err(e) => eprintln!("[get_entities_with_counts] Error querying asset folders for entity {}: {}", id, e),
+                }
+
+                results.push(EntityWithCounts {
+                    id,
+                    category_id: cat_id,
+                    name,
+                    slug,
+                    details,
+                    base_image,
+                    total_mods: total_mods_for_entity,
+                    enabled_mods: enabled_mods_for_entity,
+                });
+            }
+            Err(e) => eprintln!("[get_entities_with_counts] Error processing entity row: {}", e),
+        }
+    }
+
+    println!("[get_entities_with_counts] Found {} entities with counts for category '{}'", results.len(), category_slug);
+    Ok(results)
+}
+
 // --- Main Function ---
 fn main() {
     let context = generate_context!();
@@ -2578,6 +2696,7 @@ fn main() {
             get_asset_image_path, open_mods_folder,
             // Scan & Count
             scan_mods_directory, get_total_asset_count,
+            get_entities_by_category_with_counts,
             // Edit, Import, Delete (Assets)
             update_asset_info, delete_asset, read_binary_file,
             select_archive_file, analyze_archive, import_archive,

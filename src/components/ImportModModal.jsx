@@ -128,7 +128,7 @@ const styles = {
     imagePlaceholderText: { fontSize: '13px', color: 'rgba(255,255,255,0.5)' },
 };
 
-const FALLBACK_MOD_IMAGE_MODAL = '/api/placeholder/150/100?text=No+Preview';
+const FALLBACK_MOD_IMAGE_MODAL = '/images/placeholder.jpg';
 
 function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     // Form State

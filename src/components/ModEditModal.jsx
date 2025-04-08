@@ -139,7 +139,7 @@ const styles = {
     errorText: { color: 'var(--danger)', marginTop: '15px', fontSize: '14px', textAlign: 'center' },
 };
 
-const FALLBACK_MOD_IMAGE_MODAL = '/api/placeholder/150/100?text=No+Preview';
+const FALLBACK_MOD_IMAGE_MODAL = '/images/placeholder.jpg';
 
 function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
     // Form State

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/tauri';
 import ModCard from '../components/ModCard';
@@ -48,6 +48,7 @@ function EntityPage() {
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteError, setDeleteError] = useState('');
     const [viewMode, setViewMode] = useState('grid'); // Default, loaded in useEffect
+    const [modSearchTerm, setModSearchTerm] = useState('');
 
     // Fetch data (includes loading view mode)
     const fetchData = useCallback(async () => {
@@ -191,6 +192,18 @@ function EntityPage() {
         }
     };
 
+    const filteredAssets = useMemo(() => {
+        if (!modSearchTerm) {
+            return assets; // No filter applied
+        }
+        const lowerSearchTerm = modSearchTerm.toLowerCase();
+        return assets.filter(asset =>
+            asset.name.toLowerCase().includes(lowerSearchTerm) ||
+            (asset.author && asset.author.toLowerCase().includes(lowerSearchTerm)) ||
+            (asset.category_tag && asset.category_tag.toLowerCase().includes(lowerSearchTerm))
+        );
+    }, [assets, modSearchTerm]);
+
     // Loading/Error/No Entity checks
     if (loading) return <div className="placeholder-text">Loading entity details for {entitySlug}... <i className="fas fa-spinner fa-spin"></i></div>;
     if (error) return <div className="placeholder-text" style={{ color: 'var(--danger)' }}>Error: {error}</div>;
@@ -228,7 +241,6 @@ function EntityPage() {
                     ></i>
                     {entity.name} Mods
                 </h1>
-                 {/* Optional: Add Search Bar here for mods if needed */}
             </div>
 
             <div className="character-profile">
@@ -268,6 +280,18 @@ function EntityPage() {
             <div className="mods-section">
                 <div className="section-header">
                     <h2 className="section-title">Available Mods ({assets.length})</h2>
+                        <div className="search-bar-container">
+                        <div className="search-bar">
+                            <i className="fas fa-search"></i>
+                            <input
+                                type="text"
+                                placeholder={`Search ${filteredAssets.length} mods...`}
+                                value={modSearchTerm}
+                                onChange={(e) => setModSearchTerm(e.target.value)}
+                                aria-label={`Search mods for ${entity.name}`}
+                            />
+                        </div>
+                    </div>
                     {/* View Mode Toggle Buttons */}
                     <div className="view-mode-toggle" /* Style this container in CSS */ >
                          <button
@@ -291,22 +315,26 @@ function EntityPage() {
 
                 {/* Dynamic Class based on viewMode */}
                 <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'}>
-                    {assets.length > 0 ? (
-                        assets.map(asset => (
+                    {assets.length === 0 ? ( // Check original assets length for the initial "no mods" message
+                         <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%' }}>
+                            No mods found for {entity.name}. You can import mods via the sidebar.
+                         </p>
+                    ) : filteredAssets.length === 0 ? ( // Check filtered length for "no results" message
+                         <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%' }}>
+                            No mods found matching your search criteria.
+                         </p>
+                    ) : (
+                        filteredAssets.map(asset => ( // Map over filtered list
                             <ModCard
                                 key={asset.id}
                                 asset={asset}
-                                entitySlug={entitySlug} // Pass entitySlug for context if needed by ModCard
+                                entitySlug={entitySlug}
                                 onToggleComplete={handleToggleComplete}
                                 onEdit={handleOpenEditModal}
                                 onDelete={handleOpenDeleteModal}
-                                viewMode={viewMode} // Pass the current view mode
+                                viewMode={viewMode}
                             />
                         ))
-                    ) : (
-                        <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%' }}>
-                           No mods found for {entity.name}. You can import mods via the sidebar.
-                        </p>
                     )}
                 </div>
             </div>

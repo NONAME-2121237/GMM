@@ -1,5 +1,4 @@
-/* Paste the entire CSS content from your original genshin-modding-app.html here */
-/* Ensure the CSS icon placeholders (i.fa-home::before { ... }) are REMOVED */
+/* Genshin Modding App - Cleaned CSS */
 :root {
     --primary: #9c88ff;
     --secondary: #8c7ae6;
@@ -8,19 +7,23 @@
     --light: #f5f6fa;
     --accent: #ff9f43;
     --danger: #ff6b6b;
+    --danger-rgb: 255, 107, 107;
     --success: #1dd1a1;
     --card-bg: rgba(30, 30, 46, 0.7);
     --sidebar-width: 260px;
-    --electro: #a757cb; /* Example element color */
+    --accent-rgb: 255, 159, 67;
+    
+    /* Element colors */
+    --electro: #a757cb;
     --pyro: #ff7a3d;
     --cryo: #99d8f0;
     --hydro: #4cc2f1;
     --anemo: #75c4a9;
     --geo: #f8b63e;
     --dendro: #a0d73c;
-    --accent-rgb: 255, 159, 67;
 }
 
+/* Base styles */
 * {
     margin: 0;
     padding: 0;
@@ -31,34 +34,70 @@
 body {
     background-color: var(--darker);
     color: var(--light);
-    background-image: url('/api/placeholder/1920/1080'); /* Consider removing if too distracting or make configurable */
     background-size: cover;
     background-position: center;
     background-attachment: fixed;
     height: 100vh;
-    overflow: hidden; /* Prevent body scroll */
+    overflow: hidden;
 }
 
 .app-container {
     display: flex;
     height: 100vh;
-    overflow: hidden; /* Ensure container manages overflow */
+    overflow: hidden;
     backdrop-filter: blur(10px);
-    background-color: rgba(24, 24, 37, 0.6); /* Darker overlay for readability */
+    background-color: rgba(24, 24, 37, 0.6);
+}
+
+/* Animation definitions */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes skeleton-loading {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+.fadeIn {
+    animation: fadeIn 0.4s ease forwards;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 136, 255, 0.4);
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(156, 136, 255, 0.6);
 }
 
 /* Sidebar */
 .sidebar {
     width: var(--sidebar-width);
     background-color: var(--dark);
-    height: 100vh; /* Full height */
+    height: 100vh;
     padding: 20px;
-    transition: width 0.3s ease; /* Optional: transition if width changes */
+    transition: width 0.3s ease;
     border-right: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     flex-direction: column;
-    flex-shrink: 0; /* Prevent sidebar from shrinking */
-    overflow-y: auto; /* Allow sidebar scrolling if content exceeds height */
+    flex-shrink: 0;
+    overflow-y: auto;
 }
 
 .logo {
@@ -83,12 +122,12 @@ body {
 
 .logo svg {
     margin-right: 10px;
-    fill: url(#logo-gradient); /* Ensure the gradient ID matches SVG */
+    fill: url(#logo-gradient);
 }
 
 .nav-items {
     list-style: none;
-    flex-grow: 1; /* Allow nav items to take up space */
+    flex-grow: 1;
 }
 
 .nav-item {
@@ -100,7 +139,7 @@ body {
     display: flex;
     align-items: center;
     color: var(--light);
-    text-decoration: none; /* Remove underline from NavLink */
+    text-decoration: none;
 }
 
 .nav-item:hover {
@@ -114,9 +153,9 @@ body {
 }
 
 .nav-item i {
-    margin-right: 12px; /* Slightly more space */
-    font-size: 16px; /* Consistent icon size */
-    width: 20px; /* Ensure fixed width for alignment */
+    margin-right: 12px;
+    font-size: 16px;
+    width: 20px;
     text-align: center;
 }
 
@@ -127,10 +166,10 @@ body {
     flex-shrink: 0;
 }
 
+/* Preset Section */
 .preset-section {
-    /* margin-top: auto; */ /* Removed auto margin, let flexbox handle */
     padding: 15px 0;
-    flex-shrink: 0; /* Prevent shrinking */
+    flex-shrink: 0;
 }
 
 .preset-header {
@@ -178,12 +217,12 @@ body {
 
 .preset.active {
     border-left: 3px solid var(--primary);
-    padding-left: 7px; /* Adjust padding to account for border */
+    padding-left: 7px;
 }
 
 .preset-actions {
     display: flex;
-    gap: 8px; /* Slightly more space */
+    gap: 8px;
 }
 
 .preset-actions i {
@@ -199,13 +238,14 @@ body {
 
 /* Main Content */
 .main-content {
-    flex: 1; /* Allow content to take remaining space */
-    padding: 25px; /* Consistent padding */
-    overflow-y: auto; /* Enable vertical scrolling for content */
+    flex: 1;
+    padding: 25px;
+    overflow-y: auto;
     position: relative;
-    height: 100vh; /* Ensure it tries to take full viewport height */
+    height: 100vh;
 }
 
+/* Page Header */
 .page-header {
     display: flex;
     justify-content: space-between;
@@ -213,8 +253,8 @@ body {
     margin-bottom: 25px;
     padding-bottom: 15px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    flex-wrap: wrap; /* Allow wrapping on smaller screens */
-    gap: 15px;
+    flex-wrap: wrap;
+    gap: 20px;
 }
 
 .page-title {
@@ -222,9 +262,11 @@ body {
     font-weight: 600;
     display: flex;
     align-items: center;
+    margin-right: auto;
+    flex-shrink: 0;
 }
 
-.page-title i { /* For back arrow etc */
+.page-title i {
     margin-right: 15px;
     cursor: pointer;
     font-size: 20px;
@@ -237,14 +279,14 @@ body {
     color: var(--primary);
 }
 
-
+/* Navigation Tabs */
 .tab-navigation {
     display: flex;
     gap: 10px;
     margin-bottom: 25px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     padding-bottom: 10px;
-    flex-wrap: wrap; /* Allow tabs to wrap */
+    flex-wrap: wrap;
 }
 
 .tab {
@@ -252,7 +294,7 @@ body {
     cursor: pointer;
     transition: all 0.2s ease;
     border-radius: 6px;
-    white-space: nowrap; /* Prevent tab text wrapping */
+    white-space: nowrap;
 }
 
 .tab:hover {
@@ -264,46 +306,119 @@ body {
     color: white;
 }
 
+/* Search Bar */
+.search-bar-container {
+    flex-shrink: 0;
+    width: 100%;
+    max-width: 300px;
+}
+
 .search-bar {
     position: relative;
-    margin-bottom: 25px; /* Consistent spacing */
+    width: 100%;
 }
 
 .search-bar input {
     width: 100%;
-    padding: 12px 20px;
-    padding-left: 45px; /* More space for icon */
+    padding: 12px 20px 12px 45px;
     background-color: var(--dark);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
     color: var(--light);
-    font-size: 15px; /* Slightly larger font */
+    font-size: 15px;
     transition: all 0.2s ease;
 }
 
 .search-bar input:focus {
     outline: none;
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(156, 136, 255, 0.3); /* Larger focus ring */
+    box-shadow: 0 0 0 3px rgba(156, 136, 255, 0.3);
 }
 
 .search-bar i {
     position: absolute;
-    left: 18px; /* Adjust icon position */
+    left: 18px;
     top: 50%;
     transform: translateY(-50%);
     color: rgba(255, 255, 255, 0.5);
     font-size: 16px;
 }
 
-.cards-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); /* Slightly wider min card width */
-    gap: 25px; /* Consistent gap */
-    padding-bottom: 30px; /* Space at bottom */
+@media (min-width: 992px) {
+    .search-bar-container {
+        width: auto;
+    }
 }
 
-.character-card { /* Reused for EntityCard */
+/* Element Filters */
+.element-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.element-filter-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.element-filter-button i {
+    font-size: 14px;
+    color: var(--element-color, var(--light));
+}
+
+.element-filter-button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.element-filter-button.active {
+    background-color: var(--element-color, var(--primary));
+    border-color: var(--element-color, var(--primary));
+    color: var(--darker);
+    font-weight: 600;
+    box-shadow: 0 0 10px rgba(156, 136, 255, 0.3);
+}
+
+.element-filter-button.active i {
+    color: inherit;
+}
+
+.filter-button-name {
+    display: none;
+}
+
+@media (min-width: 768px) {
+    .filter-button-name {
+        display: inline;
+    }
+    .element-filter-button {
+        padding: 6px 14px;
+    }
+}
+
+/* Cards Grid */
+.cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 25px;
+    padding-bottom: 30px;
+}
+
+/* Character/Entity Card */
+.character-card {
     background-color: var(--card-bg);
     border-radius: 12px;
     overflow: hidden;
@@ -312,12 +427,11 @@ body {
     position: relative;
     box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.05);
-    text-decoration: none; /* Remove link underline */
-    color: var(--light); /* Ensure text color is inherited correctly */
-    display: flex; /* Use flexbox for better internal control */
-    flex-direction: column; /* Stack image and content vertically */
+    text-decoration: none;
+    color: var(--light);
+    display: flex;
+    flex-direction: column;
 }
-
 
 .character-card:hover {
     transform: translateY(-5px);
@@ -326,11 +440,11 @@ body {
 }
 
 .card-image {
-    height: 220px; /* Slightly taller image */
+    height: 220px;
     background-size: cover;
-    background-position: center top; /* Often better for character portraits */
+    background-position: center top;
     position: relative;
-    flex-shrink: 0; /* Prevent image shrinking */
+    flex-shrink: 0;
 }
 
 .card-image::after {
@@ -339,23 +453,23 @@ body {
     bottom: 0;
     left: 0;
     right: 0;
-    height: 70px; /* Taller gradient */
-    background: linear-gradient(to top, rgba(30, 30, 46, 0.95), transparent); /* Darker gradient */
+    height: 70px;
+    background: linear-gradient(to top, rgba(30, 30, 46, 0.95), transparent);
 }
 
 .card-content {
     padding: 15px;
     text-align: center;
-    flex-grow: 1; /* Allow content to take remaining space */
+    flex-grow: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center; /* Center content vertically */
+    justify-content: center;
 }
 
 .card-name {
     font-weight: 600;
     font-size: 16px;
-    margin-bottom: 8px; /* More space */
+    margin-bottom: 8px;
 }
 
 .card-element {
@@ -364,37 +478,57 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 5px; /* Space between icon and text */
+    gap: 5px;
 }
 
 .card-element i {
-     /* No margin needed if using gap */
-     /* color: var(--accent); */ /* Color can be dynamic based on element */
-     font-size: 16px; /* Match text size */
+    font-size: 16px;
+}
+
+/* Card badges */
+.card-badges-container {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    z-index: 2;
 }
 
 .card-badge {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    background-color: rgba(29, 209, 161, 0.85); /* Slightly transparent */
     color: white;
-    font-size: 11px; /* Smaller badge */
-    padding: 4px 8px;
+    font-size: 11px;
+    padding: 3px 7px;
     border-radius: 6px;
     font-weight: 600;
-    z-index: 2; /* Ensure badge is above gradient */
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
-/* Character/Entity Page */
-/* .character-page is just the container, use general styles */
+.card-badge.total-badge {
+    background-color: rgba(156, 136, 255, 0.85);
+}
 
+.card-badge.enabled-badge {
+    background-color: rgba(29, 209, 161, 0.9);
+}
+
+.card-badge i {
+    vertical-align: middle;
+    font-size: 1em;
+}
+
+/* Character Profile */
 .character-profile {
     display: flex;
     gap: 30px;
     margin-bottom: 30px;
-    flex-wrap: wrap; /* Allow wrapping on smaller screens */
+    flex-wrap: wrap;
 }
 
 .character-avatar {
@@ -406,13 +540,13 @@ body {
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.1);
     background-color: var(--card-bg);
-    background-image: url('/api/placeholder/260/400'); /* Default placeholder */
+    background-image: url('/images/placeholder.jpg');
     background-size: cover;
-    background-position: center top; /* Adjust as needed */
-    flex-shrink: 0; /* Prevent shrinking */
+    background-position: center top;
+    flex-shrink: 0;
 }
 
-.character-avatar::after { /* Optional gradient overlay */
+.character-avatar::after {
     content: '';
     position: absolute;
     bottom: 0;
@@ -420,12 +554,12 @@ body {
     right: 0;
     height: 120px;
     background: linear-gradient(to top, rgba(30, 30, 46, 0.9), transparent);
-    pointer-events: none; /* Allow clicks through gradient */
+    pointer-events: none;
 }
 
 .character-info {
-    flex: 1; /* Take remaining space */
-    min-width: 300px; /* Prevent getting too squished */
+    flex: 1;
+    min-width: 300px;
     background-color: var(--card-bg);
     border-radius: 12px;
     padding: 25px;
@@ -439,50 +573,45 @@ body {
     margin-bottom: 10px;
     display: flex;
     align-items: center;
-    flex-wrap: wrap; /* Allow wrapping */
-    gap: 15px; /* Space between name and icon */
+    flex-wrap: wrap;
+    gap: 15px;
 }
 
 .character-name .element-icon {
-    /* margin-left: 15px; */ /* Use gap instead */
-    /* color: var(--electro); */ /* Color set inline */
-    font-size: 28px; /* Slightly smaller */
+    font-size: 28px;
 }
 
 .character-details {
     display: flex;
-    flex-wrap: wrap; /* Allow wrapping */
-    gap: 12px; /* Consistent gap */
+    flex-wrap: wrap;
+    gap: 12px;
     margin-bottom: 20px;
 }
 
 .character-detail {
     background-color: rgba(0, 0, 0, 0.2);
-    padding: 8px 14px; /* More padding */
+    padding: 8px 14px;
     border-radius: 8px;
     font-size: 14px;
-    display: inline-flex; /* Use inline-flex */
+    display: inline-flex;
     align-items: center;
-    gap: 8px; /* Space between icon and text */
+    gap: 8px;
     white-space: nowrap;
 }
 
 .character-detail i {
-    /* margin-right: 8px; */ /* Use gap instead */
-    opacity: 0.8; /* Slightly more visible */
+    opacity: 0.8;
     font-size: 15px;
 }
 
 .character-description {
-    line-height: 1.7; /* More line spacing */
-    color: rgba(255, 255, 255, 0.85); /* Slightly brighter */
-    margin-bottom: 25px; /* More spacing */
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 25px;
     font-size: 15px;
 }
 
-/* --- Removed Character Stats Section --- */
-/* .character-stats { ... } */
-
+/* Mods Section */
 .mods-section {
     margin-top: 30px;
 }
@@ -491,22 +620,31 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 25px; /* Consistent spacing */
-    flex-wrap: wrap; /* Allow wrapping */
+    margin-bottom: 25px;
+    flex-wrap: wrap;
     gap: 15px;
 }
 
 .section-title {
-    font-size: 24px; /* Slightly larger */
+    font-size: 24px;
     font-weight: 600;
+    margin-right: auto;
 }
 
 .mods-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Min width for mod cards */
-    gap: 25px; /* Consistent gap */
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 25px;
 }
 
+/* Mod List */
+.mods-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Mod Card (Grid view) */
 .mod-card {
     background-color: var(--card-bg);
     border-radius: 12px;
@@ -515,7 +653,7 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.1);
     transition: all 0.3s ease;
     display: flex;
-    flex-direction: column; /* Stack elements vertically */
+    flex-direction: column;
 }
 
 .mod-card:hover {
@@ -524,37 +662,133 @@ body {
     border-color: rgba(156, 136, 255, 0.3);
 }
 
-/* Visual cue for disabled mods */
-.mod-disabled-visual {
-    opacity: 0.65;
-    /* background-color: rgba(40, 40, 56, 0.7); */ /* Optional different background */
-}
-.mod-disabled-visual:hover {
-    opacity: 0.8; /* Slightly less opaque on hover */
+/* Mod Card List View */
+.mod-card-list {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 10px 15px;
+    background-color: var(--card-bg);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    width: 100%;
+    min-height: 50px;
+    transition: background-color 0.2s ease;
 }
 
+.mod-card-list:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.mod-card-list .compact-toggle {
+    flex-shrink: 0;
+    margin-right: 5px;
+}
+
+.mod-list-name {
+    flex-grow: 1;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 15px;
+    color: var(--light);
+}
+
+.mod-list-author {
+    flex-shrink: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+.mod-list-error {
+    flex-shrink: 0;
+    color: var(--danger);
+    margin-left: 10px;
+    font-size: 14px;
+}
+
+.mod-list-error i {
+    vertical-align: middle;
+}
+
+.mod-list-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    margin-left: 5px;
+}
+
+.mod-list-actions .compact-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.mod-list-actions .compact-btn:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.mod-list-actions .compact-btn.danger:hover {
+    background-color: rgba(var(--danger-rgb), 0.15);
+    color: var(--danger);
+}
+
+.mod-list-actions .compact-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Disabled Visual Style */
+.mod-disabled-visual {
+    opacity: 0.65;
+}
+
+.mod-disabled-visual:hover {
+    opacity: 0.8;
+}
+
+.mod-card-list.mod-disabled-visual {
+    opacity: 0.65;
+}
+
+/* Mod Card Header */
 .mod-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 15px;
-    gap: 15px; /* Space between title and toggle */
+    gap: 15px;
     flex-shrink: 0;
 }
 
 .mod-title {
     font-weight: 600;
-    font-size: 17px; /* Slightly larger */
-    flex-grow: 1; /* Allow title to take space */
-    word-break: break-word; /* Prevent long titles overflowing */
+    font-size: 17px;
+    flex-grow: 1;
+    word-break: break-word;
 }
 
+/* Toggle Switch */
 .toggle-switch {
     position: relative;
     display: inline-block;
     width: 46px;
     height: 24px;
-    flex-shrink: 0; /* Prevent toggle shrinking */
+    flex-shrink: 0;
 }
 
 .toggle-switch input {
@@ -570,7 +804,7 @@ body {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: #34495e; /* Darker grey */
+    background-color: #34495e;
     transition: .4s;
     border-radius: 24px;
 }
@@ -599,23 +833,22 @@ input:checked + .slider:before {
     transform: translateX(22px);
 }
 
-/* Disabled toggle style */
 input:disabled + .slider {
     cursor: not-allowed;
     background-color: #7f8c8d;
 }
 
-
+/* Mod Category */
 .mod-category {
     display: inline-block;
     padding: 4px 10px;
-    background-color: rgba(156, 136, 255, 0.15); /* Slightly stronger */
+    background-color: rgba(156, 136, 255, 0.15);
     color: var(--primary);
-    border-radius: 6px; /* More rounded */
+    border-radius: 6px;
     font-size: 12px;
     margin-bottom: 12px;
     font-weight: 500;
-    align-self: flex-start; /* Align tag to the left */
+    align-self: flex-start;
 }
 
 .mod-description {
@@ -623,18 +856,18 @@ input:disabled + .slider {
     color: rgba(255, 255, 255, 0.8);
     font-size: 14px;
     line-height: 1.6;
-    flex-grow: 1; /* Allow description to fill space */
+    flex-grow: 1;
 }
 
 .mod-details {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: auto; /* Push to bottom */
-    padding-top: 10px; /* Space above details */
-    border-top: 1px solid rgba(255, 255, 255, 0.05); /* Subtle separator */
+    margin-top: auto;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
     gap: 15px;
-    flex-wrap: wrap; /* Allow wrapping */
+    flex-wrap: wrap;
     flex-shrink: 0;
 }
 
@@ -644,42 +877,80 @@ input:disabled + .slider {
     white-space: nowrap;
 }
 
+/* Key Binding */
 .key-binding {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    background-color: rgba(0, 0, 0, 0.25); /* Darker background */
+    background-color: rgba(0, 0, 0, 0.25);
     padding: 5px 10px;
     border-radius: 6px;
     font-size: 13px;
-    gap: 6px; /* Space between icon and keys */
+    gap: 6px;
 }
 
 .key-binding i {
-    /* margin-right: 8px; */ /* Use gap instead */
     opacity: 0.7;
 }
 
 .key {
     background-color: rgba(255, 255, 255, 0.1);
-    padding: 3px 8px; /* Slightly more padding */
+    padding: 3px 8px;
     border-radius: 4px;
-    font-family: 'Consolas', 'Monaco', monospace; /* Monospace font */
+    font-family: 'Consolas', 'Monaco', monospace;
     font-weight: 600;
     font-size: 12px;
-    /* margin: 0 2px; */ /* Use gap instead */
     transition: all 0.2s ease;
-    display: inline-block; /* Ensure keys are blocks */
+    display: inline-block;
 }
 
 .key:hover {
     background-color: rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px); /* Subtle lift */
+    transform: translateY(-1px);
 }
 
-/* Button styles */
+/* View Mode Toggle */
+.view-mode-toggle {
+    display: inline-flex;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.view-mode-toggle .btn-icon {
+    appearance: none;
+    background: transparent;
+    border: none;
+    padding: 6px 12px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    line-height: 1;
+}
+
+.view-mode-toggle .btn-icon:not(.active):hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.view-mode-toggle .btn-icon.active {
+    background-color: var(--primary);
+    color: white;
+    cursor: default;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.view-mode-toggle .btn-icon:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+    z-index: 1;
+}
+
+/* Button Styles */
 .btn {
-    padding: 9px 18px; /* Slightly larger buttons */
+    padding: 9px 18px;
     border-radius: 8px;
     font-weight: 500;
     font-size: 14px;
@@ -689,8 +960,8 @@ input:disabled + .slider {
     align-items: center;
     justify-content: center;
     border: none;
-    text-decoration: none; /* Remove link underline if used on <a> */
-    gap: 8px; /* Space between icon and text */
+    text-decoration: none;
+    gap: 8px;
     white-space: nowrap;
 }
 
@@ -707,7 +978,7 @@ input:disabled + .slider {
 .btn-outline {
     background-color: transparent;
     color: var(--light);
-    border: 1px solid rgba(255, 255, 255, 0.3); /* Slightly more visible border */
+    border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .btn-outline:hover {
@@ -715,204 +986,41 @@ input:disabled + .slider {
     border-color: rgba(255, 255, 255, 0.5);
 }
 
-.btn i {
-    /* margin-right: 8px; */ /* Use gap instead */
-    font-size: 1em; /* Make icon size relative to button font size */
-}
-
-
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); } /* Smaller distance */
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.fadeIn {
-    animation: fadeIn 0.4s ease forwards; /* Slightly faster */
-}
-
-/* Utility for placeholder text */
-.placeholder-text {
-    color: rgba(255, 255, 255, 0.5);
-    font-style: italic;
-    text-align: center;
-    padding: 20px;
-}
-
-/* Scrollbar styles (optional, for better aesthetics) */
-::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 10px;
-}
-
-::-webkit-scrollbar-thumb {
-    background-color: rgba(156, 136, 255, 0.4); /* Use primary color */
-    border-radius: 10px;
-    border: 2px solid transparent;
-    background-clip: content-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(156, 136, 255, 0.6);
-}
-
-/* Page Header adjustments */
-.page-header {
-    display: flex;
-    justify-content: space-between; /* Key for spacing items */
-    align-items: center;
-    flex-wrap: wrap; /* Allow wrapping */
-    gap: 20px; /* Gap between items (title, filters, search) */
-    margin-bottom: 25px;
-    padding-bottom: 15px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.page-title {
-    margin-right: auto; /* Push other items to the right */
-    flex-shrink: 0; /* Prevent title shrinking */
-}
-
-/* Element Filters */
-.element-filters {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap; /* Allow filters to wrap */
-    justify-content: center; /* Center filters if they wrap */
-    /* Removed flex-grow, let it size naturally */
-}
-
-.element-filter-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 20px; /* Pill shape */
-    background-color: transparent;
-    color: rgba(255, 255, 255, 0.7);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 13px;
-    white-space: nowrap;
-}
-
-.element-filter-button i {
-    font-size: 14px;
-    color: var(--element-color, var(--light)); /* Use color variable */
-}
-
-.element-filter-button:hover {
-    background-color: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.4);
-    color: rgba(255, 255, 255, 0.9);
-}
-
-.element-filter-button.active {
-    background-color: var(--element-color, var(--primary));
-    border-color: var(--element-color, var(--primary));
-    color: var(--darker); /* Dark text on active colored background */
-    font-weight: 600;
-    box-shadow: 0 0 10px rgba(156, 136, 255, 0.3); /* Optional subtle glow */
-}
-.element-filter-button.active i {
-    color: inherit; /* Inherit dark color from button */
-}
-
-/* Hide text on smaller screens if desired */
-.filter-button-name {
-    display: none; /* Hide text by default */
-}
-@media (min-width: 768px) { /* Show text on larger screens */
-    .filter-button-name {
-        display: inline;
-    }
-    .element-filter-button {
-         padding: 6px 14px; /* Slightly more padding when text shown */
-    }
-}
-
-
-/* Search Bar Alignment */
-.search-bar-container {
-    /* No specific styles needed if page-header handles alignment */
-    /* If more control needed: */
-    /* margin-left: auto; */ /* Push to the far right if title takes minimal space */
-    flex-shrink: 0; /* Prevent shrinking */
-    width: 100%; /* Default full width on wrap */
-    max-width: 300px; /* Max width for search bar */
-}
-
-@media (min-width: 992px) { /* Adjust breakpoint as needed */
-    .search-bar-container {
-        width: auto; /* Allow shrinking on larger screens */
-    }
-}
-
-
-.search-bar {
-    position: relative;
-    /* margin-bottom: 0; */ /* Remove bottom margin as it's now in header */
-    width: 100%; /* Ensure search bar fills its container */
-}
-
-.search-bar input {
-    /* Input styles remain largely the same */
-    font-size: 14px; /* Adjust if needed */
-}
-
-.search-bar i {
-    /* Icon styles remain largely the same */
-    left: 15px; /* Adjust if needed */
-    font-size: 15px;
-}
-
-/* Ensure grid column span for placeholder text works */
-.placeholder-text[style*="grid-column"] {
-    width: 100%;
-    text-align: center;
-}
-
 .btn-danger {
     background-color: var(--danger);
     color: white;
 }
+
 .btn-danger:hover {
-    background-color: #d63031; /* A slightly darker red */
-    box-shadow: 0 5px 15px rgba(var(--danger), 0.4);
+    background-color: #d63031;
+    box-shadow: 0 5px 15px rgba(var(--danger-rgb), 0.4);
 }
 
-/* Enhanced Library Stats Styles */
+.btn i {
+    font-size: 1em;
+}
+
+/* Enhanced Stats Styles */
 .enhanced-stats-container {
     display: flex;
     flex-direction: column;
     gap: 20px;
     animation: fadeIn 0.5s ease-out;
-  }
-  
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  
-  /* Stats Overview Section */
-  .stats-overview {
+}
+
+.stats-overview {
     display: flex;
     flex-direction: column;
     gap: 12px;
-  }
-  
-  .stats-row {
+}
+
+.stats-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
-  }
-  
-  .stat-card {
+}
+
+.stat-card {
     display: flex;
     align-items: center;
     padding: 16px;
@@ -921,34 +1029,34 @@ input:disabled + .slider {
     border-left: 4px solid transparent;
     transition: all 0.2s ease;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  }
-  
-  .stat-card:hover {
+}
+
+.stat-card:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
-  }
-  
-  .stat-card.total-mods {
-    border-left-color: #3b82f6; /* Blue */
+}
+
+.stat-card.total-mods {
+    border-left-color: #3b82f6;
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
-  }
-  
-  .stat-card.enabled {
-    border-left-color: #4ade80; /* Green */
+}
+
+.stat-card.enabled {
+    border-left-color: #4ade80;
     background: linear-gradient(135deg, rgba(74, 222, 128, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
-  }
-  
-  .stat-card.disabled {
-    border-left-color: #64748b; /* Gray */
+}
+
+.stat-card.disabled {
+    border-left-color: #64748b;
     background: linear-gradient(135deg, rgba(100, 116, 139, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
-  }
-  
-  .stat-card.uncategorized {
-    border-left-color: #f97316; /* Orange */
+}
+
+.stat-card.uncategorized {
+    border-left-color: #f97316;
     background: linear-gradient(135deg, rgba(249, 115, 22, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
-  }
-  
-  .stat-icon {
+}
+
+.stat-icon {
     font-size: 22px;
     width: 40px;
     height: 40px;
@@ -958,66 +1066,66 @@ input:disabled + .slider {
     background: rgba(255, 255, 255, 0.1);
     border-radius: 8px;
     margin-right: 12px;
-  }
-  
-  .total-mods .stat-icon { color: #3b82f6; }
-  .enabled .stat-icon { color: #4ade80; }
-  .disabled .stat-icon { color: #64748b; }
-  .uncategorized .stat-icon { color: #f97316; }
-  
-  .stat-info {
+}
+
+.total-mods .stat-icon { color: #3b82f6; }
+.enabled .stat-icon { color: #4ade80; }
+.disabled .stat-icon { color: #64748b; }
+.uncategorized .stat-icon { color: #f97316; }
+
+.stat-info {
     display: flex;
     flex-direction: column;
-  }
-  
-  .stat-label {
+}
+
+.stat-label {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.7);
     margin-bottom: 4px;
-  }
-  
-  .stat-value {
+}
+
+.stat-value {
     font-size: 20px;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.95);
-  }
-  
-  .animated-counter {
+}
+
+.animated-counter {
     display: inline-block;
     min-width: 30px;
-  }
-  
-  /* Charts Section */
-  .stats-charts {
+}
+
+/* Charts Section */
+.stats-charts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 20px;
     margin-top: 10px;
-  }
-  
-  .chart-container {
+}
+
+.chart-container {
     background: rgba(15, 23, 42, 0.6);
     border-radius: 12px;
     padding: 16px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
-  }
-  
-  .chart-container:hover {
+}
+
+.chart-container:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
-  }
-  
-  .chart-title {
+}
+
+.chart-title {
     font-size: 16px;
     font-weight: 500;
     margin-bottom: 10px;
     color: rgba(255, 255, 255, 0.85);
     text-align: center;
     position: relative;
-  }
-  
-  .chart-title::after {
+}
+
+.chart-title::after {
     content: '';
     position: absolute;
     bottom: -6px;
@@ -1027,47 +1135,47 @@ input:disabled + .slider {
     height: 2px;
     background: rgba(255, 255, 255, 0.2);
     border-radius: 2px;
-  }
-  
-  .chart-legend {
+}
+
+.chart-legend {
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
     gap: 12px;
     margin-top: 8px;
-  }
-  
-  .legend-item {
+}
+
+.legend-item {
     display: flex;
     align-items: center;
     font-size: 12px;
-  }
-  
-  .legend-color {
+}
+
+.legend-color {
     width: 12px;
     height: 12px;
     border-radius: 3px;
     margin-right: 6px;
-  }
-  
-  /* Loading Placeholders */
-  .stats-loading-placeholder {
+}
+
+/* Loading Placeholders */
+.stats-loading-placeholder {
     display: flex;
     flex-direction: column;
     gap: 10px;
     padding: 20px;
-  }
-  
-  .skeleton-line {
+}
+
+.skeleton-line {
     height: 16px;
     width: 100%;
     background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 37%, rgba(255, 255, 255, 0.05) 63%);
     background-size: 400% 100%;
     animation: skeleton-loading 1.4s ease infinite;
     border-radius: 4px;
-  }
-  
-  .skeleton-circle {
+}
+
+.skeleton-circle {
     height: 100px;
     width: 100px;
     border-radius: 50%;
@@ -1075,193 +1183,34 @@ input:disabled + .slider {
     background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 37%, rgba(255, 255, 255, 0.05) 63%);
     background-size: 400% 100%;
     animation: skeleton-loading 1.4s ease infinite;
-  }
-  
-  @keyframes skeleton-loading {
-    0% { background-position: 100% 50%; }
-    100% { background-position: 0 50%; }
-  }
-  
-  /* Error state */
-  .stats-error {
+}
+
+/* Error state */
+.stats-error {
     text-align: center;
     padding: 30px 20px;
     color: var(--danger);
     display: flex;
     flex-direction: column;
     align-items: center;
-  }
-  
-  /* Responsive adjustments */
-  @media (max-width: 768px) {
-    .stats-charts {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  /* Ensure mods-list is a column */
-.mods-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px; /* Slightly smaller gap for list */
 }
 
-/* === Compact List Item Styles === */
-.mod-card-list {
-    display: flex;
-    align-items: center;
-    gap: 15px; /* Space between elements */
-    padding: 10px 15px; /* Reduced padding */
-    background-color: var(--card-bg);
-    border-radius: 8px; /* Slightly less rounded */
-    border: 1px solid rgba(255, 255, 255, 0.1);
+/* Placeholder text */
+.placeholder-text {
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
+}
+
+.placeholder-text[style*="grid-column"] {
     width: 100%;
-    min-height: 50px; /* Ensure consistent height */
-    transition: background-color 0.2s ease;
-}
-.mod-card-list:hover {
-    background-color: rgba(255, 255, 255, 0.05); /* Subtle hover */
+    text-align: center;
 }
 
-/* Toggle Switch in List */
-.mod-card-list .compact-toggle {
-    flex-shrink: 0; /* Prevent toggle from shrinking */
-    margin-right: 5px; /* Slight space after toggle */
-}
-
-
-/* Mod Name in List */
-.mod-list-name {
-    flex-grow: 1; /* Takes up available space */
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis; /* Truncate long names */
-    font-size: 15px;
-    color: var(--light);
-}
-
-/* Author in List (Optional display) */
-.mod-list-author {
-    flex-shrink: 0; /* Don't shrink */
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.6);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 180px; /* Limit author width */
-    margin-left: auto; /* Pushes it towards the right before actions */
-    margin-right: 10px;
-}
-
-/* Error Icon in List */
-.mod-list-error {
-    flex-shrink: 0;
-    color: var(--danger);
-    margin-left: 10px; /* Space before error */
-    font-size: 14px;
-}
-.mod-list-error i {
-    vertical-align: middle;
-}
-
-
-/* Action Buttons in List */
-.mod-list-actions {
-    display: flex;
-    align-items: center;
-    gap: 5px; /* Small gap between buttons */
-    flex-shrink: 0;
-    margin-left: 5px; /* Space before actions */
-}
-
-.mod-list-actions .compact-btn {
-    background: none;
-    border: none;
-    color: rgba(255, 255, 255, 0.6);
-    padding: 4px; /* Smaller padding */
-    font-size: 14px; /* Slightly smaller icon */
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background-color 0.2s ease, color 0.2s ease;
-}
-.mod-list-actions .compact-btn:hover {
-     background-color: rgba(255, 255, 255, 0.1);
-     color: rgba(255, 255, 255, 0.9);
-}
-.mod-list-actions .compact-btn.danger:hover {
-     background-color: rgba(var(--danger-rgb, 255, 107, 107), 0.15); /* Add --danger-rgb if needed */
-     color: var(--danger);
-}
-.mod-list-actions .compact-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-
-/* Disabled visual for list item */
-.mod-card-list.mod-disabled-visual {
-    opacity: 0.65;
-}
-
-/* src/styles/main.css - Enhanced View Mode Toggle Styles */
-
-.view-mode-toggle {
-    display: inline-flex; /* Use inline-flex to group buttons */
-    border-radius: 8px; /* Overall container rounding */
-    overflow: hidden; /* Clip children to rounded corners */
-    background-color: rgba(0, 0, 0, 0.2); /* Subtle background for the group */
-    border: 1px solid rgba(255, 255, 255, 0.1); /* Subtle border */
-}
-
-.view-mode-toggle .btn-icon {
-    /* Reset default button styles */
-    appearance: none;
-    background: transparent; /* Make inactive transparent */
-    border: none; /* Remove individual borders */
-    /* border-right: 1px solid rgba(255, 255, 255, 0.1); */ /* Optional separator */
-
-    /* Common styling */
-    padding: 6px 12px; /* Adjust padding as needed */
-    color: rgba(255, 255, 255, 0.6); /* Default icon color */
-    font-size: 14px;
-    cursor: pointer;
-    transition: background-color 0.2s ease, color 0.2s ease;
-    line-height: 1; /* Ensure icon is centered vertically */
-}
-
-/* Hover state for inactive buttons */
-.view-mode-toggle .btn-icon:not(.active):hover {
-   background-color: rgba(255, 255, 255, 0.1);
-   color: rgba(255, 255, 255, 0.9);
-}
-
-/* Active state */
-.view-mode-toggle .btn-icon.active {
-   background-color: var(--primary); /* Use primary color for active */
-   color: white; /* White icon on active background */
-   cursor: default; /* Indicate it's already selected */
-   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2); /* Subtle inset shadow */
-}
-
-/* Focus state - optional for accessibility */
-.view-mode-toggle .btn-icon:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: -2px;
-    z-index: 1; /* Ensure focus outline is visible */
-}
-
-/* Ensure the section-header can accommodate the new toggle */
-.section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 25px;
-    flex-wrap: wrap; /* Allow wrapping */
-    gap: 15px; /* Space between title and toggle */
-}
-
-.section-title {
-    font-size: 24px;
-    font-weight: 600;
-    margin-right: auto; /* Push toggle to the right if space allows */
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .stats-charts {
+        grid-template-columns: 1fr;
+    }
 }

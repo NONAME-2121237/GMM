@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/tauri';
 import EntityCard from '../components/EntityCard';
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/localStorage';
 
-// Element data (keep existing)
+// Element data
 const elements = [
     { key: 'all', name: 'All', icon: 'fas fa-circle-nodes', color: 'var(--light)' },
     { key: 'Pyro', name: 'Pyro', icon: 'fas fa-fire', color: 'var(--pyro)' },
@@ -17,27 +17,34 @@ const elements = [
     { key: 'Geo', name: 'Geo', icon: 'fas fa-mountain', color: 'var(--geo)' },
 ];
 
-// Helper to safely parse JSON (keep existing)
+// Helper to safely parse JSON
 const safeParseJson = (jsonString, defaultValue = null) => {
     if (!jsonString) return defaultValue;
-    try { return JSON.parse(jsonString); }
-    catch (e) { console.error("JSON parse error:", e); return defaultValue; }
+    try {
+        return JSON.parse(jsonString);
+    } catch (e) {
+        console.error("JSON parse error:", e);
+        return defaultValue;
+    }
 };
 
-// Sorting Options (keep existing)
+// Sorting Options including new ones
 const sortOptions = [
     { value: 'name-asc', label: 'Name (A-Z)' },
     { value: 'name-desc', label: 'Name (Z-A)' },
-    { value: 'count-desc', label: 'Mod Count (High-Low)' },
-    { value: 'count-asc', label: 'Mod Count (Low-High)' },
+    { value: 'total-desc', label: 'Total Mods (High-Low)' },
+    { value: 'total-asc', label: 'Total Mods (Low-High)' },
+    { value: 'enabled-desc', label: 'Enabled Mods (High-Low)' },
+    { value: 'enabled-asc', label: 'Enabled Mods (Low-High)' },
 ];
 const DEFAULT_SORT_OPTION = 'name-asc';
-const OTHER_ENTITY_SUFFIX = '-other'; // Define suffix constant
+const OTHER_ENTITY_SUFFIX = '-other'; // Make sure this matches backend
 
 function HomePage() {
     const { categorySlug } = useParams();
     const [categoryInfo, setCategoryInfo] = useState({ name: categorySlug, id: null });
-    const [entities, setEntities] = useState([]);
+    // State holds the new structure returned by the backend
+    const [entitiesWithCounts, setEntitiesWithCounts] = useState([]);
     const [loadingEntities, setLoadingEntities] = useState(true);
     const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -45,136 +52,158 @@ function HomePage() {
     const [sortOption, setSortOption] = useState(DEFAULT_SORT_OPTION);
     const sortStorageKey = `categorySort_${categorySlug}`;
 
+    // Fetch Category Info and Entities with Counts
     useEffect(() => {
         setLoadingEntities(true);
         setError(null);
-        setEntities([]);
+        setEntitiesWithCounts([]); // Clear previous entities
         setSelectedElement('all');
         setSearchTerm('');
         const savedSort = getLocalStorageItem(sortStorageKey, DEFAULT_SORT_OPTION);
         setSortOption(savedSort);
-        setCategoryInfo({ name: categorySlug || 'Unknown', id: null });
+        // Simple category name update, could fetch real name later if needed
+        setCategoryInfo({ name: categorySlug ? categorySlug.charAt(0).toUpperCase() + categorySlug.slice(1) : 'Unknown', id: null });
 
-        invoke('get_entities_by_category', { categorySlug })
-            .then(setEntities)
+        // Call the new backend command
+        invoke('get_entities_by_category_with_counts', { categorySlug })
+            .then(fetchedData => {
+                // Add console log to verify data structure
+                console.log(`[HomePage ${categorySlug}] Fetched entities with counts:`, fetchedData);
+                setEntitiesWithCounts(fetchedData || []); // Ensure it's an array
+            })
             .catch(err => {
-                console.error(`Failed to fetch entities for ${categorySlug}:`, err);
-                setError(`Could not load ${categorySlug}.`);
+                console.error(`Failed to fetch entities with counts for ${categorySlug}:`, err);
+                setError(`Could not load ${categorySlug}. Details: ${typeof err === 'string' ? err : err.message || 'Unknown error'}`);
             })
             .finally(() => setLoadingEntities(false));
 
-    }, [categorySlug, sortStorageKey]);
+    }, [categorySlug, sortStorageKey]); // Dependencies for fetching data
 
+    // Handle Sort Change
     const handleSortChange = (event) => {
         const newSortOption = event.target.value;
         setSortOption(newSortOption);
         setLocalStorageItem(sortStorageKey, newSortOption);
     };
 
-    // --- MODIFIED: Memoized filtered AND sorted list ---
+    // Memoized filtered AND sorted list
     const filteredAndSortedEntities = useMemo(() => {
-        // Filtering (keep existing logic)
-        let tempEntities = entities.filter(entity => {
+        // Start with the fetched data
+        let tempEntities = [...entitiesWithCounts]; // Create a copy to sort
+
+        // Filtering Logic
+        tempEntities = tempEntities.filter(entity => {
+            // Element Filter (only for characters category)
             if (categorySlug === 'characters' && selectedElement !== 'all') {
                 const details = safeParseJson(entity.details, {});
                 if (details?.element !== selectedElement) return false;
             }
-            if (searchTerm && !entity.name.toLowerCase().includes(searchTerm.toLowerCase())) {
-                 return false;
+            // Search Term Filter
+            if (searchTerm) {
+                const lowerSearch = searchTerm.toLowerCase();
+                if (!entity.name.toLowerCase().includes(lowerSearch)) {
+                     return false; // Exclude if name doesn't match
+                }
             }
-            return true;
+            return true; // Include if passes all filters
         });
 
-        // Sorting with "Other" priority for name sorts
+        // Sorting Logic with "Other" priority
         tempEntities.sort((a, b) => {
             const isAOther = a.slug.endsWith(OTHER_ENTITY_SUFFIX);
             const isBOther = b.slug.endsWith(OTHER_ENTITY_SUFFIX);
 
             // Prioritize "Other" group first
-            if (isAOther && !isBOther) return -1; // a (Other) comes before b
-            if (!isAOther && isBOther) return 1;  // b (Other) comes before a
-            // If both are Other or neither are Other, apply selected sort:
-            if (isAOther && isBOther) { // Within "Other", sort by name or count
-                switch (sortOption) {
-                    case 'name-desc': return b.name.localeCompare(a.name);
-                    case 'count-desc': return (b.mod_count ?? 0) - (a.mod_count ?? 0);
-                    case 'count-asc': return (a.mod_count ?? 0) - (b.mod_count ?? 0);
-                    case 'name-asc': // Fallthrough intended for default name ascending
-                    default: return a.name.localeCompare(b.name);
-                }
-            } else { // Neither is "Other", standard sort
-                 switch (sortOption) {
-                    case 'name-asc': return a.name.localeCompare(b.name);
-                    case 'name-desc': return b.name.localeCompare(a.name);
-                    case 'count-desc': return (b.mod_count ?? 0) - (a.mod_count ?? 0);
-                    case 'count-asc': return (a.mod_count ?? 0) - (b.mod_count ?? 0);
-                    default: return 0;
-                }
-            }
+            if (isAOther && !isBOther) return -1;
+            if (!isAOther && isBOther) return 1;
 
+            // Apply selected sort (within 'Other' group or for non-'Other' items)
+            // Use nullish coalescing (?? 0) to safely handle potential undefined/null counts
+            switch (sortOption) {
+                case 'name-asc': return a.name.localeCompare(b.name);
+                case 'name-desc': return b.name.localeCompare(a.name);
+                case 'total-desc': return (b.total_mods ?? 0) - (a.total_mods ?? 0);
+                case 'total-asc': return (a.total_mods ?? 0) - (b.total_mods ?? 0);
+                case 'enabled-desc': return (b.enabled_mods ?? 0) - (a.enabled_mods ?? 0);
+                case 'enabled-asc': return (a.enabled_mods ?? 0) - (b.enabled_mods ?? 0);
+                default: return a.name.localeCompare(b.name); // Fallback to name ascending
+            }
         });
 
         return tempEntities;
-    }, [entities, searchTerm, selectedElement, categorySlug, sortOption]); // Keep dependencies
+    }, [entitiesWithCounts, searchTerm, selectedElement, categorySlug, sortOption]); // Dependencies for memoization
 
 
-    const pageTitle = categoryInfo.name.charAt(0).toUpperCase() + categoryInfo.name.slice(1);
+    const pageTitle = categoryInfo.name; // Use state for title
     const showElementFilters = categorySlug === 'characters';
 
     return (
         <div className="home-page fadeIn">
             <div className="page-header">
-                <h1 className="page-title">{pageTitle}</h1>
+                 <h1 className="page-title">{pageTitle}</h1>
 
-                {/* Sort Dropdown */}
-                <div className="sort-dropdown-container" style={{ marginLeft: showElementFilters ? '20px' : 'auto', marginRight: '20px' }}>
+                 {/* Sort Dropdown */}
+                 <div className="sort-dropdown-container" style={{ marginLeft: showElementFilters ? '20px' : 'auto', marginRight: '20px' }}>
                      <label htmlFor="sort-select" style={styles.sortLabel}>Sort by:</label>
                      <select id="sort-select" value={sortOption} onChange={handleSortChange} style={styles.sortSelect} aria-label="Sort entities">
                          {sortOptions.map(option => ( <option key={option.value} value={option.value}>{option.label}</option> ))}
                      </select>
-                </div>
+                 </div>
 
-                {/* Element Filters (Conditional) */}
-                {showElementFilters && (
-                    <div className="element-filters">
-                         {elements.map(element => (
-                            <button
-                                key={element.key}
-                                className={`element-filter-button ${selectedElement === element.key ? 'active' : ''}`}
-                                onClick={() => setSelectedElement(element.key)}
-                                title={element.name}
-                                style={{ '--element-color': element.color }}
-                            >
-                                <i className={`${element.icon} fa-fw`}></i>
-                                <span className="filter-button-name">{element.name}</span>
-                            </button>
-                        ))}
-                    </div>
-                )}
+                 {/* Element Filters (Conditional) */}
+                 {showElementFilters && (
+                     <div className="element-filters">
+                          {elements.map(element => (
+                             <button
+                                 key={element.key}
+                                 className={`element-filter-button ${selectedElement === element.key ? 'active' : ''}`}
+                                 onClick={() => setSelectedElement(element.key)}
+                                 title={element.name}
+                                 style={{ '--element-color': element.color }}
+                             >
+                                 <i className={`${element.icon} fa-fw`}></i>
+                                 <span className="filter-button-name">{element.name}</span>
+                             </button>
+                         ))}
+                     </div>
+                 )}
 
-                {/* Search Bar Container */}
-                <div className="search-bar-container">
-                     <div className="search-bar">
-                        <i className="fas fa-search"></i>
-                        <input type="text" placeholder={`Search ${pageTitle.toLowerCase()}...`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} aria-label={`Search ${pageTitle}`} />
-                    </div>
-                </div>
+                 {/* Search Bar Container */}
+                 <div className="search-bar-container">
+                      <div className="search-bar">
+                         <i className="fas fa-search"></i>
+                         <input
+                             type="text"
+                             placeholder={`Search ${pageTitle ? pageTitle.toLowerCase() : 'items'}...`}
+                             value={searchTerm}
+                             onChange={(e) => setSearchTerm(e.target.value)}
+                             aria-label={`Search ${pageTitle}`}
+                         />
+                     </div>
+                 </div>
             </div>
 
             {/* Content Area */}
-            {loadingEntities && <div className="placeholder-text">Loading {pageTitle.toLowerCase()}...</div>}
+            {loadingEntities && <div className="placeholder-text">Loading {pageTitle ? pageTitle.toLowerCase() : 'items'}... <i className="fas fa-spinner fa-spin"></i></div>}
             {error && <div className="placeholder-text" style={{ color: 'var(--danger)' }}>Error: {error}</div>}
 
             {!loadingEntities && !error && (
-                <div className="cards-grid"> {/* Keep grid class, individual cards handle view mode */}
+                <div className="cards-grid">
                     {filteredAndSortedEntities.length > 0 ? (
-                        filteredAndSortedEntities.map(entity => (
-                            <EntityCard key={entity.slug} entity={entity} />
+                        // Ensure the correct object structure is passed to EntityCard
+                        filteredAndSortedEntities.map(entityData => (
+                            <EntityCard key={entityData.slug} entity={entityData} />
                         ))
-                    ) : entities.length > 0 ? (
-                         <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>No {pageTitle.toLowerCase()} found matching your criteria.</p>
+                    ) : entitiesWithCounts.length > 0 ? (
+                         // Message when filters/search yield no results
+                         <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
+                             No {pageTitle ? pageTitle.toLowerCase() : 'items'} found matching your criteria.
+                         </p>
                      ) : (
-                         <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>No {pageTitle.toLowerCase()} have been added yet.</p>
+                         // Message when the category is genuinely empty
+                         <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
+                            No {pageTitle ? pageTitle.toLowerCase() : 'items'} have been added yet.
+                         </p>
                     )}
                 </div>
             )}
@@ -182,11 +211,13 @@ function HomePage() {
     );
 }
 
+// Styles for sort dropdown
 const styles = {
     sortLabel: {
         fontSize: '13px',
         color: 'rgba(255, 255, 255, 0.7)',
         marginRight: '8px',
+        whiteSpace: 'nowrap', // Prevent label wrapping
     },
     sortSelect: {
         padding: '6px 10px',
@@ -196,8 +227,10 @@ const styles = {
         color: 'var(--light)',
         fontSize: '13px',
         cursor: 'pointer',
-        minWidth: '150px',
+        minWidth: '180px', // Adjust width as needed
+        height: '34px', // Match height with filter buttons roughly
     },
 };
+
 
 export default HomePage;
