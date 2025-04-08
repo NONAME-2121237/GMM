@@ -69,6 +69,15 @@ struct ApplyProgress {
   message: String,
 }
 
+#[derive(Serialize, Debug, Clone)]
+struct DashboardStats {
+    total_mods: i64,
+    enabled_mods: i64,
+    disabled_mods: i64,
+    uncategorized_mods: i64, // Mods in entities ending with "-other"
+    category_counts: HashMap<String, i64>, // Category Name -> Count
+}
+
 // Type alias for the top-level structure (HashMap: category_slug -> CategoryDefinition)
 type Definitions = HashMap<String, CategoryDefinition>;
 
@@ -2425,6 +2434,117 @@ fn delete_preset(preset_id: i64, db_state: State<DbState>) -> CmdResult<()> {
     }
 }
 
+// --- Command to get Dashboard Stats ---
+#[command]
+fn get_dashboard_stats(db_state: State<DbState>) -> CmdResult<DashboardStats> {
+    let base_mods_path = match get_mods_base_path_from_settings(&db_state) {
+        Ok(p) => p,
+        Err(_) => {
+             // If base path isn't set, return default zeroed stats
+            return Ok(DashboardStats {
+                total_mods: 0,
+                enabled_mods: 0,
+                disabled_mods: 0,
+                uncategorized_mods: 0,
+                category_counts: HashMap::new(),
+            });
+        }
+    };
+
+    let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+
+    // 1. Total Mods
+    let total_mods = conn.query_row("SELECT COUNT(*) FROM assets", [], |row| row.get::<_, i64>(0))
+                         .map_err(|e| format!("Failed to get total mod count: {}", e))?;
+
+    // 2. Uncategorized Mods
+    let uncategorized_mods = conn.query_row(
+        "SELECT COUNT(a.id) FROM assets a JOIN entities e ON a.entity_id = e.id WHERE e.slug LIKE '%-other'",
+        [],
+        |row| row.get::<_, i64>(0)
+    ).map_err(|e| format!("Failed to get uncategorized mod count: {}", e))?;
+
+    // 3. Category Counts
+    let mut category_counts = HashMap::new();
+    let mut cat_stmt = conn.prepare(
+        "SELECT c.name, COUNT(a.id)
+         FROM categories c
+         JOIN entities e ON c.id = e.category_id
+         JOIN assets a ON e.id = a.entity_id
+         GROUP BY c.name
+         HAVING COUNT(a.id) > 0" // Only include categories with mods
+    ).map_err(|e| format!("Failed to prepare category count query: {}", e))?;
+
+    let cat_rows = cat_stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    }).map_err(|e| format!("Failed to execute category count query: {}", e))?;
+
+    for row_result in cat_rows {
+        match row_result {
+            Ok((name, count)) => { category_counts.insert(name, count); }
+            Err(e) => { eprintln!("[get_dashboard_stats] Error processing category count row: {}", e); }
+        }
+    }
+
+    // 4. Enabled/Disabled Count (Disk Check)
+    let mut enabled_mods = 0;
+    let mut disabled_mods = 0;
+    let mut disk_check_errors = 0;
+
+    // Fetch folder names for checking
+    let mut asset_folders_stmt = conn.prepare("SELECT folder_name FROM assets")
+        .map_err(|e| format!("Failed to prepare asset folder fetch: {}", e))?;
+    let asset_folder_rows = asset_folders_stmt.query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Failed to query asset folders: {}", e))?;
+
+    for folder_result in asset_folder_rows {
+        match folder_result {
+            Ok(clean_relative_path_str) => {
+                 let clean_relative_path = PathBuf::from(clean_relative_path_str.replace("\\", "/"));
+                 let filename_osstr = clean_relative_path.file_name().unwrap_or_default();
+                 let filename_str = filename_osstr.to_string_lossy();
+                 if filename_str.is_empty() { continue; }
+
+                 let disabled_filename = format!("{}{}", DISABLED_PREFIX, filename_str);
+                 let relative_parent_path = clean_relative_path.parent();
+
+                 let full_path_if_enabled = base_mods_path.join(&clean_relative_path);
+                 let full_path_if_disabled = match relative_parent_path {
+                    Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
+                    _ => base_mods_path.join(&disabled_filename),
+                 };
+
+                 if full_path_if_enabled.is_dir() {
+                     enabled_mods += 1;
+                 } else if full_path_if_disabled.is_dir() {
+                     disabled_mods += 1;
+                 } else {
+                     // Folder not found in either state - might have been deleted since last scan
+                     // We don't count it as enabled or disabled.
+                     disk_check_errors += 1;
+                 }
+            }
+            Err(e) => { eprintln!("[get_dashboard_stats] Error fetching asset folder row: {}", e); }
+        }
+    }
+
+    Ok(DashboardStats {
+        total_mods,
+        enabled_mods,
+        disabled_mods,
+        uncategorized_mods,
+        category_counts,
+    })
+}
+
+
+// --- Command to get App Version ---
+#[command]
+fn get_app_version() -> String {
+    // Read from environment variable set by build script/Cargo
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 // --- Main Function ---
 fn main() {
     let context = generate_context!();
@@ -2464,7 +2584,9 @@ fn main() {
             read_archive_file_content,
             // Presets
             create_preset, get_presets, get_favorite_presets, apply_preset,
-            toggle_preset_favorite, delete_preset
+            toggle_preset_favorite, delete_preset,
+            // Dashboard & Version
+            get_dashboard_stats, get_app_version
         ])
         .run(context)
         .expect("error while running tauri application");

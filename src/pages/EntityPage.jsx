@@ -1,10 +1,10 @@
-// --- START OF FILE src/pages/EntityPage.jsx ---
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/tauri';
 import ModCard from '../components/ModCard';
 import ModEditModal from '../components/ModEditModal';
-import ConfirmationModal from '../components/ConfirmationModal'; // Import confirmation modal
+import ConfirmationModal from '../components/ConfirmationModal';
+import { getLocalStorageItem, setLocalStorageItem } from '../utils/localStorage';
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -13,7 +13,7 @@ const parseDetails = (detailsJson) => {
         return JSON.parse(detailsJson);
     } catch (e) {
         console.error("Failed to parse entity details JSON:", e);
-        return {};
+        return {}; // Return empty object on error
     }
 };
 
@@ -24,14 +24,15 @@ const elementIconsFA = {
     Dendro: "fas fa-leaf",
 };
 const weaponIconsFA = {
-    Polearm: "fas fa-staff-aesculapius", Sword: "fas fa-sword", // Using fas icons
-    Claymore: "fas fa-gavel", Bow: "fas fa-bow-arrow", // Using fas icons
-    Catalyst: "fas fa-book-sparkles" // Using fas icons
+    Polearm: "fas fa-staff-aesculapius", Sword: "fas fa-sword",
+    Claymore: "fas fa-gavel", Bow: "fas fa-bow-arrow",
+    Catalyst: "fas fa-book-sparkles"
 };
 const RarityIcon = () => <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i>;
-
-// Default placeholder image path (relative to public) - For the main entity avatar
 const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.png';
+
+// Global View Mode Key
+const VIEW_MODE_STORAGE_KEY = 'entityViewMode';
 
 function EntityPage() {
     const { entitySlug } = useParams();
@@ -40,49 +41,43 @@ function EntityPage() {
     const [assets, setAssets] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    // Edit Modal State
     const [editingAsset, setEditingAsset] = useState(null);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    // Delete Modal State
     const [assetToDelete, setAssetToDelete] = useState(null);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false); // Loading state for delete operation
-    const [deleteError, setDeleteError] = useState(''); // Error state for delete operation
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState('');
+    const [viewMode, setViewMode] = useState('grid'); // Default, loaded in useEffect
 
-
+    // Fetch data (includes loading view mode)
     const fetchData = useCallback(async () => {
+        const savedViewMode = getLocalStorageItem(VIEW_MODE_STORAGE_KEY, 'grid');
+        setViewMode(savedViewMode);
+
         console.log(`[EntityPage ${entitySlug}] Fetching data...`);
         setLoading(true);
         setError(null);
-        setEntity(null); // Clear old data
-        setAssets([]); // Clear old data
+        setEntity(null);
+        setAssets([]);
         try {
-            // Fetch details and assets sequentially or in parallel
             const entityDetails = await invoke('get_entity_details', { entitySlug });
-            console.log(`[EntityPage ${entitySlug}] Fetched entity details:`, entityDetails);
             setEntity(entityDetails);
-            // Pass entitySlug when fetching assets
             const entityAssets = await invoke('get_assets_for_entity', { entitySlug });
-            console.log(`[EntityPage ${entitySlug}] Fetched assets:`, entityAssets);
             setAssets(entityAssets);
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error');
             console.error(`[EntityPage ${entitySlug}] Failed to load data:`, errorString);
-            // Distinguish between entity not found and other errors
-             if (errorString.includes("not found")) {
-                setError(`Entity '${entitySlug}' not found.`);
-             } else {
-                setError(`Could not load details or mods for ${entitySlug}. Details: ${errorString}`);
-             }
+             if (errorString.includes("not found")) setError(`Entity '${entitySlug}' not found.`);
+             else setError(`Could not load details or mods for ${entitySlug}. Details: ${errorString}`);
         } finally {
             setLoading(false);
             console.log(`[EntityPage ${entitySlug}] Fetching complete. Loading: ${false}`);
         }
-    }, [entitySlug]); // Dependency: refetch when slug changes
+    }, [entitySlug]);
 
     useEffect(() => {
         fetchData();
-    }, [fetchData]); // Run fetchData when the memoized function changes
+    }, [fetchData]);
 
     // Callback for ModCard to update state after toggle
     const handleToggleComplete = useCallback((assetId, newIsEnabledState) => {
@@ -90,25 +85,19 @@ function EntityPage() {
         setAssets(currentAssets =>
             currentAssets.map(asset => {
                 if (asset.id === assetId) {
-                    console.log(`[EntityPage ${entitySlug}] Updating asset ${assetId} in state. Old state:`, asset);
-                    // Determine the correct folder name based on the *new* state reported by backend
-                    const currentFolderName = asset.folder_name; // The name *before* the toggle completed visually
+                    const currentFolderName = asset.folder_name;
                     const isCurrentlyDisabledPrefixed = currentFolderName.startsWith('DISABLED_');
-                    const baseFolderName = isCurrentlyDisabledPrefixed ? currentFolderName.substring(9) : currentFolderName; // Remove 'DISABLED_' prefix (9 chars)
-
-                    // --- FIX: Handle potential nested paths during toggle renaming ---
+                    const baseFolderName = isCurrentlyDisabledPrefixed ? currentFolderName.substring(9) : currentFolderName;
                     const parts = baseFolderName.split('/');
-                    const filename = parts.pop() || ''; // Get the last part (filename)
-                    const parentPath = parts.join('/'); // Get the preceding path parts
-
+                    const filename = parts.pop() || '';
+                    const parentPath = parts.join('/');
                     let updatedFolderName;
                     if (newIsEnabledState) {
-                        updatedFolderName = baseFolderName; // Enabled state uses the clean base name
+                        updatedFolderName = baseFolderName;
                     } else {
                         const disabledFilename = `DISABLED_${filename}`;
-                        updatedFolderName = parentPath ? `${parentPath}/${disabledFilename}` : disabledFilename; // Reconstruct path with disabled prefix
+                        updatedFolderName = parentPath ? `${parentPath}/${disabledFilename}` : disabledFilename;
                     }
-
                     const updatedAsset = { ...asset, is_enabled: newIsEnabledState, folder_name: updatedFolderName };
                     console.log(`[EntityPage ${entitySlug}] Updated asset ${assetId} state:`, updatedAsset);
                     return updatedAsset;
@@ -116,7 +105,7 @@ function EntityPage() {
                 return asset;
             })
         );
-        // Refetch entity details (includes mod_count)
+        // Refetch entity details (includes mod_count) - moved inside the callback for consistency
          invoke('get_entity_details', { entitySlug })
             .then(updatedEntityDetails => {
                 console.log(`[EntityPage ${entitySlug}] Refetched entity details after toggle:`, updatedEntityDetails);
@@ -124,20 +113,20 @@ function EntityPage() {
             })
             .catch(err => console.error(`[EntityPage ${entitySlug}] Failed to refetch entity details after toggle:`, err));
 
-    }, [entitySlug]);
+    }, [entitySlug]); // Removed fetchData dependency here, explicit call inside
 
-
+    // goBack function
     const goBack = () => {
          if (window.history.length > 2) {
             navigate(-1);
          } else {
-             // Fallback to default category if no history
-             const fallbackCategory = entity?.category_id === 1 ? 'characters' : 'characters'; // Example logic
+             // Fallback logic (adjust as needed)
+             const fallbackCategory = entity?.category_id === 1 ? 'characters' : 'characters';
              navigate(`/category/${fallbackCategory}`);
          }
     };
 
-    // --- Edit Modal Handlers ---
+    // Edit Modal Handlers
     const handleOpenEditModal = useCallback((assetToEdit) => {
         console.log("Opening edit modal for:", assetToEdit);
         setEditingAsset(assetToEdit);
@@ -146,37 +135,33 @@ function EntityPage() {
 
     const handleCloseEditModal = useCallback(() => {
         setIsEditModalOpen(false);
-        setEditingAsset(null); // Clear editing state on close
+        setEditingAsset(null);
     }, []);
 
     const handleSaveEditSuccess = useCallback((originalAssetId, newTargetEntitySlug) => {
         console.log("Save successful, processing result for asset ID:", originalAssetId, "New Slug:", newTargetEntitySlug);
-        handleCloseEditModal(); // Close the modal on success
-
+        handleCloseEditModal();
         if (newTargetEntitySlug && newTargetEntitySlug !== entitySlug) {
-             // Relocation occurred, remove from current list
              console.log(`Asset ${originalAssetId} relocated from ${entitySlug} to ${newTargetEntitySlug}. Removing from list.`);
              setAssets(currentAssets => currentAssets.filter(asset => asset.id !== originalAssetId));
-              // Decrement mod count locally for immediate feedback (will be corrected on next full fetch)
               setEntity(currentEntity => ({ ...currentEntity, mod_count: Math.max(0, (currentEntity?.mod_count || 0) - 1) }));
         } else {
-            // No relocation, just refresh data for this entity to get updated info
             console.log(`Asset ${originalAssetId} updated within ${entitySlug}. Refreshing data.`);
             fetchData(); // Refetch all data for the current entity
         }
     }, [handleCloseEditModal, entitySlug, fetchData]);
 
-    // --- Delete Modal Handlers ---
+    // Delete Modal Handlers
     const handleOpenDeleteModal = useCallback((asset) => {
         setAssetToDelete(asset);
         setIsDeleteModalOpen(true);
-        setDeleteError(''); // Clear previous errors
+        setDeleteError('');
     }, []);
 
     const handleCloseDeleteModal = useCallback(() => {
         setIsDeleteModalOpen(false);
         setAssetToDelete(null);
-        setIsDeleting(false); // Ensure loading state is reset
+        setIsDeleting(false);
         setDeleteError('');
     }, []);
 
@@ -187,39 +172,42 @@ function EntityPage() {
         try {
             await invoke('delete_asset', { assetId: assetToDelete.id });
             console.log(`Asset ${assetToDelete.id} deleted successfully.`);
-            // Remove from state
             setAssets(currentAssets => currentAssets.filter(asset => asset.id !== assetToDelete.id));
-            // Update mod count in entity state (will be corrected on next full fetch if needed)
              setEntity(currentEntity => ({ ...currentEntity, mod_count: Math.max(0, (currentEntity?.mod_count || 0) - 1) }));
              handleCloseDeleteModal();
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown delete error');
             console.error(`Failed to delete asset ${assetToDelete.id}:`, errorString);
             setDeleteError(`Failed to delete: ${errorString}`);
-             setIsDeleting(false); // Keep modal open to show error
+             setIsDeleting(false);
         }
     }, [assetToDelete, handleCloseDeleteModal]);
 
+    // View Mode Toggle Handler
+    const toggleViewMode = (newMode) => {
+        if (newMode !== viewMode) {
+            setViewMode(newMode);
+            setLocalStorageItem(VIEW_MODE_STORAGE_KEY, newMode); // Save preference globally
+        }
+    };
 
+    // Loading/Error/No Entity checks
     if (loading) return <div className="placeholder-text">Loading entity details for {entitySlug}... <i className="fas fa-spinner fa-spin"></i></div>;
     if (error) return <div className="placeholder-text" style={{ color: 'var(--danger)' }}>Error: {error}</div>;
     if (!entity) return <div className="placeholder-text">Entity data could not be loaded.</div>;
 
-
+    // Details parsing and avatar URL
     const details = parseDetails(entity.details);
     const element = details?.element;
     const elementIconClass = element ? (elementIconsFA[element] || 'fas fa-question-circle') : null;
     const weapon = details?.weapon;
     const weaponIconClass = weapon ? (weaponIconsFA[weapon] || 'fas fa-question-circle') : null;
-
-     const avatarUrl = entity.base_image
-        ? `/images/entities/${entity.base_image}` // Assumes images are in public/images/entities/
-        : DEFAULT_ENTITY_PLACEHOLDER_IMAGE; // Fallback placeholder
-
-     const handleAvatarError = (e) => {
+    const avatarUrl = entity.base_image ? `/images/entities/${entity.base_image}` : DEFAULT_ENTITY_PLACEHOLDER_IMAGE;
+    const handleAvatarError = (e) => {
         if (e.target.src !== DEFAULT_ENTITY_PLACEHOLDER_IMAGE) {
             console.warn(`Failed to load entity avatar: ${avatarUrl}, falling back to placeholder.`);
-            e.target.style.backgroundImage = `url('${DEFAULT_ENTITY_PLACEHOLDER_IMAGE}')`; // Set background to placeholder
+            // Use background style fallback for div
+            e.target.style.backgroundImage = `url('${DEFAULT_ENTITY_PLACEHOLDER_IMAGE}')`;
         }
      };
 
@@ -232,7 +220,7 @@ function EntityPage() {
                         className="fas fa-arrow-left fa-fw"
                         onClick={goBack}
                         title="Back to list"
-                        style={{ cursor: 'pointer', marginRight: '15px' }}
+                        style={{ cursor: 'pointer', marginRight: '15px', opacity: 0.7, ':hover': { opacity: 1 } }}
                         role="button"
                         aria-label="Go back"
                         tabIndex={0}
@@ -240,12 +228,14 @@ function EntityPage() {
                     ></i>
                     {entity.name} Mods
                 </h1>
+                 {/* Optional: Add Search Bar here for mods if needed */}
             </div>
 
             <div className="character-profile">
                 <div
                     className="character-avatar"
                     style={{ backgroundImage: `url('${avatarUrl}')` }}
+                    // onError doesn't work directly on div background, handle indirectly if needed
                 >
                 </div>
 
@@ -268,7 +258,6 @@ function EntityPage() {
                     ) : (
                          <p className="character-description placeholder-text" style={{padding: 0, textAlign:'left'}}>No description available.</p>
                     )}
-                    {/* Mod count display - now updated by refetch */}
                     <p style={{fontSize: '13px', color: 'rgba(255, 255, 255, 0.6)', marginTop:'15px'}}>
                         Mods in library: {entity.mod_count ?? '...'}
                     </p>
@@ -279,39 +268,51 @@ function EntityPage() {
             <div className="mods-section">
                 <div className="section-header">
                     <h2 className="section-title">Available Mods ({assets.length})</h2>
+                    {/* View Mode Toggle Buttons */}
+                    <div className="view-mode-toggle" /* Style this container in CSS */ >
+                         <button
+                            className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} // Class determines styling
+                            onClick={() => toggleViewMode('grid')}
+                            title="Grid View"
+                            aria-label="Switch to grid view"
+                         >
+                             <i className="fas fa-th fa-fw"></i>
+                         </button>
+                         <button
+                             className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} // Class determines styling
+                             onClick={() => toggleViewMode('list')}
+                             title="List View"
+                             aria-label="Switch to list view"
+                         >
+                             <i className="fas fa-list fa-fw"></i>
+                         </button>
+                    </div>
                 </div>
 
-                <div className="mods-grid">
+                {/* Dynamic Class based on viewMode */}
+                <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'}>
                     {assets.length > 0 ? (
                         assets.map(asset => (
                             <ModCard
                                 key={asset.id}
                                 asset={asset}
-                                entitySlug={entitySlug}
+                                entitySlug={entitySlug} // Pass entitySlug for context if needed by ModCard
                                 onToggleComplete={handleToggleComplete}
                                 onEdit={handleOpenEditModal}
-                                onDelete={handleOpenDeleteModal} // Pass delete handler
+                                onDelete={handleOpenDeleteModal}
+                                viewMode={viewMode} // Pass the current view mode
                             />
                         ))
                     ) : (
-                        <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
+                        <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%' }}>
                            No mods found for {entity.name}. You can import mods via the sidebar.
                         </p>
                     )}
                 </div>
             </div>
 
-            {/* Edit Modal */}
-            {isEditModalOpen && editingAsset && (
-                <ModEditModal
-                    asset={editingAsset}
-                    currentEntitySlug={entitySlug} // Pass current slug for comparison logic in modal
-                    onClose={handleCloseEditModal}
-                    onSaveSuccess={(newTargetSlug) => handleSaveEditSuccess(editingAsset.id, newTargetSlug)} // Pass original ID and new slug
-                />
-            )}
-
-             {/* Delete Confirmation Modal */}
+            {/* Modals */}
+            {isEditModalOpen && editingAsset && ( <ModEditModal asset={editingAsset} currentEntitySlug={entitySlug} onClose={handleCloseEditModal} onSaveSuccess={handleSaveEditSuccess} /> )}
             {isDeleteModalOpen && assetToDelete && (
                  <ConfirmationModal
                     isOpen={isDeleteModalOpen}
@@ -319,7 +320,7 @@ function EntityPage() {
                     onConfirm={handleConfirmDelete}
                     title="Confirm Deletion"
                     confirmText="Delete"
-                    confirmButtonVariant="danger" // Style the confirm button as danger
+                    confirmButtonVariant="danger"
                     isLoading={isDeleting}
                     errorMessage={deleteError}
                  >

@@ -1,143 +1,222 @@
 // src/pages/HomeDashboard.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { useSettings } from '../contexts/SettingsContext';
 import { Link } from 'react-router-dom';
 import { open } from '@tauri-apps/api/shell';
+import EnhancedLibraryStats from '../components/EnhancedLibraryStats';
+
+// URLs for links
+const GENSHIN_WIKI_URL = "https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki";
+const PAIMON_MOE_URL = "https://paimon.moe";
+const INTERACTIVE_MAP_URL = "https://act.hoyolab.com/ys/app/interactive-map/index.html";
+const GAMEBANANA_URL = "https://gamebanana.com/mods/games/8552";
 
 function HomeDashboard() {
     const {
         isSetupComplete,
         isLoading: settingsLoading,
-        customLibraryUrl // Get the new setting
+        customLibraryUrl
     } = useSettings();
-    const [totalAssetCount, setTotalAssetCount] = useState(null);
-    const [loadingError, setLoadingError] = useState(null);
 
-    useEffect(() => {
-        if (isSetupComplete && totalAssetCount === null) {
-            setLoadingError(null);
-            invoke('get_total_asset_count')
-                .then(count => {
-                    console.log("Total asset count:", count);
-                    setTotalAssetCount(count);
-                })
-                .catch(err => {
-                    console.error("Error fetching total asset count:", err);
-                    setLoadingError("Could not check total mod count.");
-                    setTotalAssetCount(-1);
-                });
-        } else if (!isSetupComplete) {
-            setTotalAssetCount(null);
+    // State for stats
+    const [dashboardStats, setDashboardStats] = useState(null);
+    const [statsLoading, setStatsLoading] = useState(false);
+    const [statsError, setStatsError] = useState(null);
+
+    // State for app version
+    const [appVersion, setAppVersion] = useState(null);
+    const [versionLoading, setVersionLoading] = useState(false);
+    const [versionError, setVersionError] = useState(null);
+
+    // State for total count (still needed for initial prompt)
+    const [totalAssetCountForPrompt, setTotalAssetCountForPrompt] = useState(null);
+
+    // Combined fetch function
+    const fetchDashboardData = useCallback(async () => {
+        if (!isSetupComplete) return; // Don't fetch if setup isn't done
+
+        setStatsLoading(true);
+        setVersionLoading(true);
+        setStatsError(null);
+        setVersionError(null);
+
+        try {
+            const [statsResult, versionResult] = await Promise.allSettled([
+                invoke('get_dashboard_stats'),
+                invoke('get_app_version')
+            ]);
+
+            if (statsResult.status === 'fulfilled') {
+                console.log("Dashboard Stats:", statsResult.value);
+                setDashboardStats(statsResult.value);
+                // Also update the prompt count if needed
+                setTotalAssetCountForPrompt(statsResult.value.total_mods);
+            } else {
+                console.error("Error fetching dashboard stats:", statsResult.reason);
+                setStatsError("Could not load library statistics.");
+                setTotalAssetCountForPrompt(-1); // Indicate error for prompt
+            }
+
+            if (versionResult.status === 'fulfilled') {
+                setAppVersion(versionResult.value);
+            } else {
+                 console.error("Error fetching app version:", versionResult.reason);
+                 setVersionError("Could not load app version.");
+            }
+
+        } catch (err) { // Catch potential errors in Promise.all itself (unlikely here)
+             console.error("Error fetching dashboard data:", err);
+             setStatsError("An unexpected error occurred loading dashboard data.");
+             setVersionError("An unexpected error occurred loading dashboard data.");
+        } finally {
+            setStatsLoading(false);
+            setVersionLoading(false);
         }
-    }, [isSetupComplete, totalAssetCount]);
+    }, [isSetupComplete]); // Depend only on setup completion
+
+
+    // Initial fetch for the prompt logic (can be removed if stats load fast enough)
+     useEffect(() => {
+        if (isSetupComplete && totalAssetCountForPrompt === null && !dashboardStats) {
+            invoke('get_total_asset_count')
+                .then(count => setTotalAssetCountForPrompt(count))
+                .catch(() => setTotalAssetCountForPrompt(-1)); // Indicate error
+        } else if (!isSetupComplete) {
+             setTotalAssetCountForPrompt(null); // Reset if setup incomplete
+        }
+     }, [isSetupComplete, totalAssetCountForPrompt, dashboardStats]);
+
+    // Fetch all dashboard data when setup is complete
+    useEffect(() => {
+        fetchDashboardData();
+    }, [fetchDashboardData]); // fetchDashboardData depends on isSetupComplete
+
+    // Handlers (keep existing ones, add openExternalUrl)
+    const [actionError, setActionError] = useState(''); // For button errors
 
     const handleOpenModsFolder = async () => {
+        setActionError('');
          try { await invoke('open_mods_folder'); }
-         catch (error) { console.error("Failed to open mods folder:", error); setLoadingError("Failed to open mods folder"); }
+         catch (error) { console.error("Failed to open mods folder:", error); setActionError("Failed to open mods folder"); }
     };
 
-    // --- New: Function to open external URL ---
     const openExternalUrl = async (url) => {
-        setLoadingError(''); // Clear previous errors
+        setActionError('');
         if (!url) return;
         try {
-            console.log(`Attempting to open URL: ${url}`);
-            await open(url); // Use Tauri's open API
+            await open(url);
         } catch (error) {
              console.error(`Failed to open URL ${url}:`, error);
-             setLoadingError(`Failed to open link: ${error}`);
+             setActionError(`Failed to open link: ${error}`);
         }
      };
 
-    const showScanPrompt = isSetupComplete && totalAssetCount === 0;
+    const showScanPrompt = isSetupComplete && totalAssetCountForPrompt === 0;
 
-    // --- Determine custom library button text ---
     let customLibraryButtonText = 'Custom Library';
     if (customLibraryUrl) {
         try {
             const url = new URL(customLibraryUrl);
-            // Use hostname, remove www. if present
             customLibraryButtonText = url.hostname.replace(/^www\./, '');
-        } catch (_) {
-            // If URL is invalid, use a generic name but still show button if URL exists
-            customLibraryButtonText = 'Custom Link';
-        }
+        } catch (_) { customLibraryButtonText = 'Custom Link'; }
     }
 
-
     return (
-        <div className="fadeIn">
+        <div className="fadeIn" style={{ position: 'relative', minHeight: 'calc(100vh - 50px)' /* Ensure space for version */ }}>
             <div className="page-header" style={{ borderBottom: 'none', marginBottom: '15px' }}>
                  <h1 className="page-title">Dashboard</h1>
             </div>
 
             {showScanPrompt && (
-                <div style={{ padding: '20px', background: 'rgba(var(--accent-rgb, 255 159 67) / 0.1)', border: '1px solid var(--accent)', borderRadius: '12px', marginBottom: '20px', color: 'var(--accent)' }}>
-                     <h3 style={{ marginBottom: '10px', display:'flex', alignItems:'center', gap:'10px' }}>
-                        <i className="fas fa-info-circle fa-fw"></i> Action Recommended
-                    </h3>
-                    <p style={{ lineHeight: '1.6', color: 'rgba(255, 255, 255, 0.85)' }}>
-                        Setup is complete, but no mods have been added to the library yet.
-                    </p>
-                    <p style={{ lineHeight: '1.6', color: 'rgba(255, 255, 255, 0.85)', marginTop: '5px' }}>
-                         Please go to the <Link to="/settings" style={{ color: 'var(--primary)', fontWeight: '500' }}>Settings</Link> page and click "Scan Now" to populate your mod library.
+                <div style={styles.infoBoxAccent}>
+                     <h3 style={styles.infoBoxTitle}><i className="fas fa-info-circle fa-fw"></i> Action Recommended</h3>
+                     <p>Setup is complete, but no mods are in the library yet.</p>
+                     <p style={{ marginTop: '5px' }}>
+                         Go to <Link to="/settings" style={styles.inlineLink}>Settings</Link> and click "Scan Now".
                     </p>
                 </div>
             )}
 
-            <div style={{ padding: '20px', background: 'var(--card-bg)', borderRadius: '12px', marginBottom: '20px' }}>
-                <h2 style={{ marginBottom: '15px', fontWeight: '600' }}>Welcome to Genshin Mod Manager!</h2>
-
-                 {/* --- Buttons Area --- */}
-                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '20px' }}>
-                     <button
-                        className="btn btn-outline"
-                        onClick={handleOpenModsFolder}
-                        disabled={settingsLoading || !isSetupComplete}
-                        title={!isSetupComplete ? "Complete setup first" : "Open your configured Mods folder"}
-                     >
-                         <i className="fas fa-folder-open fa-fw"></i> Open Mods Folder
+             {/* --- Action Buttons Row --- */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
+                 <button className="btn btn-outline" onClick={handleOpenModsFolder} disabled={settingsLoading || !isSetupComplete} title={!isSetupComplete ? "Complete setup first" : "Open your configured Mods folder"}>
+                     <i className="fas fa-folder-open fa-fw"></i> Mods Folder
+                 </button>
+                 <button className="btn btn-outline" onClick={() => openExternalUrl(GAMEBANANA_URL)} title="Open GameBanana Genshin Mods page">
+                     <i className="fas fa-external-link-alt fa-fw"></i> GameBanana
+                 </button>
+                 {customLibraryUrl && (
+                     <button className="btn btn-outline" onClick={() => openExternalUrl(customLibraryUrl)} title={`Open: ${customLibraryUrl}`}>
+                         <i className="fas fa-external-link-alt fa-fw"></i> {customLibraryButtonText}
                      </button>
+                 )}
+                 <Link to="/settings" className="btn btn-primary" style={{ marginLeft: 'auto' }}>
+                     <i className="fas fa-cog fa-fw"></i> Settings
+                 </Link>
+            </div>
+            {actionError && <p style={{ color: 'var(--danger)', fontSize: '12px', marginBottom: '15px' }}>{actionError}</p>}
 
-                     {/* --- New GameBanana Button --- */}
-                     <button
-                         className="btn btn-outline"
-                         onClick={() => openExternalUrl('https://gamebanana.com/mods/games/8552')}
-                         title="Open GameBanana Genshin Mods page"
-                     >
-                         <i className="fas fa-external-link-alt fa-fw"></i> GameBanana
-                     </button>
 
-                     {/* --- New Custom Library Button (Conditional) --- */}
-                     {customLibraryUrl && (
-                         <button
-                             className="btn btn-outline"
-                             onClick={() => openExternalUrl(customLibraryUrl)}
-                             title={`Open: ${customLibraryUrl}`}
-                         >
-                             <i className="fas fa-external-link-alt fa-fw"></i> {customLibraryButtonText}
-                         </button>
-                     )}
+             {/* --- Main Content Columns --- */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
 
-                     <Link to="/settings" className="btn btn-primary" style={{ marginLeft: 'auto' /* Pushes settings button right */ }}>
-                         <i className="fas fa-cog fa-fw"></i> Go to Settings
-                     </Link>
+                {/* Enhanced Stats Box */}
+                <div style={styles.card}>
+                    <h3 style={styles.cardTitle}>Library Stats</h3>
+                    {/* Use the new EnhancedLibraryStats component */}
+                    <EnhancedLibraryStats 
+                        stats={dashboardStats} 
+                        loading={statsLoading} 
+                        error={statsError}
+                    />
                 </div>
-                 {/* --- End Buttons Area --- */}
-                 {loadingError && <p style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '15px' }}>{loadingError}</p>}
-            </div>
 
-            <div style={{ padding: '20px', background: 'var(--card-bg)', borderRadius: '12px' }}>
-                <h3 style={{ marginBottom: '15px', fontWeight: '600' }}>Library Stats</h3>
-                 {totalAssetCount === null && <p className='placeholder-text' style={{padding: 0, textAlign:'left'}}>Loading stats...</p>}
-                 {loadingError && !loadingError.startsWith("Failed to open link") && /* Don't show count error if link failed */
-                     <p className='placeholder-text' style={{padding: 0, textAlign:'left', color:'var(--danger)'}}>{loadingError}</p>
-                 }
-                 {totalAssetCount !== null && totalAssetCount >= 0 && <p className='placeholder-text' style={{padding: 0, textAlign:'left'}}>Total Mods Found: {totalAssetCount}</p>}
-            </div>
+                {/* Useful Links Box */}
+                <div style={styles.card}>
+                    <h3 style={styles.cardTitle}>Useful Links</h3>
+                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                         <button className="btn btn-outline" onClick={() => openExternalUrl(GENSHIN_WIKI_URL)}>
+                             <i className="fas fa-book fa-fw"></i> Genshin Wiki
+                         </button>
+                         <button className="btn btn-outline" onClick={() => openExternalUrl(PAIMON_MOE_URL)}>
+                              <i className="fas fa-calculator fa-fw"></i> Paimon.moe (calculator & wish stats)
+                         </button>
+                         <button className="btn btn-outline" onClick={() => openExternalUrl(INTERACTIVE_MAP_URL)}>
+                             <i className="fas fa-map-marked-alt fa-fw"></i> Interactive Map
+                         </button>
+                     </div>
+                </div>
+
+            </div> {/* End Grid */}
+
+
+            {/* App Version Display */}
+            {(appVersion || versionError) && (
+                 <div style={styles.versionDisplay} title={versionError || ''}>
+                     {versionLoading ? '...' : (versionError ? 'v?.?.?' : `v${appVersion}`)}
+                 </div>
+            )}
+
         </div>
     );
 }
+
+// Basic inline styles
+const styles = {
+    card: { padding: '20px', background: 'var(--card-bg)', borderRadius: '12px', },
+    cardTitle: { marginBottom: '15px', fontWeight: '600', fontSize: '18px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px' },
+    infoBoxAccent: {
+        padding: '20px', background: 'rgba(var(--accent-rgb, 255 159 67) / 0.1)',
+        border: '1px solid var(--accent)', borderRadius: '12px', marginBottom: '20px',
+        color: 'var(--accent)'
+    },
+    infoBoxTitle: { marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: '600' },
+    inlineLink: { color: 'var(--primary)', fontWeight: '500', textDecoration: 'underline' },
+    versionDisplay: {
+        position: 'absolute', bottom: '10px', right: '15px', fontSize: '11px',
+        color: 'rgba(255,255,255,0.4)', zIndex: 1, userSelect: 'none'
+    }
+};
 
 export default HomeDashboard;

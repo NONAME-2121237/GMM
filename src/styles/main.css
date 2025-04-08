@@ -885,3 +885,383 @@ input:disabled + .slider {
     background-color: #d63031; /* A slightly darker red */
     box-shadow: 0 5px 15px rgba(var(--danger), 0.4);
 }
+
+/* Enhanced Library Stats Styles */
+.enhanced-stats-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    animation: fadeIn 0.5s ease-out;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  /* Stats Overview Section */
+  .stats-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .stats-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  
+  .stat-card {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 8px;
+    border-left: 4px solid transparent;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+  
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+  }
+  
+  .stat-card.total-mods {
+    border-left-color: #3b82f6; /* Blue */
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
+  }
+  
+  .stat-card.enabled {
+    border-left-color: #4ade80; /* Green */
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
+  }
+  
+  .stat-card.disabled {
+    border-left-color: #64748b; /* Gray */
+    background: linear-gradient(135deg, rgba(100, 116, 139, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
+  }
+  
+  .stat-card.uncategorized {
+    border-left-color: #f97316; /* Orange */
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.12) 0%, rgba(15, 23, 42, 0.6) 100%);
+  }
+  
+  .stat-icon {
+    font-size: 22px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    margin-right: 12px;
+  }
+  
+  .total-mods .stat-icon { color: #3b82f6; }
+  .enabled .stat-icon { color: #4ade80; }
+  .disabled .stat-icon { color: #64748b; }
+  .uncategorized .stat-icon { color: #f97316; }
+  
+  .stat-info {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .stat-label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 4px;
+  }
+  
+  .stat-value {
+    font-size: 20px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+  }
+  
+  .animated-counter {
+    display: inline-block;
+    min-width: 30px;
+  }
+  
+  /* Charts Section */
+  .stats-charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-top: 10px;
+  }
+  
+  .chart-container {
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+  }
+  
+  .chart-container:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+  }
+  
+  .chart-title {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 10px;
+    color: rgba(255, 255, 255, 0.85);
+    text-align: center;
+    position: relative;
+  }
+  
+  .chart-title::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+  }
+  
+  .chart-legend {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  
+  .legend-item {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+  }
+  
+  .legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    margin-right: 6px;
+  }
+  
+  /* Loading Placeholders */
+  .stats-loading-placeholder {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px;
+  }
+  
+  .skeleton-line {
+    height: 16px;
+    width: 100%;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 37%, rgba(255, 255, 255, 0.05) 63%);
+    background-size: 400% 100%;
+    animation: skeleton-loading 1.4s ease infinite;
+    border-radius: 4px;
+  }
+  
+  .skeleton-circle {
+    height: 100px;
+    width: 100px;
+    border-radius: 50%;
+    margin: 10px auto;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 37%, rgba(255, 255, 255, 0.05) 63%);
+    background-size: 400% 100%;
+    animation: skeleton-loading 1.4s ease infinite;
+  }
+  
+  @keyframes skeleton-loading {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+  }
+  
+  /* Error state */
+  .stats-error {
+    text-align: center;
+    padding: 30px 20px;
+    color: var(--danger);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .stats-charts {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Ensure mods-list is a column */
+.mods-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* Slightly smaller gap for list */
+}
+
+/* === Compact List Item Styles === */
+.mod-card-list {
+    display: flex;
+    align-items: center;
+    gap: 15px; /* Space between elements */
+    padding: 10px 15px; /* Reduced padding */
+    background-color: var(--card-bg);
+    border-radius: 8px; /* Slightly less rounded */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    width: 100%;
+    min-height: 50px; /* Ensure consistent height */
+    transition: background-color 0.2s ease;
+}
+.mod-card-list:hover {
+    background-color: rgba(255, 255, 255, 0.05); /* Subtle hover */
+}
+
+/* Toggle Switch in List */
+.mod-card-list .compact-toggle {
+    flex-shrink: 0; /* Prevent toggle from shrinking */
+    margin-right: 5px; /* Slight space after toggle */
+}
+
+
+/* Mod Name in List */
+.mod-list-name {
+    flex-grow: 1; /* Takes up available space */
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* Truncate long names */
+    font-size: 15px;
+    color: var(--light);
+}
+
+/* Author in List (Optional display) */
+.mod-list-author {
+    flex-shrink: 0; /* Don't shrink */
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px; /* Limit author width */
+    margin-left: auto; /* Pushes it towards the right before actions */
+    margin-right: 10px;
+}
+
+/* Error Icon in List */
+.mod-list-error {
+    flex-shrink: 0;
+    color: var(--danger);
+    margin-left: 10px; /* Space before error */
+    font-size: 14px;
+}
+.mod-list-error i {
+    vertical-align: middle;
+}
+
+
+/* Action Buttons in List */
+.mod-list-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px; /* Small gap between buttons */
+    flex-shrink: 0;
+    margin-left: 5px; /* Space before actions */
+}
+
+.mod-list-actions .compact-btn {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 4px; /* Smaller padding */
+    font-size: 14px; /* Slightly smaller icon */
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+.mod-list-actions .compact-btn:hover {
+     background-color: rgba(255, 255, 255, 0.1);
+     color: rgba(255, 255, 255, 0.9);
+}
+.mod-list-actions .compact-btn.danger:hover {
+     background-color: rgba(var(--danger-rgb, 255, 107, 107), 0.15); /* Add --danger-rgb if needed */
+     color: var(--danger);
+}
+.mod-list-actions .compact-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Disabled visual for list item */
+.mod-card-list.mod-disabled-visual {
+    opacity: 0.65;
+}
+
+/* src/styles/main.css - Enhanced View Mode Toggle Styles */
+
+.view-mode-toggle {
+    display: inline-flex; /* Use inline-flex to group buttons */
+    border-radius: 8px; /* Overall container rounding */
+    overflow: hidden; /* Clip children to rounded corners */
+    background-color: rgba(0, 0, 0, 0.2); /* Subtle background for the group */
+    border: 1px solid rgba(255, 255, 255, 0.1); /* Subtle border */
+}
+
+.view-mode-toggle .btn-icon {
+    /* Reset default button styles */
+    appearance: none;
+    background: transparent; /* Make inactive transparent */
+    border: none; /* Remove individual borders */
+    /* border-right: 1px solid rgba(255, 255, 255, 0.1); */ /* Optional separator */
+
+    /* Common styling */
+    padding: 6px 12px; /* Adjust padding as needed */
+    color: rgba(255, 255, 255, 0.6); /* Default icon color */
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    line-height: 1; /* Ensure icon is centered vertically */
+}
+
+/* Hover state for inactive buttons */
+.view-mode-toggle .btn-icon:not(.active):hover {
+   background-color: rgba(255, 255, 255, 0.1);
+   color: rgba(255, 255, 255, 0.9);
+}
+
+/* Active state */
+.view-mode-toggle .btn-icon.active {
+   background-color: var(--primary); /* Use primary color for active */
+   color: white; /* White icon on active background */
+   cursor: default; /* Indicate it's already selected */
+   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2); /* Subtle inset shadow */
+}
+
+/* Focus state - optional for accessibility */
+.view-mode-toggle .btn-icon:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+    z-index: 1; /* Ensure focus outline is visible */
+}
+
+/* Ensure the section-header can accommodate the new toggle */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+    flex-wrap: wrap; /* Allow wrapping */
+    gap: 15px; /* Space between title and toggle */
+}
+
+.section-title {
+    font-size: 24px;
+    font-weight: 600;
+    margin-right: auto; /* Push toggle to the right if space allows */
+}
