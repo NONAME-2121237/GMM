@@ -503,7 +503,6 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                                 isDisabled={isImporting || categoryLoading}
                                 isClearable={false}
                                 isSearchable={true} // Enable searching
-                                menuPortalTarget={document.body} // Avoid clipping issues
                                 menuPosition={'fixed'}
                             />
                         </div>
@@ -522,7 +521,6 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                                 isDisabled={isImporting || !selectedCategoryOption || entityLoading || entities.length === 0}
                                 isClearable={false}
                                 isSearchable={true} // Enable searching
-                                menuPortalTarget={document.body} // Avoid clipping issues
                                 menuPosition={'fixed'}
                              />
                          </div>

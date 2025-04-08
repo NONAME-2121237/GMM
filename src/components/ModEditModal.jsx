@@ -56,12 +56,12 @@ const reactSelectStyles = {
          },
     }),
     menu: (baseStyles) => ({
-      ...baseStyles,
-      backgroundColor: 'var(--dark)', // Dropdown background
-      border: '1px solid rgba(255, 255, 255, 0.1)',
-      borderRadius: '6px',
-      zIndex: 1060, // Ensure higher than confirmation modal
-    }),
+        ...baseStyles,
+        backgroundColor: 'var(--dark)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '6px',
+        zIndex: 1100, // Higher than typical modal overlay zIndex (e.g., 1050)
+      }),
     menuList: (baseStyles) => ({
        ...baseStyles,
         padding: '4px 0', // Padding for the list container
@@ -407,7 +407,6 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
                                 isLoading={categoryLoading}
                                 isDisabled={isSaving || categoryLoading}
                                 isClearable={false}
-                                menuPortalTarget={document.body}
                                 menuPosition={'fixed'}
                             />
                         </div>
@@ -424,7 +423,6 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
                                 isLoading={entityLoading}
                                 isDisabled={isSaving || !selectedCategoryOption || entityLoading || entities.length === 0}
                                 isClearable={false}
-                                menuPortalTarget={document.body}
                                 menuPosition={'fixed'}
                             />
                         </div>

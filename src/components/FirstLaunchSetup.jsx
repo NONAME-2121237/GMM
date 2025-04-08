@@ -52,8 +52,8 @@ function FirstLaunchSetup() {
     };
 
     const handleSave = async () => {
-        if (!selectedModsFolder || !selectedQuickLaunch) {
-            setSaveError("Both paths must be selected before continuing.");
+        if (!selectedModsFolder) {
+            setSaveError("The Mods Folder path must be selected before continuing.");
             return;
         }
         setIsSaving(true);
@@ -62,7 +62,7 @@ function FirstLaunchSetup() {
         try {
             // Save both settings
             const saveMods = await updateSetting(SETTINGS_KEY_MODS_FOLDER, selectedModsFolder);
-            const saveLaunch = await updateSetting(SETTINGS_KEY_QUICK_LAUNCH, selectedQuickLaunch);
+            const saveLaunch = await updateSetting(SETTINGS_KEY_QUICK_LAUNCH, selectedQuickLaunch || '');
 
             if (saveMods && saveLaunch) {
                 // Important: Refetch settings in the provider to update global state
@@ -80,15 +80,16 @@ function FirstLaunchSetup() {
         }
     };
 
-    const canSave = selectedModsFolder && selectedQuickLaunch && !isSaving;
+    const canSave = selectedModsFolder && !isSaving;
 
     return (
         <div style={styles.container}>
             <div style={styles.card}>
                 <h1 style={styles.title}>Initial Setup</h1>
                 <p style={styles.description}>
-                    Please select your main Mods folder
-                    and the game or mod launcher executable for the Quick Launch button.
+                    Please select your main Mods folder. This is required.
+                    <br />
+                    Optionally, select the game or mod launcher executable for the Quick Launch button.
                 </p>
 
                 {/* Mods Folder Selection */}

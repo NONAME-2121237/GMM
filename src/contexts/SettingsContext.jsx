@@ -64,7 +64,7 @@ export function SettingsProvider({ children }) {
     }, []);
 
     // Setup completion check remains the same (custom URL is optional)
-    const isSetupComplete = !isLoading && !!modsFolder && !!quickLaunchPath;
+    const isSetupComplete = !isLoading && !!modsFolder;
 
     const value = {
         modsFolder,
