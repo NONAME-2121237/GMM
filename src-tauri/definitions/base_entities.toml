@@ -100,6 +100,8 @@ entities = [
     { name = "Yun Jin", slug = "yun-jin", description = "A renowned Liyue opera singer who is the director of the Yun-Han Opera Troupe.", details = '{"rarity": "4 Star", "element": "Geo", "weapon": "Polearm"}', base_image = "yun_jin_base.png" },
     { name = "Zhongli", slug = "zhongli", description = "A mysterious expert contracted by the Wangsheng Funeral Parlor. Extremely knowledgeable in all things. The former Geo Archon.", details = '{"rarity": "5 Star", "element": "Geo", "weapon": "Polearm"}', base_image = "zhongli_base.png" },
     { name = "Chasca" , slug = "chasca", description = "The most infamous Peacemaker of the Flower-Feather Clan and no stranger to the Night Warden Wars, Chasca bears the Ancient Name of Vuka. She is familiar with conflicts — at times struggling with many of her own internal ones — yet despite how many would view her, she is always able to stand above them.", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Bow"}', base_image = "chasca_base.png" },
+    { name = "Xiangling", slug = "xiangling", description = "She is the Head Chef at the Wanmin Restaurant and runs it alongside her father Chef Mao. As a chef, Xiangling isn't afraid to try out different recipes or 'exotic' ingredients, making her dishes sometimes quite unique.", details = '{"rarity": "4 Star", "element": "Pyro", "weapon": "Polearm"}', base_image = "xiangling_base.png" },
+    { name = "Xianyun", slug = "xianyun", description = "Curious about what draws her disciples to Liyue Harbor, she has taken up residence in the city to see for herself.", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Catalyst"}', base_image = "xianyun_base.png" },
 
     # === Traveler ===
     # Define a base 'Traveler' and potentially element-specific versions if mods target them differently
@@ -165,4 +167,16 @@ entities = [
     { name = "Oculus",     slug = "oculus",    description = "An elemental collectible found in Tevyat.", details = '{"type": "Collectible"}', base_image = "oculus.png" },
     { name = "Waverider", slug = "waverider", description = "Waverider boat.", details = '{"type": "Waverider"}', base_image = "waverider.png" },
     { name = "Statue of The Seven", slug = "statue-of-the-seven", description = "A statue representing an Archon, used for healing, stamina upgrades, and map unlocking.", details = '{"type": "Interaction Point"}', base_image = "statue_of_the_seven.png" },
+]
+
+# ===================
+# ====    UI    ====
+# ===================
+[ui]
+name = "UI"
+entities = [
+    { name = "Icons", slug = "icons", description = "Game icons.", details = '{"type": "Icons"}', base_image = "icons.png" },
+    { name = "Map", slug = "map", description = "Map modifications.", details = '{"type": "Map"}', base_image = "map.png" },
+    { name = "Loading screens", slug = "loading-screens", description = "Loading screens.", details = '{"type": "Screens"}', base_image = "loadingscreen.png" },
+    { name = "Namecards", slug = "namecards", description = "Character namecards.", details = '{"type": "Screens"}', base_image = "namecards.png" },
 ]
