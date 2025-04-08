@@ -76,7 +76,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
         cleanupObjectUrl(); // Clean up previous blob URL
 
         // No need to fetch image if in list mode or 'other' entity
-        if (viewMode !== 'grid' || isOtherEntity) {
+        if (viewMode !== 'grid') {
             return;
         }
 
@@ -203,7 +203,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
     // Default Grid View Structure
     return (
         <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Folder: ${folderNameOnDisk}`}>
-            {!isOtherEntity && (
+            {viewMode !== "list" && (
                 <div style={imageContainerStyle}>
                      {imageLoading && ( <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i> )}
                      {!imageLoading && imageBgCss === FALLBACK_MOD_IMAGE_BG && (

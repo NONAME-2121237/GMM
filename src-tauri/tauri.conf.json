@@ -29,7 +29,6 @@
           { "name": "open-filemanager-linux", "cmd": "xdg-open", "args": ["{0}"] }
         ]
       },
-      "targets": ["msi"],
       "window": { "all": true },
       "dialog": { "all": true },
       "process": { "exit": true }
@@ -44,6 +43,7 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
+      "targets": ["msi"],
       "windows": {
          "certificateThumbprint": null,
          "digestAlgorithm": "sha256",
