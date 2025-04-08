@@ -29,6 +29,7 @@
           { "name": "open-filemanager-linux", "cmd": "xdg-open", "args": ["{0}"] }
         ]
       },
+      "targets": ["msi"],
       "window": { "all": true },
       "dialog": { "all": true },
       "process": { "exit": true }
