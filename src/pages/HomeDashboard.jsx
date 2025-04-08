@@ -3,19 +3,21 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { useSettings } from '../contexts/SettingsContext';
 import { Link } from 'react-router-dom';
+import { open } from '@tauri-apps/api/shell';
 
 function HomeDashboard() {
-    const { isSetupComplete, isLoading: settingsLoading } = useSettings();
-    // State to track total mods, null = loading, 0 = empty, >0 = has content
+    const {
+        isSetupComplete,
+        isLoading: settingsLoading,
+        customLibraryUrl // Get the new setting
+    } = useSettings();
     const [totalAssetCount, setTotalAssetCount] = useState(null);
     const [loadingError, setLoadingError] = useState(null);
 
-    // Fetch total asset count only if setup is complete
     useEffect(() => {
-        // Only run if setup is complete and we haven't determined the count yet
         if (isSetupComplete && totalAssetCount === null) {
-            setLoadingError(null); // Clear previous error
-            invoke('get_total_asset_count') // *** Call the new command ***
+            setLoadingError(null);
+            invoke('get_total_asset_count')
                 .then(count => {
                     console.log("Total asset count:", count);
                     setTotalAssetCount(count);
@@ -23,22 +25,46 @@ function HomeDashboard() {
                 .catch(err => {
                     console.error("Error fetching total asset count:", err);
                     setLoadingError("Could not check total mod count.");
-                    setTotalAssetCount(-1); // Indicate error state
+                    setTotalAssetCount(-1);
                 });
         } else if (!isSetupComplete) {
-            // Reset count if setup isn't complete (e.g., user resets settings)
             setTotalAssetCount(null);
         }
-        // Intentionally only run when isSetupComplete changes or count needs reset
-        // Avoid re-running just because totalAssetCount changes from null to a value
-    }, [isSetupComplete, totalAssetCount === null]); // Rerun if setup completes or we reset to null
+    }, [isSetupComplete, totalAssetCount]);
 
-    const handleOpenModsFolder = async () => { /* ... function remains the same ... */
-         try { await invoke('open_mods_folder'); } catch (error) { console.error("Failed to open mods folder:", error); /* TODO: Show user error */ }
+    const handleOpenModsFolder = async () => {
+         try { await invoke('open_mods_folder'); }
+         catch (error) { console.error("Failed to open mods folder:", error); setLoadingError("Failed to open mods folder"); }
     };
 
-    // Determine if the prompt should be shown: Setup complete AND total asset count is 0
+    // --- New: Function to open external URL ---
+    const openExternalUrl = async (url) => {
+        setLoadingError(''); // Clear previous errors
+        if (!url) return;
+        try {
+            console.log(`Attempting to open URL: ${url}`);
+            await open(url); // Use Tauri's open API
+        } catch (error) {
+             console.error(`Failed to open URL ${url}:`, error);
+             setLoadingError(`Failed to open link: ${error}`);
+        }
+     };
+
     const showScanPrompt = isSetupComplete && totalAssetCount === 0;
+
+    // --- Determine custom library button text ---
+    let customLibraryButtonText = 'Custom Library';
+    if (customLibraryUrl) {
+        try {
+            const url = new URL(customLibraryUrl);
+            // Use hostname, remove www. if present
+            customLibraryButtonText = url.hostname.replace(/^www\./, '');
+        } catch (_) {
+            // If URL is invalid, use a generic name but still show button if URL exists
+            customLibraryButtonText = 'Custom Link';
+        }
+    }
+
 
     return (
         <div className="fadeIn">
@@ -46,7 +72,6 @@ function HomeDashboard() {
                  <h1 className="page-title">Dashboard</h1>
             </div>
 
-            {/* Prompt for initial scan if needed */}
             {showScanPrompt && (
                 <div style={{ padding: '20px', background: 'rgba(var(--accent-rgb, 255 159 67) / 0.1)', border: '1px solid var(--accent)', borderRadius: '12px', marginBottom: '20px', color: 'var(--accent)' }}>
                      <h3 style={{ marginBottom: '10px', display:'flex', alignItems:'center', gap:'10px' }}>
@@ -61,33 +86,56 @@ function HomeDashboard() {
                 </div>
             )}
 
-
-            {/* Existing Welcome/Info Box */}
             <div style={{ padding: '20px', background: 'var(--card-bg)', borderRadius: '12px', marginBottom: '20px' }}>
                 <h2 style={{ marginBottom: '15px', fontWeight: '600' }}>Welcome to Genshin Mod Manager!</h2>
-                 <button
-                    className="btn btn-outline"
-                    style={{ marginTop: '20px', marginRight:'10px' }}
-                    onClick={handleOpenModsFolder}
-                    disabled={settingsLoading || !isSetupComplete} // Disable if loading settings or not setup
-                 >
-                     <i className="fas fa-folder-open fa-fw"></i> Open Mods Folder
-                 </button>
-                 <Link to="/settings" className="btn btn-primary" style={{marginTop:'20px'}}>
-                     <i className="fas fa-cog fa-fw"></i> Go to Settings
-                 </Link>
+
+                 {/* --- Buttons Area --- */}
+                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '20px' }}>
+                     <button
+                        className="btn btn-outline"
+                        onClick={handleOpenModsFolder}
+                        disabled={settingsLoading || !isSetupComplete}
+                        title={!isSetupComplete ? "Complete setup first" : "Open your configured Mods folder"}
+                     >
+                         <i className="fas fa-folder-open fa-fw"></i> Open Mods Folder
+                     </button>
+
+                     {/* --- New GameBanana Button --- */}
+                     <button
+                         className="btn btn-outline"
+                         onClick={() => openExternalUrl('https://gamebanana.com/mods/games/8552')}
+                         title="Open GameBanana Genshin Mods page"
+                     >
+                         <i className="fas fa-external-link-alt fa-fw"></i> GameBanana
+                     </button>
+
+                     {/* --- New Custom Library Button (Conditional) --- */}
+                     {customLibraryUrl && (
+                         <button
+                             className="btn btn-outline"
+                             onClick={() => openExternalUrl(customLibraryUrl)}
+                             title={`Open: ${customLibraryUrl}`}
+                         >
+                             <i className="fas fa-external-link-alt fa-fw"></i> {customLibraryButtonText}
+                         </button>
+                     )}
+
+                     <Link to="/settings" className="btn btn-primary" style={{ marginLeft: 'auto' /* Pushes settings button right */ }}>
+                         <i className="fas fa-cog fa-fw"></i> Go to Settings
+                     </Link>
+                </div>
+                 {/* --- End Buttons Area --- */}
+                 {loadingError && <p style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '15px' }}>{loadingError}</p>}
             </div>
 
-            {/* Placeholder Stats Box */}
-             <div style={{ padding: '20px', background: 'var(--card-bg)', borderRadius: '12px' }}>
+            <div style={{ padding: '20px', background: 'var(--card-bg)', borderRadius: '12px' }}>
                 <h3 style={{ marginBottom: '15px', fontWeight: '600' }}>Library Stats</h3>
-                 {/* Add loading/error state for stats */}
                  {totalAssetCount === null && <p className='placeholder-text' style={{padding: 0, textAlign:'left'}}>Loading stats...</p>}
-                 {loadingError && <p className='placeholder-text' style={{padding: 0, textAlign:'left', color:'var(--danger)'}}>{loadingError}</p>}
+                 {loadingError && !loadingError.startsWith("Failed to open link") && /* Don't show count error if link failed */
+                     <p className='placeholder-text' style={{padding: 0, textAlign:'left', color:'var(--danger)'}}>{loadingError}</p>
+                 }
                  {totalAssetCount !== null && totalAssetCount >= 0 && <p className='placeholder-text' style={{padding: 0, textAlign:'left'}}>Total Mods Found: {totalAssetCount}</p>}
-                 {/* Add more stats later (enabled count etc) */}
-             </div>
-
+            </div>
         </div>
     );
 }

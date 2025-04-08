@@ -124,6 +124,13 @@ const PRESET_APPLY_PROGRESS_EVENT: &str = "preset://apply_progress";
 const PRESET_APPLY_COMPLETE_EVENT: &str = "preset://apply_complete";
 const PRESET_APPLY_ERROR_EVENT: &str = "preset://apply_error";
 
+// --- Add Pruning Event ---
+const PRUNING_START_EVENT: &str = "prune://start";
+const PRUNING_PROGRESS_EVENT: &str = "prune://progress";
+const PRUNING_COMPLETE_EVENT: &str = "prune://complete";
+const PRUNING_ERROR_EVENT: &str = "prune://error";
+// -------------------------
+
 type CmdResult<T> = Result<T, String>;
 
 struct DbState(Arc<Mutex<Connection>>);
@@ -1072,7 +1079,7 @@ fn open_mods_folder(_app_handle: AppHandle, db_state: State<DbState>) -> CmdResu
 
 #[command]
 async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle) -> CmdResult<()> {
-    println!("Starting robust mod directory scan...");
+    println!("Starting robust mod directory scan with pruning...");
     let base_mods_path = get_mods_base_path_from_settings(&db_state).map_err(|e| e.to_string())?;
     println!("Scanning base path: {}", base_mods_path.display());
 
@@ -1083,15 +1090,13 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
     }
 
     // --- Preparation ---
-    // Pre-fetch maps using the incoming connection *before* spawning task
     let deduction_maps = {
         let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
         let conn = &*conn_guard;
         fetch_deduction_maps(conn).map_err(|e| format!("Failed to pre-fetch deduction maps: {}", e))?
     };
-    println!("[Scan Prep] Deduction maps loaded ({} cats, {} entities)", deduction_maps.category_slug_to_id.len(), deduction_maps.entity_slug_to_id.len());
+    println!("[Scan Prep] Deduction maps loaded.");
 
-    // --- Get DB Path and Clone necessary data for the task ---
     let db_path = {
         let data_dir = get_app_data_dir(&app_handle).map_err(|e| e.to_string())?;
         data_dir.join(DB_NAME)
@@ -1099,41 +1104,65 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
     let db_path_str = db_path.to_string_lossy().to_string();
     let base_mods_path_clone = base_mods_path.clone();
     let app_handle_clone = app_handle.clone();
-    let maps_clone = deduction_maps.clone(); // Clone maps for the task
+    let maps_clone = deduction_maps.clone();
 
-    // --- Calculate total expected mods *before* the main walk ---
     println!("[Scan Prep] Calculating total potential mod folders...");
     let potential_mod_folders_for_count: Vec<PathBuf> = WalkDir::new(&base_mods_path)
         .min_depth(1)
         .into_iter()
-        .filter_map(|e| e.ok().filter(|entry| entry.file_type().is_dir())) // Only consider directories
-        .filter(|e| has_ini_file(&e.path().to_path_buf())) // Check if *this* dir contains an ini
+        .filter_map(|e| e.ok().filter(|entry| entry.file_type().is_dir()))
+        .filter(|e| has_ini_file(&e.path().to_path_buf()))
         .map(|e| e.path().to_path_buf())
         .collect();
-
     let total_to_process = potential_mod_folders_for_count.len();
     println!("[Scan Prep] Found {} potential mod folders for progress total.", total_to_process);
 
-    // --- Emit initial progress ---
-     app_handle.emit_all(SCAN_PROGRESS_EVENT, ScanProgress {
+    app_handle.emit_all(SCAN_PROGRESS_EVENT, ScanProgress {
             processed: 0, total: total_to_process, current_path: None, message: "Starting scan...".to_string()
         }).unwrap_or_else(|e| eprintln!("Failed to emit initial scan progress: {}", e));
 
 
-    // --- Process folders in a blocking task ---
+    // --- Process folders and collect FOUND asset IDs in a blocking task ---
     let scan_task = async_runtime::spawn_blocking(move || {
         // Open a new connection inside the blocking task
         let conn = Connection::open(&db_path_str).map_err(|e| format!("Failed to open DB connection in scan task: {}", e))?;
+
+        // --- Fetch ALL asset IDs and their CLEAN relative paths from DB first ---
+        let mut initial_db_assets = HashMap::<i64, String>::new(); // asset_id -> clean_relative_path
+        { // Scope for the statement
+            let mut stmt = conn.prepare("SELECT id, folder_name FROM assets")
+                .map_err(|e| format!("Failed to prepare asset fetch statement: {}", e))?;
+            // *** FIX: Add .map_err inside the query_map closure if needed, or handle row errors later ***
+            // Note: Errors during row iteration are handled below in the loop.
+            let rows = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)));
+
+             // Handle potential error from preparing the iterator itself
+             let row_iter = rows.map_err(|e| format!("Error creating asset query iterator: {}", e))?;
+
+            for row_result in row_iter {
+                 match row_result {
+                     Ok((id, folder_name)) => {
+                         initial_db_assets.insert(id, folder_name.replace("\\", "/"));
+                     }
+                     Err(e) => {
+                          // Log error for the specific row but continue fetching others
+                          eprintln!("[Scan Task Prep] Error fetching asset row from DB: {}", e);
+                          // Optionally, you could return an error here to stop the whole scan
+                          // return Err(format!("Error fetching asset row from DB: {}", e));
+                     }
+                 }
+            }
+        }
+        println!("[Scan Task Prep] Fetched {} assets from DB initially.", initial_db_assets.len());
 
         let mut processed_count = 0; // Counts folders *identified* as mods and processed
         let mut mods_added_count = 0;
         let mut mods_updated_count = 0;
         let mut errors_count = 0;
         let mut processed_mod_paths = HashSet::new(); // Track processed paths to avoid duplicates if structure is odd
+        let mut found_asset_ids = HashSet::<i64>::new(); // Track IDs found on disk
 
         // --- Iterate using WalkDir ---
-        // We iterate through *all* entries, but only process directories containing .ini
-        // `skip_current_dir` will be used *after* processing a mod folder.
         let mut walker = WalkDir::new(&base_mods_path_clone).min_depth(1).into_iter();
 
         while let Some(entry_result) = walker.next() {
@@ -1141,122 +1170,160 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
                 Ok(entry) => {
                     let path = entry.path().to_path_buf();
 
-                    // Check if it's a directory *and* directly contains an ini file *and* not already processed
                     if entry.file_type().is_dir()
                        && has_ini_file(&path)
-                       && !processed_mod_paths.contains(&path) // Avoid reprocessing
+                       && !processed_mod_paths.contains(&path)
                     {
-                        // *** Found a Mod Folder - Process it ***
-                        processed_count += 1; // Increment count of mods processed
-                        processed_mod_paths.insert(path.clone()); // Mark as processed
+                        processed_count += 1;
+                        processed_mod_paths.insert(path.clone());
                         let path_display = path.display().to_string();
                         let folder_name_only = path.file_name().unwrap_or_default().to_string_lossy();
 
-                        // Emit progress event
                         app_handle_clone.emit_all(SCAN_PROGRESS_EVENT, ScanProgress {
                              processed: processed_count,
-                             total: total_to_process, // Use total from pre-calculation
+                             total: total_to_process,
                              current_path: Some(path_display.clone()),
                              message: format!("Processing: {}", folder_name_only)
                          }).unwrap_or_else(|e| eprintln!("Failed to emit scan progress: {}", e));
 
-                        // --- Use new Deduction Logic ---
                         match deduce_mod_info_v2(&path, &base_mods_path_clone, &maps_clone) {
                             Some(deduced) => {
-                                 // Use the deduced entity_slug to find the ID
                                  if let Some(target_entity_id) = maps_clone.entity_slug_to_id.get(&deduced.entity_slug) {
-                                     // --- Calculate clean relative path correctly ---
                                     let relative_path_buf = match path.strip_prefix(&base_mods_path_clone) {
                                         Ok(p) => p.to_path_buf(),
                                         Err(_) => {
                                             eprintln!("[Scan Task] Error: Could not strip base path prefix from '{}'. Skipping.", path.display());
                                             errors_count += 1;
-                                            // No skip_current_dir here, walker continues from next item
                                             continue;
                                         }
                                     };
-                                    // Get the filename *from the buffer* which represents the relative path
                                     let filename_osstr = relative_path_buf.file_name().unwrap_or_default();
                                     let filename_str = filename_osstr.to_string_lossy();
                                     let clean_filename = filename_str.trim_start_matches(DISABLED_PREFIX);
                                     let relative_parent_path = relative_path_buf.parent();
                                     let relative_path_to_store = match relative_parent_path {
-                                        // Join parent (if exists) with the cleaned filename
                                         Some(parent) => parent.join(clean_filename).to_string_lossy().to_string(),
-                                        None => clean_filename.to_string(), // No parent, just the clean filename
+                                        None => clean_filename.to_string(),
                                     };
-                                    // Ensure forward slashes for consistency in DB
                                     let relative_path_to_store = relative_path_to_store.replace("\\", "/");
 
-                                    // Check if this clean relative path already exists for the entity
                                     let existing_id: Option<i64> = conn.query_row(
                                         "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
                                         params![target_entity_id, relative_path_to_store],
                                         |row| row.get(0),
-                                    ).optional().map_err(|e| format!("DB error checking for existing asset '{}': {}", relative_path_to_store, e))?;
+                                    ).optional() // optional() turns QueryReturnedNoRows into Ok(None)
+                                     .map_err(|e| format!("DB error checking for existing asset '{}': {}", relative_path_to_store, e))?; // Now map other errors
 
-                                    if existing_id.is_none() {
-                                         // Insert new asset
+                                    if let Some(asset_id) = existing_id {
+                                         found_asset_ids.insert(asset_id);
+                                    } else {
+                                         // *** FIX: Add .map_err here ***
                                          let insert_result = conn.execute(
                                             "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                                             params![
                                                 target_entity_id,
-                                                deduced.mod_name, // Use deduced name for display
+                                                deduced.mod_name,
                                                 deduced.description,
-                                                relative_path_to_store, // Store the CLEAN relative path
+                                                relative_path_to_store,
                                                 deduced.image_filename,
                                                 deduced.author,
-                                                deduced.mod_type_tag // Store raw tag from ini
+                                                deduced.mod_type_tag
                                             ]
-                                         );
+                                         ).map_err(|e| format!("DB error inserting new asset '{}': {}", relative_path_to_store, e)); // Don't use ? here, handle below
+
                                          match insert_result {
-                                             Ok(changes) => { if changes > 0 { mods_added_count += 1; } }
-                                             Err(e) => { eprintln!("[Scan Task] Error inserting NEW mod from path '{}' with clean relative path '{}': {}", path_display, relative_path_to_store, e); errors_count += 1; }
+                                             Ok(changes) => {
+                                                 if changes > 0 {
+                                                    mods_added_count += 1;
+                                                    let new_id = conn.last_insert_rowid();
+                                                    found_asset_ids.insert(new_id);
+                                                }
+                                             }
+                                             // Handle specific insert error if needed
+                                             Err(e) => { eprintln!("[Scan Task] {}", e); errors_count += 1; }
                                          }
-                                     } else {
-                                         // Optionally update existing asset data here if needed
-                                         // mods_updated_count += 1;
                                     }
                                  } else {
-                                      // This case should be less frequent now due to fallback logic
+                                      eprintln!("[Scan Task] Error: Could not find entity ID for deduced slug '{}' from path '{}'", deduced.entity_slug, path_display);
                                       errors_count += 1;
                                  }
                             }
                             None => {
+                                 eprintln!("[Scan Task] Error: Failed to deduce mod info for path '{}'", path_display);
                                  errors_count += 1;
                             }
-                        } // End deduce_mod_info_v2 match
-
-                        // *** CRUCIAL: Tell WalkDir not to descend into this mod folder ***
-                        // We've processed it, don't look for mods inside it.
+                        }
                         walker.skip_current_dir();
-
-                    } else if entry.file_type().is_dir() {
-                        // It's a directory, but NOT identified as a mod folder (no ini or already processed).
-                        // Allow WalkDir to continue descending into it implicitly.
-                        // println!("[Scan Task] Descending into directory: {}", path.display()); // Debug logging if needed
-                    } // else it's a file, WalkDir handles it, just continue.
-
-                } // End Ok(entry)
+                    }
+                }
                 Err(e) => {
                      eprintln!("[Scan Task] Error accessing path during scan: {}", e);
                      errors_count += 1;
                 }
-            } // End match entry_result
-        } // End while loop
+            }
+        }
 
-        // TODO: Add logic here to prune assets from DB that no longer exist on disk? (Separate feature maybe)
+        // --- Pruning Logic ---
+        let mut mods_to_prune_ids = Vec::new();
+        for (asset_id, _clean_path) in initial_db_assets.iter() {
+            if !found_asset_ids.contains(asset_id) {
+                 mods_to_prune_ids.push(*asset_id);
+            }
+        }
+        let prune_count = mods_to_prune_ids.len();
+        let mut pruned_count = 0;
+        let mut pruning_errors_count = 0;
 
-        // Return summary info from the blocking task
-        Ok::<_, String>((processed_count, mods_added_count, mods_updated_count, errors_count))
-    }); // End spawn_blocking
+        if !mods_to_prune_ids.is_empty() {
+            println!("[Scan Task Pruning] Found {} mods in DB missing from disk. Pruning...", prune_count);
+            app_handle_clone.emit_all(PRUNING_START_EVENT, prune_count).ok();
 
-    // --- Handle Task Result (same as before) ---
+             let ids_to_delete_sql: Vec<Box<dyn rusqlite::ToSql>> = mods_to_prune_ids
+                .into_iter()
+                .map(|id| Box::new(id) as Box<dyn rusqlite::ToSql>)
+                .collect();
+
+            if !ids_to_delete_sql.is_empty() {
+                let placeholders = ids_to_delete_sql.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                let sql = format!("DELETE FROM assets WHERE id IN ({})", placeholders);
+
+                app_handle_clone.emit_all(PRUNING_PROGRESS_EVENT, format!("Deleting {} entries...", ids_to_delete_sql.len())).ok();
+
+                // *** FIX: Add .map_err here ***
+                let delete_result = conn.execute(&sql, rusqlite::params_from_iter(ids_to_delete_sql))
+                                        .map_err(|e| format!("DB error during pruning: {}", e)); // Don't use ?, handle below
+
+                match delete_result {
+                    Ok(count) => {
+                         pruned_count = count;
+                         println!("[Scan Task Pruning] Successfully pruned {} asset entries.", pruned_count);
+                         app_handle_clone.emit_all(PRUNING_COMPLETE_EVENT, pruned_count).ok();
+                    },
+                    Err(e) => {
+                        eprintln!("[Scan Task Pruning] {}", e);
+                         pruning_errors_count += 1;
+                         app_handle_clone.emit_all(PRUNING_ERROR_EVENT, e).ok(); // Send the error string
+                    }
+                }
+            } else {
+                 println!("[Scan Task Pruning] No valid IDs to prune after conversion.");
+                 app_handle_clone.emit_all(PRUNING_COMPLETE_EVENT, 0).ok();
+            }
+        } else {
+             println!("[Scan Task Pruning] No missing mods found. Skipping pruning.");
+        }
+        // --- End Pruning Logic ---
+
+        let total_errors = errors_count + pruning_errors_count;
+        Ok::<_, String>((processed_count, mods_added_count, mods_updated_count, total_errors, pruned_count))
+    });
+
+    // --- Handle Task Result ---
      match scan_task.await {
-         Ok(Ok((processed, added, _updated, errors))) => {
+         Ok(Ok((processed, added, _updated, errors, pruned))) => {
              let summary = format!(
-                 "Scan complete. Processed {} identified mod folders. Added {} new mods. {} errors occurred.",
-                 processed, added, errors
+                 "Scan complete. Processed {} mod folders. Added {} new mods. Pruned {} missing mods. {} errors occurred.",
+                 processed, added, pruned, errors
             );
              println!("{}", summary);
              app_handle.emit_all(SCAN_COMPLETE_EVENT, summary.clone()).unwrap_or_else(|e| eprintln!("Failed to emit scan complete event: {}", e));

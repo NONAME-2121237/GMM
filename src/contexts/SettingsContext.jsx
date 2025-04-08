@@ -6,10 +6,12 @@ const SettingsContext = createContext(null);
 
 export const SETTINGS_KEY_MODS_FOLDER = "mods_folder_path";
 export const SETTINGS_KEY_QUICK_LAUNCH = "quick_launch_path";
+export const SETTINGS_KEY_CUSTOM_LIBRARY_URL = "custom_library_url";
 
 export function SettingsProvider({ children }) {
     const [modsFolder, setModsFolder] = useState(null);
     const [quickLaunchPath, setQuickLaunchPath] = useState(null);
+    const [customLibraryUrl, setCustomLibraryUrl] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -17,18 +19,22 @@ export function SettingsProvider({ children }) {
         setIsLoading(true);
         setError(null);
         try {
-            const [folderResult, launchResult] = await Promise.all([
+            // Fetch all settings together
+            const [folderResult, launchResult, libraryResult] = await Promise.all([
                 invoke('get_setting', { key: SETTINGS_KEY_MODS_FOLDER }),
-                invoke('get_setting', { key: SETTINGS_KEY_QUICK_LAUNCH })
+                invoke('get_setting', { key: SETTINGS_KEY_QUICK_LAUNCH }),
+                invoke('get_setting', { key: SETTINGS_KEY_CUSTOM_LIBRARY_URL })
             ]);
-            console.log("Fetched Settings:", { folderResult, launchResult });
-            setModsFolder(folderResult || ''); // Use empty string if null/undefined
-            setQuickLaunchPath(launchResult || ''); // Use empty string if null/undefined
+            console.log("Fetched Settings:", { folderResult, launchResult, libraryResult });
+            setModsFolder(folderResult || '');
+            setQuickLaunchPath(launchResult || '');
+            setCustomLibraryUrl(libraryResult || '');
         } catch (err) {
             console.error("Failed to fetch settings:", err);
             setError("Could not load application settings.");
-            setModsFolder(''); // Set to empty on error
-            setQuickLaunchPath(''); // Set to empty on error
+            setModsFolder('');
+            setQuickLaunchPath('');
+            setCustomLibraryUrl(''); // Reset on error
         } finally {
             setIsLoading(false);
         }
@@ -46,30 +52,32 @@ export function SettingsProvider({ children }) {
                 setModsFolder(value);
             } else if (key === SETTINGS_KEY_QUICK_LAUNCH) {
                 setQuickLaunchPath(value);
+            } else if (key === SETTINGS_KEY_CUSTOM_LIBRARY_URL) {
+                setCustomLibraryUrl(value);
             }
             return true; // Indicate success
         } catch (err) {
             console.error(`Failed to set setting ${key}:`, err);
-            // Optionally set an error state to show in UI
             setError(`Failed to save setting: ${key}`);
             return false; // Indicate failure
         }
     }, []);
 
-    // Determine if setup is complete (both paths non-empty)
-    // Only consider setup complete *after* initial loading is done
+    // Setup completion check remains the same (custom URL is optional)
     const isSetupComplete = !isLoading && !!modsFolder && !!quickLaunchPath;
 
     const value = {
         modsFolder,
         quickLaunchPath,
+        customLibraryUrl,
         isLoading,
         error,
-        fetchSettings, // Expose fetch function if needed externally
+        fetchSettings,
         updateSetting,
         isSetupComplete,
-        SETTINGS_KEY_MODS_FOLDER, // Expose keys for consistency
-        SETTINGS_KEY_QUICK_LAUNCH
+        SETTINGS_KEY_MODS_FOLDER,
+        SETTINGS_KEY_QUICK_LAUNCH,
+        SETTINGS_KEY_CUSTOM_LIBRARY_URL
     };
 
     return (
