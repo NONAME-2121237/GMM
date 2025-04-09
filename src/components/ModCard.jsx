@@ -252,7 +252,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
     // Default Grid View Structure
     return (
         <>
-            <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Folder: ${folderNameOnDisk}`}>
+            <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Folder: ${folderNameOnDisk}`} style={{ height: '100%' }}>
                 {viewMode !== "list" && (
                     <div style={imageContainerStyle}>
                         {imageLoading && ( <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i> )}

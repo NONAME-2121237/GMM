@@ -36,7 +36,7 @@ const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.png';
 
 // Global View Mode Key
 const VIEW_MODE_STORAGE_KEY = 'entityViewMode';
-const LIST_ITEM_HEIGHT = 72;
+const LIST_ITEM_HEIGHT = 60;
 const GRID_ITEM_WIDTH = 330;
 const GRID_ITEM_HEIGHT = 350;
 
@@ -343,7 +343,7 @@ function EntityPage() {
                 </div>
 
                 {/* --- List/Grid Container (measured) --- */}
-                <div ref={listContainerRef} style={{ height: 'calc(100vh - 450px)', minHeight: '300px' /* Adjust based on profile height */, overflow: 'hidden' }}>
+                <div ref={listContainerRef} style={{ height: 'calc(100vh - 200px)', minHeight: '300px' /* Adjust based on profile height */, overflow: 'hidden' }}>
                     {loading ? (
                          <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'} style={{height: '100%'}}>
                              {Array.from({ length: 6 }).map((_, i) => <ModCardSkeleton key={i} viewMode={viewMode} />)}

@@ -6,11 +6,40 @@ import { Link } from 'react-router-dom';
 import { open } from '@tauri-apps/api/shell';
 import EnhancedLibraryStats from '../components/EnhancedLibraryStats';
 
-// URLs for links
-const GENSHIN_WIKI_URL = "https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki";
-const PAIMON_MOE_URL = "https://paimon.moe";
-const INTERACTIVE_MAP_URL = "https://act.hoyolab.com/ys/app/interactive-map/index.html";
+// URLs for links with added type information
 const GAMEBANANA_URL = "https://gamebanana.com/mods/games/8552";
+const USEFUL_URLS = [
+    {
+        title: "Genshin Wiki", 
+        type: "Reference",
+        url: "https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki", 
+        icon: "fas fa-book"
+    },
+    {
+        title: "Paimon.moe", 
+        type: "Wish Calculator",
+        url: "https://paimon.moe", 
+        icon: "fas fa-calculator"
+    },
+    {
+        title: "Interactive Map", 
+        type: "Exploration",
+        url: "https://act.hoyolab.com/ys/app/interactive-map/index.html", 
+        icon: "fas fa-map-marked-alt"
+    },
+    {
+        title: "KQM", 
+        type: "Guides",
+        url: "https://keqingmains.com", 
+        icon: "fas fa-book"
+    },
+    {
+        title: "Genshin Center", 
+        type: "Planning",
+        url: "https://genshin-center.com/planner", 
+        icon: "fas fa-calendar-alt"
+    },
+];
 
 function HomeDashboard() {
     const {
@@ -176,15 +205,22 @@ function HomeDashboard() {
                 <div style={styles.card}>
                     <h3 style={styles.cardTitle}>Useful Links</h3>
                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                         <button className="btn btn-outline" onClick={() => openExternalUrl(GENSHIN_WIKI_URL)}>
-                             <i className="fas fa-book fa-fw"></i> Genshin Wiki
-                         </button>
-                         <button className="btn btn-outline" onClick={() => openExternalUrl(PAIMON_MOE_URL)}>
-                              <i className="fas fa-calculator fa-fw"></i> Paimon.moe (calculator & wish stats)
-                         </button>
-                         <button className="btn btn-outline" onClick={() => openExternalUrl(INTERACTIVE_MAP_URL)}>
-                             <i className="fas fa-map-marked-alt fa-fw"></i> Interactive Map
-                         </button>
+                        {USEFUL_URLS.map((link, index) => (
+                            <button 
+                                key={index} 
+                                className="btn btn-outline link-btn" 
+                                onClick={() => openExternalUrl(link.url)}
+                                style={styles.linkButton}
+                            >
+                                <div style={styles.linkContent}>
+                                    <div style={styles.linkMain}>
+                                        <i className={`${link.icon} fa-fw`} style={styles.linkIcon}></i>
+                                        <span style={styles.linkTitle}>{link.title}</span>
+                                    </div>
+                                    <span style={styles.linkType}>{link.type}</span>
+                                </div>
+                            </button>
+                        ))}
                      </div>
                 </div>
 
@@ -198,11 +234,47 @@ function HomeDashboard() {
                  </div>
             )}
 
+            {/* Add CSS animations */}
+            <style>{`
+                .link-btn {
+                    transition: all 0.2s ease-in-out !important;
+                    overflow: hidden !important;
+                    position: relative !important;
+                }
+                
+                .link-btn:hover {
+                    transform: translateY(-2px) !important;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1) !important;
+                }
+                
+                .link-btn:active {
+                    transform: translateY(0) !important;
+                }
+                
+                .link-btn::after {
+                    content: '';
+                    position: absolute;
+                    bottom: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 3px;
+                    background: linear-gradient(90deg, var(--primary), var(--accent));
+                    transform: scaleX(0);
+                    transform-origin: right;
+                    transition: transform 0.3s ease-out;
+                }
+                
+                .link-btn:hover::after {
+                    transform: scaleX(1);
+                    transform-origin: left;
+                }
+            `}</style>
+
         </div>
     );
 }
 
-// Basic inline styles
+// Enhanced styles with link button styling
 const styles = {
     card: { padding: '20px', background: 'var(--card-bg)', borderRadius: '12px', },
     cardTitle: { marginBottom: '15px', fontWeight: '600', fontSize: '18px', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px' },
@@ -216,6 +288,41 @@ const styles = {
     versionDisplay: {
         position: 'absolute', bottom: '10px', right: '15px', fontSize: '11px',
         color: 'rgba(255,255,255,0.4)', zIndex: 1, userSelect: 'none'
+    },
+    // New link button styles
+    linkButton: {
+        padding: '12px 15px',
+        textAlign: 'left',
+        height: 'auto',
+        width: '100%'
+    },
+    linkContent: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        width: '100%'
+    },
+    linkMain: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px'
+    },
+    linkIcon: {
+        color: 'var(--primary)',
+        fontSize: '16px'
+    },
+    linkTitle: {
+        fontWeight: '500'
+    },
+    linkType: {
+        fontSize: '12px',
+        padding: '3px 8px',
+        borderRadius: '12px',
+        background: 'rgba(var(--primary-rgb), 0.15)',
+        color: 'var(--primary)',
+        fontWeight: '500',
+        letterSpacing: '0.5px',
+        textTransform: 'uppercase'
     }
 };
 

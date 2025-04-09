@@ -267,11 +267,6 @@ function SettingsPage() {
                             {isManualScanning && !scanSummary && !scanError ? ' Scanning...' : ' Scan Now'}
                         </button>
                      </div>
-
-                    {/* --- Other Options --- */}
-                    <h3 style={styles.sectionHeader}>Other Options</h3>
-                    <p className="placeholder-text" style={{textAlign:'left', padding:0}}>More settings coming soon...</p>
-
                 </div>
             )}
 
