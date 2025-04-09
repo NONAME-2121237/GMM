@@ -137,13 +137,13 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     const [description, setDescription] = useState('');
     const [author, setAuthor] = useState('');
     const [categoryTag, setCategoryTag] = useState('');
-    const [targetEntitySlug, setTargetEntitySlug] = useState('');
+    // Removed targetEntitySlug state, now derived from selectedEntityOption
     const [selectedInternalRoot, setSelectedInternalRoot] = useState('');
     // Entity Selection State
-    const [categories, setCategories] = useState([]); // Keep raw categories from backend
-    const [entities, setEntities] = useState([]);     // Keep raw entities from backend
-    const [selectedCategoryOption, setSelectedCategoryOption] = useState(null); // react-select state: { value: slug, label: name }
-    const [selectedEntityOption, setSelectedEntityOption] = useState(null);     // react-select state: { value: slug, label: name }
+    const [categories, setCategories] = useState([]);
+    const [entities, setEntities] = useState([]);
+    const [selectedCategoryOption, setSelectedCategoryOption] = useState(null);
+    const [selectedEntityOption, setSelectedEntityOption] = useState(null);
     const [categoryLoading, setCategoryLoading] = useState(true);
     const [entityLoading, setEntityLoading] = useState(false);
     // Preview State
@@ -151,6 +151,9 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     const [selectedPreviewAbsPath, setSelectedPreviewAbsPath] = useState(null);
     const previewObjectUrlRef = useRef(null);
     const [previewLoading, setPreviewLoading] = useState(false);
+    // --- Add state for pasted image ---
+    const [pastedImageFile, setPastedImageFile] = useState(null);
+    // --- End add ---
     // Modal State
     const [isImporting, setIsImporting] = useState(false);
     const [error, setError] = useState('');
@@ -167,7 +170,6 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     const categoryOptions = useMemo(() => {
         return categories.map(cat => ({ value: cat.slug, label: cat.name }));
     }, [categories]);
-
     const entityOptions = useMemo(() => {
         return entities.map(ent => ({ value: ent.slug, label: ent.name }));
     }, [entities]);
@@ -186,17 +188,16 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
         let isMounted = true;
         if (!analysisResult || categoryLoading) return;
 
-        console.log("Analysis result and categories ready, setting initial form values.");
-
         // Reset fields
         setDescription('');
         setAuthor('');
         setCategoryTag('');
-        setSelectedEntityOption(null); // Reset entity option
-        setSelectedCategoryOption(null); // Reset category option
+        setSelectedEntityOption(null);
+        setSelectedCategoryOption(null);
         setError('');
         setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL);
         setSelectedPreviewAbsPath(null);
+        setPastedImageFile(null); // Reset pasted file
         cleanupPreviewObjectUrl();
 
         // Set deduced name/author
@@ -322,6 +323,30 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
         // Rerun when selectedCategoryOption changes
         }, [selectedCategoryOption, analysisResult?.deduced_category_slug, analysisResult?.deduced_entity_slug, analysisResult?.raw_ini_target]);
 
+    const handlePaste = useCallback((event) => {
+        setError('');
+        const items = event.clipboardData.items;
+        let imageFound = false;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
+                const file = items[i].getAsFile();
+                if (file) {
+                    imageFound = true;
+                    console.log("Pasted image file for import:", file);
+                    cleanupPreviewObjectUrl();
+                    setSelectedPreviewAbsPath(null); // Clear file path selection
+                    setPastedImageFile(file); // Store the File object
+
+                    const url = URL.createObjectURL(file);
+                    previewObjectUrlRef.current = url;
+                    setPreviewImageUrl(url);
+                    break;
+                }
+            }
+        }
+        if (imageFound) { event.preventDefault(); }
+        else { console.log("No image found in paste for import."); }
+    }, [cleanupPreviewObjectUrl]);
 
     // --- Select Separate Preview Handler ---
     const handleSelectPreviewImage = async () => {
@@ -338,6 +363,7 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
             else if (Array.isArray(selected) && selected.length > 0) absolutePath = selected[0];
 
             if (absolutePath) {
+                setPastedImageFile(null);
                 setSelectedPreviewAbsPath(absolutePath);
                 setPreviewLoading(true);
                 invoke('read_binary_file', { path: absolutePath })
@@ -374,28 +400,45 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     // --- Confirm Import Handler ---
     const handleConfirmImport = async () => {
         setError('');
-        const targetEntitySlugValue = selectedEntityOption?.value; // Get slug from selected option
+        const targetEntitySlugValue = selectedEntityOption?.value;
         if (!targetEntitySlugValue) { setError('Please select the target character/entity.'); return; }
         if (!modName.trim()) { setError('Please enter a mod name.'); return; }
         const hasDirectories = analysisResult?.entries?.some(e => e.is_dir);
         if (!selectedInternalRoot && hasDirectories) { setError('Please select the mod root folder from the archive.'); return; }
 
         setIsImporting(true);
+        let imageDataToSend = null;
+
+        // --- Read pasted image data if present ---
+        if (pastedImageFile) {
+            try {
+                const arrayBuffer = await pastedImageFile.arrayBuffer();
+                imageDataToSend = Array.from(new Uint8Array(arrayBuffer));
+                console.log("Prepared pasted image data for import (length):", imageDataToSend.length);
+            } catch (readErr) {
+                console.error("Error reading pasted file for import:", readErr);
+                setError("Failed to read pasted image data.");
+                setIsImporting(false);
+                return;
+            }
+        }
+        // --- End Read ---
+
         try {
             await invoke('import_archive', {
                 archivePathStr: analysisResult.file_path,
-                targetEntitySlug: targetEntitySlugValue, // Use value from selected option
+                targetEntitySlug: targetEntitySlugValue,
                 selectedInternalRoot: selectedInternalRoot || "",
                 modName: modName.trim(),
                 description: description || null,
                 author: author || null,
                 categoryTag: categoryTag || null,
-                selectedPreviewAbsolutePath: selectedPreviewAbsPath,
+                // --- Send either data OR path ---
+                imageData: imageDataToSend, // Send data if available
+                selectedPreviewAbsolutePath: imageDataToSend ? null : selectedPreviewAbsPath, // Send path only if no data
+                // --- End Send ---
             });
-
-             // Pass slugs back for navigation
-             onImportSuccess(targetEntitySlugValue, selectedCategoryOption?.value || 'characters');
-
+            onImportSuccess(targetEntitySlugValue, selectedCategoryOption?.value || 'characters');
         } catch (err) {
              const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown import error');
              console.error("Import failed:", errorString);
@@ -467,23 +510,22 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                         {/* Preview Section */}
                         <div style={{marginTop:'auto', paddingTop:'15px'}}>
                              <label style={styles.label}>Preview Image:</label>
-                              <div style={styles.imagePreviewContainer}>
-                                 {previewLoading ? (
-                                     <i className="fas fa-spinner fa-spin fa-fw"></i>
-                                 ) : previewImageUrl !== FALLBACK_MOD_IMAGE_MODAL ? (
-                                     <img src={previewImageUrl} alt="Preview" style={styles.imagePreview} onError={() => setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL)} />
-                                 ) : (
-                                      <p style={styles.imagePlaceholderText}>No preview found or selected.</p>
-                                  )}
-                              </div>
-                              <button
-                                  className="btn btn-outline"
-                                  style={{marginTop:'10px', width:'100%'}}
-                                  onClick={handleSelectPreviewImage}
-                                  disabled={isImporting}
+                             {/* --- Add onPaste and tabIndex --- */}
+                              <div
+                                  style={styles.imagePreviewContainer}
+                                  onPaste={handlePaste}
+                                  tabIndex={0}
+                                  title="Click 'Select Preview' or paste image here"
                               >
-                                  <i className="fas fa-image fa-fw"></i> Select Preview File...
+                              {/* --- End Add --- */}
+                                 {previewLoading ? <i className="fas fa-spinner fa-spin fa-fw"></i>
+                                 : previewImageUrl !== FALLBACK_MOD_IMAGE_MODAL ? <img src={previewImageUrl} alt="Preview" style={styles.imagePreview} onError={() => setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL)} />
+                                 : <p style={styles.imagePlaceholderText}>No preview.</p>}
+                              </div>
+                              <button className="btn btn-outline" style={{marginTop:'10px', width:'100%'}} onClick={handleSelectPreviewImage} disabled={isImporting}>
+                                  <i className="fas fa-image fa-fw"></i> Change Image...
                               </button>
+                              <p style={{fontSize:'11px', color:'rgba(255,255,255,0.5)', textAlign:'center', marginTop:'5px'}}>Paste image directly into box above.</p>
                          </div>
                     </div> {/* End Left Panel */}
 

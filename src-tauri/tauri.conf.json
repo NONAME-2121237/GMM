@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Genshin Mod Manager",
-    "version": "1.3.2"
+    "version": "1.3.3"
   },
   "tauri": {
     "allowlist": {
@@ -76,7 +76,7 @@
         "https://eidenz.github.io/gmm-updates/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "basicUi"
       }
     }
   }

@@ -1508,219 +1508,176 @@ fn update_asset_info(
     author: Option<String>,
     category_tag: Option<String>,
     selected_image_absolute_path: Option<String>,
-    new_target_entity_slug: Option<String>, // Added for relocation
+    image_data: Option<Vec<u8>>,
+    new_target_entity_slug: Option<String>,
     db_state: State<DbState>
-) -> CmdResult<()> {
-    println!("[update_asset_info] Start for asset ID: {}. Relocate to: {:?}", asset_id, new_target_entity_slug);
+) -> CmdResult<()> { // Returns Result<(), String>
+    println!("[update_asset_info] Start for asset ID: {}. Relocate to: {:?}. Image Data Provided: {}",
+        asset_id, new_target_entity_slug, image_data.is_some());
 
     let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
     let conn = &*conn_guard;
-    println!("[update_asset_info] DB lock acquired.");
 
     // --- 1. Get Current Asset Location Info ---
     let current_info = get_asset_location_info(conn, asset_id)
-        .map_err(|e| format!("Failed to get current asset info: {}", e))?; // Use internal error type mapping
+        .map_err(|e| format!("Failed get current asset info: {}", e))?;
     println!("[update_asset_info] Current Info: {:?}", current_info);
 
-    // --- 2. Check if Relocation is Requested ---
-    // FIX 1: Borrow `current_info.entity_slug`
+    // --- 2. Relocation Logic ---
     let needs_relocation = new_target_entity_slug.is_some() && new_target_entity_slug.as_deref() != Some(&current_info.entity_slug);
-
     let mut final_entity_id = current_info.entity_id;
     let mut final_relative_path_str = current_info.clean_relative_path.clone();
+    let mut final_path_on_disk: Option<PathBuf> = None;
+
+    let base_mods_path = PathBuf::from(
+        get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
+           .map_err(|e|e.to_string())?
+           .ok_or_else(|| "Mods folder path not set".to_string())?
+    );
+    println!("[update_asset_info] Base mods path: {}", base_mods_path.display());
 
     if needs_relocation {
-        let target_slug = new_target_entity_slug.unwrap(); // Safe unwrap due to check above
-        println!("[update_asset_info] Relocation requested to '{}'", target_slug);
-
-        // --- 3a. Get New Category/Entity Info ---
+        // ... (setup for relocation: target_slug, new_entity_id, etc.) ...
+        let target_slug = new_target_entity_slug.as_ref().unwrap();
         let (new_entity_id, new_category_slug): (i64, String) = conn.query_row(
             "SELECT e.id, c.slug FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = ?1",
             params![target_slug],
             |row| Ok((row.get(0)?, row.get(1)?)),
-        ).map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => format!("New target entity '{}' not found.", target_slug),
-            _ => format!("DB Error getting new target entity info: {}", e)
-        })?;
-        println!("[update_asset_info] New target Entity ID: {}, Category Slug: {}", new_entity_id, new_category_slug);
+        ).map_err(|e| format!("DB Error getting new target entity info: {}", e))?;
 
-        // --- 3b. Get Base Mods Path ---
-        // FIX 2: Map AppError before using `?` on Option
-        let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
-            .map_err(|e| e.to_string())? // Map AppError -> String
-            .ok_or_else(|| "Mods folder path not set".to_string())?;
-        let base_mods_path = PathBuf::from(base_mods_path_str);
-        println!("[update_asset_info] Base mods path: {}", base_mods_path.display());
-
-        // --- 3c. Determine Current Full Path (Check Enabled/Disabled) ---
+        // --- Determine Current Full Path on Disk (Check Enabled/Disabled) ---
         let current_relative_path_buf = PathBuf::from(&current_info.clean_relative_path);
-        let current_filename_osstr = current_relative_path_buf.file_name().ok_or_else(|| format!("Could not extract filename from current DB path: {}", current_info.clean_relative_path))?;
+        let current_filename_osstr = current_relative_path_buf.file_name().ok_or("Cannot get current filename")?;
         let current_filename_str = current_filename_osstr.to_string_lossy();
-        if current_filename_str.is_empty() { return Err("Current filename is empty".to_string()); }
         let disabled_filename = format!("{}{}", DISABLED_PREFIX, current_filename_str);
         let relative_parent_path = current_relative_path_buf.parent();
-
         let full_path_if_enabled = base_mods_path.join(&current_relative_path_buf);
         let full_path_if_disabled = match relative_parent_path {
            Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
            _ => base_mods_path.join(&disabled_filename),
         };
-
-        let current_full_path = if full_path_if_enabled.is_dir() {
-            full_path_if_enabled
-        } else if full_path_if_disabled.is_dir() {
-            full_path_if_disabled
-        } else {
-            return Err(format!(
-                "Cannot relocate mod '{}': Source folder not found at expected locations derived from DB path '{}' (Checked {} and {}).",
-                current_info.id,
-                current_info.clean_relative_path,
-                full_path_if_enabled.display(),
-                full_path_if_disabled.display()
-            ));
-        };
+        let current_full_path = if full_path_if_enabled.is_dir() { full_path_if_enabled }
+            else if full_path_if_disabled.is_dir() { full_path_if_disabled }
+            else { return Err(format!("Cannot relocate: Source folder not found at '{}' or disabled variant.", full_path_if_enabled.display())); };
         println!("[update_asset_info] Current full path on disk: {}", current_full_path.display());
 
+        // --- Construct New Relative (for DB) and Full (for Disk) Paths ---
+        let mod_base_name = current_filename_str.trim_start_matches(DISABLED_PREFIX);
+        let new_relative_path_buf = PathBuf::new().join(&new_category_slug).join(target_slug).join(mod_base_name);
+        final_relative_path_str = new_relative_path_buf.to_string_lossy().replace("\\", "/"); // For DB
 
-        // --- 3d. Construct New Relative and Full Paths ---
-        let mod_base_name = current_filename_str.trim_start_matches(DISABLED_PREFIX); // Use the clean name for the new path
-        let new_relative_path_buf = PathBuf::new()
-            .join(&new_category_slug)
-            .join(&target_slug) // Use the new entity slug provided
-            .join(mod_base_name);
-        final_relative_path_str = new_relative_path_buf.to_string_lossy().replace("\\", "/"); // Store with forward slashes
-
-        // Construct the new *full* destination path. Respect the original enabled/disabled state by using the base name or prefixed name.
-        let new_filename_to_use = if current_full_path.file_name().map_or(false, |name| name.to_string_lossy().starts_with(DISABLED_PREFIX)) {
-            disabled_filename // Keep disabled prefix if it was disabled
+        // Determine the name to use on disk (keep disabled prefix if present)
+        let new_filename_to_use_on_disk = if current_full_path.file_name().map_or(false, |name| name.to_string_lossy().starts_with(DISABLED_PREFIX)) {
+             disabled_filename // Keep disabled prefix
         } else {
-            mod_base_name.to_string() // Use clean name if it was enabled
+             mod_base_name.to_string() // Use clean name
         };
-
-        let new_full_dest_path = base_mods_path
-             .join(&new_category_slug)
-             .join(&target_slug)
-             .join(&new_filename_to_use); // Use the potentially prefixed name
-
+        let new_full_dest_path_on_disk = base_mods_path.join(&new_category_slug).join(target_slug).join(&new_filename_to_use_on_disk);
         println!("[update_asset_info] New relative path for DB: {}", final_relative_path_str);
-        println!("[update_asset_info] New full destination path on disk: {}", new_full_dest_path.display());
+        println!("[update_asset_info] New full destination path on disk: {}", new_full_dest_path_on_disk.display());
 
-        // --- 3e. Create Parent Directory for Destination ---
-        if let Some(parent) = new_full_dest_path.parent() {
-             fs::create_dir_all(parent)
-                 .map_err(|e| format!("Failed to create destination parent directory '{}': {}", parent.display(), e))?;
-        } else { return Err(format!("Could not determine parent directory for new path: {}", new_full_dest_path.display())); }
+        // --- Create Parent Directory & Perform Move ---
+        if let Some(parent) = new_full_dest_path_on_disk.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())? // Add map_err
+       } else {
+            return Err("Could not determine parent for new path".into());
+       }
+        if new_full_dest_path_on_disk.exists() { return Err(format!("Cannot relocate: Target path '{}' already exists.", new_full_dest_path_on_disk.display())); }
+        fs::rename(&current_full_path, &new_full_dest_path_on_disk)
+            .map_err(|e| e.to_string())?; // Add map_err
+        // --- END FIX 2 ---
 
-
-        // --- 3f. Perform Filesystem Move ---
-        if new_full_dest_path.exists() {
-            // This should ideally not happen if mod folder names are unique enough within an entity scope
-            // but moving across entities could cause collision. Error out for safety.
-             eprintln!("[update_asset_info] Error: Target relocation path already exists: {}", new_full_dest_path.display());
-             return Err(format!("Cannot relocate: Target path '{}' already exists.", new_full_dest_path.display()));
-        }
-        fs::rename(&current_full_path, &new_full_dest_path)
-            .map_err(|e| format!("Failed to move mod folder from '{}' to '{}': {}", current_full_path.display(), new_full_dest_path.display(), e))?;
         println!("[update_asset_info] Successfully moved mod folder.");
 
-        // Update final_entity_id for the DB update later
         final_entity_id = new_entity_id;
-
-    } // --- End Relocation Block ---
-
-
-    // --- 4. Handle Image Copying (Common Logic) ---
-    // Get Base Mods Path (if not already fetched during relocation)
-    let base_mods_path = if needs_relocation {
-         // Already fetched and checked
-         PathBuf::from(get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER).map_err(|e|e.to_string())?.ok_or_else(|| "Mods folder path not set".to_string())?)
-    } else {
-         // FIX 2: Map AppError before using `?` on Option
-         PathBuf::from(get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER).map_err(|e|e.to_string())?.ok_or_else(|| "Mods folder path not set".to_string())?)
-    };
-
-    // Determine the correct mod folder path *after* potential relocation
-    // We use final_relative_path_str which now points to the new location if moved
-    let final_mod_folder_path = base_mods_path.join(&final_relative_path_str);
-    println!("[update_asset_info] Final mod folder path for image handling: {}", final_mod_folder_path.display());
-
-    // Sanity check: the folder should exist after move/or initially
-    // Need to check both potential enabled/disabled states at the *new* location
-    let final_filename_osstr = final_mod_folder_path.file_name().ok_or_else(|| format!("Could not extract filename from final path: {}", final_mod_folder_path.display()))?;
-    let final_filename_str = final_filename_osstr.to_string_lossy();
-    let final_clean_filename = final_filename_str.trim_start_matches(DISABLED_PREFIX);
-    let final_disabled_filename = format!("{}{}", DISABLED_PREFIX, final_clean_filename);
-    let final_parent_path = final_mod_folder_path.parent().ok_or_else(|| format!("Cannot get parent of final path: {}", final_mod_folder_path.display()))?;
-
-    let final_path_enabled_check = final_parent_path.join(final_clean_filename);
-    let final_path_disabled_check = final_parent_path.join(final_disabled_filename);
-
-    let final_path_on_disk = if final_path_enabled_check.is_dir() {
-        final_path_enabled_check
-    } else if final_path_disabled_check.is_dir() {
-        final_path_disabled_check
-    } else {
-         // If neither exists after the move (or initially if no move), something is wrong
-         eprintln!("[update_asset_info] Critical Error: Final mod folder not found on disk after potential move. Checked {} and {}", final_path_enabled_check.display(), final_path_disabled_check.display());
-         return Err(format!("Mod folder not found at final destination '{}' after update/move.", final_parent_path.display()));
-    };
-    println!("[update_asset_info] Confirmed final path on disk for image copy: {}", final_path_on_disk.display());
-
-
-    let mut image_filename_to_save = current_info.clean_relative_path.split('/').last().map(|s| s.to_string()); // Use existing filename initially
-
-    if let Some(source_path_str) = selected_image_absolute_path {
-        println!("[update_asset_info] New image selected: {}", source_path_str);
-        let source_path = PathBuf::from(&source_path_str);
-        if !source_path.is_file() {
-             eprintln!("[update_asset_info] Error: Selected source image file does not exist.");
-             return Err(format!("Selected image file does not exist: {}", source_path.display()));
-        }
-
-        // Use the confirmed path on disk
-        let target_image_path = final_path_on_disk.join(TARGET_IMAGE_FILENAME);
-        println!("[update_asset_info] Target image path: {}", target_image_path.display());
-
-        // Ensure parent directory exists (it must if we found final_path_on_disk)
-        // fs::create_dir_all(final_path_on_disk.parent().unwrap()) ... // Not needed
-
-        match fs::copy(&source_path, &target_image_path) {
-            Ok(_) => {
-                println!("[update_asset_info] Image copied successfully.");
-                image_filename_to_save = Some(TARGET_IMAGE_FILENAME.to_string());
-            }
-            Err(e) => {
-                eprintln!("[update_asset_info] Failed to copy image: {}", e);
-                return Err(format!("Failed to copy image to mod folder: {}", e));
-            }
-        }
-    } else {
-         println!("[update_asset_info] No new image selected.");
-         // Get existing filename from the current info
-         image_filename_to_save = conn.query_row::<Option<String>, _, _>("SELECT image_filename FROM assets WHERE id=?1", params![asset_id], |r|r.get(0)).ok().flatten();
+        final_path_on_disk = Some(new_full_dest_path_on_disk);
     }
-    println!("[update_asset_info] Image handling complete. Filename to save: {:?}", image_filename_to_save);
 
-    // --- 5. Update Database (Common Logic) ---
-    println!("[update_asset_info] Attempting DB update for asset ID {} with final_entity_id {} and final_relative_path {}", asset_id, final_entity_id, final_relative_path_str);
+    // --- 4. Handle Image Saving (Handles Paste > File Path > Existing) ---
+
+    // Determine the mod folder path ON DISK where the image should be saved
+    // This uses the path *after* potential relocation if it happened.
+    let mod_folder_on_disk = if let Some(relocated_path) = final_path_on_disk {
+        relocated_path
+    } else {
+        // If no relocation, determine current path (enabled/disabled) based on current_info
+        let current_relative_path_buf = PathBuf::from(&current_info.clean_relative_path);
+        let current_filename_osstr = current_relative_path_buf.file_name().ok_or("Cannot get current filename")?;
+        let current_filename_str = current_filename_osstr.to_string_lossy();
+        let disabled_filename = format!("{}{}", DISABLED_PREFIX, current_filename_str);
+        let relative_parent_path = current_relative_path_buf.parent();
+        let full_path_if_enabled = base_mods_path.join(&current_relative_path_buf);
+        let full_path_if_disabled = match relative_parent_path {
+            Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename),
+            _ => base_mods_path.join(&disabled_filename),
+        };
+        if full_path_if_enabled.is_dir() { full_path_if_enabled }
+        else if full_path_if_disabled.is_dir() { full_path_if_disabled }
+        else { return Err(format!("Mod folder not found on disk at '{}' or disabled variant.", full_path_if_enabled.display())); }
+    };
+    println!("[update_asset_info] Confirmed mod path on disk for image: {}", mod_folder_on_disk.display());
+
+    // Ensure the target directory exists (it should, but double-check)
+    if !mod_folder_on_disk.is_dir() {
+        // This might happen if the folder got deleted between checks, try creating it.
+        println!("[update_asset_info] Warning: Target mod folder {} does not exist, attempting to create.", mod_folder_on_disk.display());
+        fs::create_dir_all(&mod_folder_on_disk).map_err(|e| e.to_string())?;
+    }
+
+    let mut image_filename_to_save: Option<String> = None; // Default to None
+
+    // --- Priority 1: Handle pasted/provided image data ---
+    if let Some(data) = image_data {
+        println!("[update_asset_info] Handling provided image data ({} bytes)", data.len());
+        let target_image_path = mod_folder_on_disk.join(TARGET_IMAGE_FILENAME);
+        // Use fs::write which creates/truncates the file
+        fs::write(&target_image_path, data)
+            .map_err(|e| format!("Failed to save pasted image data to '{}': {}", target_image_path.display(), e))?;
+        println!("[update_asset_info] Image data written successfully.");
+        image_filename_to_save = Some(TARGET_IMAGE_FILENAME.to_string());
+    }
+    // --- Priority 2: Handle selected file path (only if no data was provided) ---
+    else if let Some(source_path_str) = selected_image_absolute_path {
+        println!("[update_asset_info] Handling selected image file path: {}", source_path_str);
+        let source_path = PathBuf::from(&source_path_str);
+        if !source_path.is_file() { return Err(format!("Selected image file does not exist: {}", source_path.display())); }
+        let target_image_path = mod_folder_on_disk.join(TARGET_IMAGE_FILENAME);
+        fs::copy(&source_path, &target_image_path)
+             .map_err(|e| format!("Failed to copy selected image to '{}': {}", target_image_path.display(), e))?;
+        println!("[update_asset_info] Image file copied successfully.");
+        image_filename_to_save = Some(TARGET_IMAGE_FILENAME.to_string());
+    }
+    // --- Priority 3: No new image provided, fetch existing filename from DB ---
+    else {
+         println!("[update_asset_info] No new image data or path provided. Fetching existing filename.");
+         // Query existing filename. Ok if it doesn't exist (returns None)
+         image_filename_to_save = conn.query_row::<Option<String>, _, _>(
+            "SELECT image_filename FROM assets WHERE id=?1",
+             params![asset_id],
+             |r|r.get(0)
+         ).optional().map_err(|e| format!("DB error fetching existing image name: {}", e))?.flatten(); // flatten Option<Option<String>>
+    }
+    println!("[update_asset_info] Image handling complete. Filename to save in DB: {:?}", image_filename_to_save);
+
+
+    // --- 5. Update Database ---
+    println!("[update_asset_info] Attempting DB update for asset ID {}...", asset_id);
     let changes = conn.execute(
         "UPDATE assets SET name = ?1, description = ?2, author = ?3, category_tag = ?4, image_filename = ?5, entity_id = ?6, folder_name = ?7 WHERE id = ?8",
         params![
-            name,
+            name, // Use name from arguments
             description,
             author,
             category_tag,
-            image_filename_to_save,
-            final_entity_id,         // Use the potentially updated entity ID
-            final_relative_path_str, // Use the potentially updated relative path
+            image_filename_to_save, // Use the determined filename
+            final_entity_id,        // Use potentially updated entity ID
+            final_relative_path_str, // Use potentially updated relative path (for DB only)
             asset_id
         ]
-    ).map_err(|e| format!("Failed to update asset info in DB for ID {}: {}", asset_id, e))?;
-    println!("[update_asset_info] DB update executed. Changes: {}", changes);
+    ).map_err(|e| format!("Failed update asset info in DB for ID {}: {}", asset_id, e))?;
 
-    if changes == 0 {
-        eprintln!("[update_asset_info] Warning: DB update affected 0 rows for asset ID {}.", asset_id);
-    }
+    println!("[update_asset_info] DB update executed. Changes: {}", changes);
+    if changes == 0 { eprintln!("[update_asset_info] Warning: DB update affected 0 rows for asset ID {}.", asset_id); }
 
     println!("[update_asset_info] Asset ID {} updated successfully. END", asset_id);
     Ok(())
@@ -2166,10 +2123,15 @@ fn import_archive(
     description: Option<String>,
     author: Option<String>,
     category_tag: Option<String>,
+    // --- Add image data parameter ---
+    image_data: Option<Vec<u8>>,
+    // Keep existing file path param as fallback/alternative
     selected_preview_absolute_path: Option<String>,
     db_state: State<DbState>
 ) -> CmdResult<()> {
-    println!("[import_archive] Importing '{}', internal path '{}' for entity '{}'", archive_path_str, selected_internal_root, target_entity_slug);
+    println!("[import_archive] Importing '{}', internal path '{}' for entity '{}'. Image Data Provided: {}",
+        archive_path_str, selected_internal_root, target_entity_slug, image_data.is_some());
+
     // --- Basic Validation & Setup (Unchanged) ---
     if mod_name.trim().is_empty() { return Err("Mod Name cannot be empty.".to_string()); }
     if target_entity_slug.trim().is_empty() { return Err("Target Entity must be selected.".to_string()); }
@@ -2191,10 +2153,13 @@ fn import_archive(
     let target_mod_folder_name = mod_name.trim().replace(" ", "_").replace(".", "_");
     if target_mod_folder_name.is_empty() { return Err("Mod Name results in invalid folder name.".to_string()); }
     let final_mod_dest_path = base_mods_path.join(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
-    fs::create_dir_all(&final_mod_dest_path).map_err(|e| format!("Failed create dest dir '{}': {}", final_mod_dest_path.display(), e))?;
+    // Create directory *before* extraction and image saving
+    fs::create_dir_all(&final_mod_dest_path)
+        .map_err(|e| format!("Failed create dest directory '{}': {}", final_mod_dest_path.display(), e))?;
+    println!("[import_archive] Target destination folder created/ensured: {}", final_mod_dest_path.display());
 
 
-    // --- Extraction Logic (Branching) ---
+    // --- Extraction Logic (Branching - unchanged from previous corrections) ---
     println!("[import_archive] Starting extraction...");
     let extension = archive_path.extension().and_then(|os| os.to_str()).map(|s| s.to_lowercase());
     let prefix_to_extract_norm = selected_internal_root.replace("\\", "/");
@@ -2313,36 +2278,76 @@ fn import_archive(
         _ => return Err(format!("Unsupported archive type for extraction: {:?}", extension)),
     }
     println!("[import_archive] Extracted {} files.", files_extracted_count);
+    // --- End Extraction ---
 
-    // --- Handle Preview Image (Unchanged) ---
+    // --- Handle Preview Image (Handles Paste > File Path > Extracted) ---
     let mut image_filename_for_db: Option<String> = None;
-    if let Some(user_preview_path_str) = selected_preview_absolute_path {
-         let source_path = PathBuf::from(&user_preview_path_str);
-         let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
-         if source_path.is_file() {
-             fs::copy(&source_path, &target_image_path).map_err(|e| format!("Failed copy user preview: {}", e))?;
-             image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
-         }
-    } else {
-         let potential_extracted_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
-         if potential_extracted_image_path.is_file() { image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string()); }
-    }
 
-    // --- Add to Database (Unchanged) ---
+    // --- Priority 1: Pasted image data ---
+    if let Some(data) = image_data {
+        println!("[import_archive] Handling provided image data ({} bytes)", data.len());
+        let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
+        fs::write(&target_image_path, data)
+            .map_err(|e| format!("Failed to save pasted image data to '{}': {}", target_image_path.display(), e))?;
+        println!("[import_archive] Image data written successfully.");
+        image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+    }
+    // --- Priority 2: Selected external file path ---
+    else if let Some(user_preview_path_str) = selected_preview_absolute_path {
+        println!("[import_archive] Handling selected image file path: {}", user_preview_path_str);
+        let source_path = PathBuf::from(&user_preview_path_str);
+        if source_path.is_file() {
+            let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
+            fs::copy(&source_path, &target_image_path)
+                .map_err(|e| format!("Failed copy user preview to '{}': {}", target_image_path.display(), e))?;
+            println!("[import_archive] Image file copied successfully.");
+            image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+        } else {
+             println!("[import_archive] Warning: Selected preview file '{}' not found, skipping.", user_preview_path_str);
+        }
+    }
+    // --- Priority 3: Check if default name was extracted ---
+    else {
+        let potential_extracted_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
+        if potential_extracted_image_path.is_file() {
+            println!("[import_archive] Using extracted {} as preview.", TARGET_IMAGE_FILENAME);
+            image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+        } else {
+             println!("[import_archive] No pasted, selected, or extracted preview found.");
+        }
+    }
+    println!("[import_archive] Image handling complete. Filename to save in DB: {:?}", image_filename_for_db);
+
+
+    // --- Add to Database (Check Existing & Insert - unchanged) ---
     let relative_path_for_db = Path::new(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
     let relative_path_for_db_str = relative_path_for_db.to_string_lossy().replace("\\", "/");
+
     let check_existing: Option<i64> = conn.query_row(
         "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
         params![target_entity_id, relative_path_for_db_str], |row| row.get(0)
     ).optional().map_err(|e| format!("DB error check existing import '{}': {}", relative_path_for_db_str, e))?;
-    if check_existing.is_some() { fs::remove_dir_all(&final_mod_dest_path).ok(); return Err(format!("DB entry already exists for '{}'. Aborting.", relative_path_for_db_str)); }
+
+    if check_existing.is_some() {
+        fs::remove_dir_all(&final_mod_dest_path).ok(); // Attempt cleanup
+        return Err(format!("Database entry already exists for '{}'. Aborting.", relative_path_for_db_str));
+    }
+
+    println!("[import_archive] Adding asset to DB: entity_id={}, name={}, path={}, image={:?}", target_entity_id, mod_name, relative_path_for_db_str, image_filename_for_db);
     conn.execute(
         "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![target_entity_id, mod_name, description, relative_path_for_db_str, image_filename_for_db, author, category_tag]
-    ).map_err(|e| { fs::remove_dir_all(&final_mod_dest_path).ok(); format!("Failed add imported mod to DB: {}", e) })?;
+        params![
+            target_entity_id, mod_name.trim(), // Ensure name is trimmed
+            description, relative_path_for_db_str,
+            image_filename_for_db, author, category_tag
+        ]
+    ).map_err(|e| {
+        fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup on DB error
+        format!("Failed add imported mod to database: {}", e)
+    })?;
 
    println!("[import_archive] Import successful for '{}'", mod_name);
-   Ok(())
+   Ok(()) // Lock released here
 }
 
 #[command]

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom';
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri';
 import { open } from '@tauri-apps/api/dialog';
-import Select from 'react-select'; // Import react-select
+import Select from 'react-select';
 
 const reactSelectStyles = {
     control: (baseStyles, state) => ({
@@ -154,8 +154,11 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
     const [entityLoading, setEntityLoading] = useState(false);
     // Preview State
     const [currentImageUrl, setCurrentImageUrl] = useState(FALLBACK_MOD_IMAGE_MODAL);
+    const [imageLoading, setImageLoading] = useState(false); // Add loading state for image
+    const [imageLoadingError, setImageLoadingError] = useState(false);
     const [selectedImageAbsPath, setSelectedImageAbsPath] = useState(null);
-    const objectUrlRef = useRef(null);
+    const [pastedImageFile, setPastedImageFile] = useState(null);
+    const previewObjectUrlRef = useRef(null); // Ref for blob URLs needing cleanup
     // Modal State
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState('');
@@ -167,9 +170,10 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
 
     // Cleanup function to revoke old object URLs
     const cleanupObjectUrl = useCallback(() => {
-        if (objectUrlRef.current) {
-            URL.revokeObjectURL(objectUrlRef.current);
-            objectUrlRef.current = null;
+        if (previewObjectUrlRef.current) {
+            console.log("[ModEditModal Cleanup] Revoking previous Blob URL:", previewObjectUrlRef.current);
+            URL.revokeObjectURL(previewObjectUrlRef.current);
+            previewObjectUrlRef.current = null;
         }
     }, []);
 
@@ -185,10 +189,12 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
             category_tag: asset.category_tag || '',
         });
         setSelectedImageAbsPath(null);
+        setPastedImageFile(null);
         setError('');
-        setCategoryLoading(true);
-        setEntityLoading(true); // Start entity loading as true until category/entity are set
-        cleanupObjectUrl();
+        setImageLoadingError(false);
+        setImageLoading(false); // Reset loading state
+        // Don't reset currentImageUrl or cleanup blob here; Effect 3 handles it.
+        setCategoryLoading(true); setEntityLoading(true); setSelectedCategoryOption(null); setSelectedEntityOption(null);
 
         // Fetch Categories
         invoke('get_categories')
@@ -227,17 +233,35 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
 
 
         // Load existing image preview (same logic as before)
-        if (asset.image_filename) {
-            invoke('get_asset_image_path', { entitySlug: '', folderNameOnDisk: asset.folder_name, imageFilename: asset.image_filename })
-            .then(filePath => { if (isMounted && objectUrlRef.current === null) setCurrentImageUrl(convertFileSrc(filePath)); })
-            .catch(err => { if (isMounted && objectUrlRef.current === null) setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL); });
+        if (asset.image_filename && asset.folder_name) {
+            invoke('get_asset_image_path', {
+                entitySlug: '', // Not needed if folder_name is relative path on disk
+                folderNameOnDisk: asset.folder_name,
+                imageFilename: asset.image_filename
+            })
+            .then(filePath => {
+                if (!isMounted) return;
+                console.log(`[ModEditModal Image Effect ${asset.id}] Got absolute path: ${filePath}`);
+                if (!filePath) throw new Error("Backend returned empty path.");
+                // Use convertFileSrc for existing files served via asset protocol
+                const assetUrl = convertFileSrc(filePath);
+                console.log(`[ModEditModal Image Effect ${asset.id}] Setting image URL to asset: ${assetUrl}`);
+                setCurrentImageUrl(assetUrl);
+            })
+            .catch(err => {
+                if (isMounted) {
+                    console.error(`[ModEditModal Image Effect ${asset.id}] Failed load existing image:`, err);
+                    setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL);
+                    setImageLoadingError(true);
+                }
+            });
         } else {
-            setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL);
+             console.log(`[ModEditModal Image Effect ${asset.id}] No existing image filename/folder.`);
+             setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL);
         }
 
         return () => { isMounted = false; cleanupObjectUrl(); };
     }, [asset, currentEntitySlug]); // Rerun when the asset prop or current entity slug changes
-
 
     // Fetch Entities when Category Changes & Set Initial Entity
     useEffect(() => {
@@ -284,6 +308,111 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
         return () => { isMounted = false; }
     }, [selectedCategoryOption, currentEntitySlug]); // Rerun when selected category changes
 
+    // Fetch Entities when Category Changes & Set Initial Entity
+    useEffect(() => {
+        let isMounted = true;
+        // Guard conditions: Run only if asset exists AND no new image is pending (pasted/selected)
+        if (!asset || pastedImageFile || selectedImageAbsPath) {
+            console.log('[ModEditModal Image Effect] Skipping initial load (no asset or new image pending).');
+            return;
+        }
+
+        console.log(`[ModEditModal Image Effect ${asset.id}] Attempting initial load for:`, asset.image_filename, `in folder:`, asset.folder_name);
+        setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL); // Reset to fallback
+        setImageLoadingError(false);
+        setImageLoading(true); // Set loading true
+        cleanupObjectUrl(); // Clean up any previous blob URL first
+
+        if (asset.image_filename && asset.folder_name) {
+            invoke('get_asset_image_path', {
+                entitySlug: '', // Send empty or potentially currentEntitySlug if needed by backend logic
+                folderNameOnDisk: asset.folder_name,
+                imageFilename: asset.image_filename
+            })
+            .then(filePath => {
+                if (!isMounted) return Promise.reject(new Error("Component unmounted before reading binary"));
+                if (!filePath) throw new Error("Backend returned empty path for existing image.");
+                console.log(`[ModEditModal Image Effect ${asset.id}] Got absolute path: ${filePath}`);
+                return invoke('read_binary_file', { path: filePath }); // Read the binary data
+            })
+            .then(fileData => {
+                 if (!isMounted || !fileData) return Promise.reject(new Error("Component unmounted or no binary data"));
+                 console.log(`[ModEditModal Image Effect ${asset.id}] Read binary data (length: ${fileData.length})`);
+                 try {
+                     // Determine mime type (same as before)
+                     const extension = asset.image_filename.split('.').pop().toLowerCase();
+                     let mimeType = 'image/png';
+                     if (['jpg', 'jpeg'].includes(extension)) mimeType = 'image/jpeg';
+                     else if (extension === 'gif') mimeType = 'image/gif';
+                     else if (extension === 'webp') mimeType = 'image/webp';
+
+                     const blob = new Blob([new Uint8Array(fileData)], { type: mimeType });
+                     const url = URL.createObjectURL(blob);
+                     if (isMounted) {
+                         previewObjectUrlRef.current = url; // Store for cleanup
+                         setCurrentImageUrl(url); // Set the blob URL for preview
+                         console.log(`[ModEditModal Image Effect ${asset.id}] Created Blob URL: ${url}`);
+                     } else {
+                         URL.revokeObjectURL(url); // Revoke immediately if unmounted
+                     }
+                 } catch (blobError) {
+                     console.error(`[ModEditModal Image Effect ${asset.id}] Error creating blob/URL:`, blobError);
+                     if(isMounted) { setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL); setImageLoadingError(true); }
+                 }
+            })
+            .catch(err => {
+                 if (isMounted) {
+                    console.error(`[ModEditModal Image Effect ${asset.id}] Failed load existing image:`, err);
+                    setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL);
+                    setImageLoadingError(true);
+                 }
+            })
+            .finally(() => {
+                if (isMounted) {
+                    setImageLoading(false); // Set loading false
+                }
+            });
+        } else {
+             console.log(`[ModEditModal Image Effect ${asset.id}] No existing image filename/folder.`);
+             setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL);
+             setImageLoading(false); // Set loading false
+        }
+
+        // Cleanup function for this effect
+        return () => {
+            isMounted = false;
+        };
+    }, [asset?.id, asset?.image_filename, asset?.folder_name, pastedImageFile, selectedImageAbsPath, cleanupObjectUrl]);
+
+    const handlePaste = useCallback((event) => {
+        setError('');
+        cleanupObjectUrl(); // Clean before processing paste
+        const items = event.clipboardData.items;
+        let imageFound = false;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file' && items[i].type.startsWith('image/')) {
+                const file = items[i].getAsFile();
+                if (file) {
+                    imageFound = true;
+                    console.log("[ModEditModal Paste] Pasted image file:", file.name, file.type);
+                    setSelectedImageAbsPath(null); // Clear file path selection
+                    setPastedImageFile(file); // Store File object
+                    setImageLoading(false); // Ensure loading indicator is off
+                    setImageLoadingError(false); // Clear load error
+
+                    try {
+                         const url = URL.createObjectURL(file);
+                         previewObjectUrlRef.current = url;
+                         setCurrentImageUrl(url);
+                         console.log("[ModEditModal Paste] Created Blob URL:", url);
+                    } catch (e) { /* handle error */ }
+                    break;
+                }
+            }
+        }
+        if (imageFound) { event.preventDefault(); }
+        else { console.log("[ModEditModal Paste] No image found."); }
+    }, [cleanupObjectUrl]);
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
@@ -291,7 +420,7 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
     };
 
     // handleSelectImage remains the same as before
-    const handleSelectImage = async () => { /* ... keep existing implementation ... */
+    const handleSelectImage = async () => {
         setError('');
         cleanupObjectUrl(); // Clean up previous temporary URL before creating new one
 
@@ -303,14 +432,16 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
             });
 
             let absolutePath = null;
-            if (selected && typeof selected === 'string') {
-                absolutePath = selected;
-            } else if (Array.isArray(selected) && selected.length > 0) {
-                 absolutePath = selected[0];
-            }
+            if (selected && typeof selected === 'string') absolutePath = selected;
+            else if (Array.isArray(selected) && selected.length > 0) absolutePath = selected[0];
 
             if (absolutePath) {
-                setSelectedImageAbsPath(absolutePath); // Store the absolute path for saving
+                console.log("[ModEditModal Select] Selected image file:", absolutePath);
+                setPastedImageFile(null); // Clear any pasted file state
+                setSelectedImageAbsPath(absolutePath); // Store the absolute path
+                setImageLoading(true); // Show loading for binary read
+                setImageLoadingError(false);
+                setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL);
 
                 try {
                     // Read the file content using Tauri API
@@ -318,16 +449,11 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
                     // Create a Blob from the Uint8Array
                      // Basic mime type detection
                      let mimeType = 'image/png';
-                     const ext = absolutePath.split('.').pop().toLowerCase();
-                     if (['jpg', 'jpeg'].includes(ext)) mimeType = 'image/jpeg';
-                     else if (ext === 'gif') mimeType = 'image/gif';
-                     else if (ext === 'webp') mimeType = 'image/webp';
-                    const blob = new Blob([new Uint8Array(fileData)], { type: mimeType });
-                    // Create an Object URL
+                     const blob = new Blob([new Uint8Array(fileData)], { type: mimeType });
                     const url = URL.createObjectURL(blob);
-                    objectUrlRef.current = url; // Store for cleanup
-                    setCurrentImageUrl(url); // Set the preview URL
-                    console.log("Created Blob URL for preview:", url);
+                    previewObjectUrlRef.current = url;
+                    setCurrentImageUrl(url);
+                    console.log("[ModEditModal Select] Created Blob URL:", url);
                 } catch (readError) {
                     console.error("Error reading selected file for preview:", readError);
                     setError('Could not read selected image for preview.');
@@ -342,13 +468,24 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
     };
 
     const handleSave = async () => {
-        if (!asset || !selectedEntityOption) { // Ensure entity is selected
-            setError("Please select a target entity.");
-            return;
-        }
+        if (!asset || !selectedEntityOption) { setError("Please select a target entity."); return; }
         setIsSaving(true);
         setError('');
-        const newTargetSlug = selectedEntityOption.value; // Get slug from selected react-select option
+        const newTargetSlug = selectedEntityOption.value;
+
+        let imageDataToSend = null;
+        if (pastedImageFile) {
+            try {
+                const arrayBuffer = await pastedImageFile.arrayBuffer();
+                imageDataToSend = Array.from(new Uint8Array(arrayBuffer)); // Convert to Vec<u8> format for Tauri
+                console.log("Prepared pasted image data for backend (length):", imageDataToSend.length);
+            } catch (readErr) {
+                console.error("Error reading pasted file:", readErr);
+                setError("Failed to read pasted image data.");
+                setIsSaving(false);
+                return;
+            }
+        }
 
         try {
             console.log("Saving asset info:", {
@@ -364,12 +501,13 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
                 description: formData.description || null,
                 author: formData.author || null,
                 categoryTag: formData.category_tag || null,
-                selectedImageAbsolutePath: selectedImageAbsPath,
-                newTargetEntitySlug: newTargetSlug // Pass slug to backend
+                selectedImageAbsolutePath: imageDataToSend ? null : selectedImageAbsPath, // Send path only if no data
+                imageData: imageDataToSend,
+                newTargetEntitySlug: newTargetSlug
             });
 
             console.log("Asset info saved successfully.");
-            // Inform parent about success and the slug it was saved/moved to
+
             onSaveSuccess(newTargetSlug);
 
         } catch (err) {
@@ -450,16 +588,24 @@ function ModEditModal({ asset, currentEntitySlug, onClose, onSaveSuccess }) {
                         <input id="mod-category-tag" type="text" name="category_tag" value={formData.category_tag} onChange={handleInputChange} style={styles.input} placeholder="e.g., Outfit, Retexture, Effect" disabled={isSaving} />
                     </div>
 
+                    {/* Image Preview Section */}
                     <div style={styles.formGroup}>
                         <label style={styles.label}>Preview Image:</label>
-                        <div style={styles.imagePreviewContainer}>
-                            {currentImageUrl !== FALLBACK_MOD_IMAGE_MODAL ? (
-                                <img src={currentImageUrl} alt="Mod preview" style={styles.imagePreview} onError={() => { cleanupObjectUrl(); setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL); }} />
-                            ) : ( <p style={styles.imagePlaceholderText}>No preview image set.</p> )}
+                        <div style={styles.imagePreviewContainer} onPaste={handlePaste} tabIndex={0} title="Click 'Change Image' or paste image here" >
+                            {imageLoading ? ( // Show spinner while loading initial image
+                                <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i>
+                            ) : currentImageUrl !== FALLBACK_MOD_IMAGE_MODAL ? (
+                                <img src={currentImageUrl} alt="Mod preview" style={styles.imagePreview} onError={() => { cleanupObjectUrl(); setCurrentImageUrl(FALLBACK_MOD_IMAGE_MODAL); setImageLoadingError(true); }} />
+                            ) : imageLoadingError ? (
+                                <p style={{...styles.imagePlaceholderText, color: 'var(--danger)'}}>Failed to load preview</p>
+                            ) : (
+                                <p style={styles.imagePlaceholderText}>No preview image set.</p>
+                            )}
                         </div>
-                         <button className="btn btn-outline" style={{marginTop:'10px', width:'100%'}} onClick={handleSelectImage} disabled={isSaving} >
-                             <i className="fas fa-image fa-fw"></i> Change Image...
-                         </button>
+                        <button className="btn btn-outline" style={{marginTop:'10px', width:'100%'}} onClick={handleSelectImage} disabled={isSaving} >
+                            <i className="fas fa-image fa-fw"></i> Change Image...
+                        </button>
+                        <p style={{fontSize:'11px', color:'rgba(255,255,255,0.5)', textAlign:'center', marginTop:'5px'}}>You can also paste an image directly into the box above.</p>
                     </div>
 
                 </div> {/* End Content Wrapper */}
