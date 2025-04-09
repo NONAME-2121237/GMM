@@ -1,7 +1,8 @@
 // src/components/ModCard.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/tauri';
-import KeybindsPopup from './KeybindsPopup'; // Import the new popup
+import KeybindsPopup from './KeybindsPopup';
+import { toast } from 'react-toastify';
 
 // Helper to split tags, trimming whitespace and filtering empty ones
 const parseTags = (tagString) => {
@@ -15,7 +16,16 @@ const FALLBACK_MOD_IMAGE = '/images/placeholder.jpg';
 const FALLBACK_MOD_IMAGE_BG = `url('${FALLBACK_MOD_IMAGE}')`;
 const OTHER_ENTITY_SUFFIX = '-other'; // Define suffix constant
 
-function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMode = 'grid' }) {
+function ModCard({
+    asset,
+    entitySlug,
+    onToggleComplete,
+    onEdit,
+    onDelete,
+    viewMode = 'grid',
+    isSelected = false,
+    onSelectChange,
+}) {
     // State
     const isEnabled = asset.is_enabled;
     const folderNameOnDisk = asset.folder_name; // Reflects disk state
@@ -23,7 +33,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
     const [imageBgCss, setImageBgCss] = useState(FALLBACK_MOD_IMAGE_BG); // For grid view background
     const [imageLoading, setImageLoading] = useState(false);
     const [imageError, setImageError] = useState(false);
-    const [toggleError, setToggleError] = useState(null);
+    // Removed local toggleError state, use toast directly
     const objectUrlRef = useRef(null); // Ref to store temporary blob URL for cleanup
     const isOtherEntity = entitySlug?.endsWith(OTHER_ENTITY_SUFFIX);
     const tags = useMemo(() => parseTags(asset.category_tag), [asset.category_tag]);
@@ -45,14 +55,16 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
     const handleToggle = useCallback(async () => {
         if (isToggling) return;
         setIsToggling(true);
-        setToggleError(null);
+        // Clear previous errors via toast? Or let new toasts appear?
         try {
             const newIsEnabledState = await invoke('toggle_asset_enabled', { entitySlug, asset });
             onToggleComplete(asset.id, newIsEnabledState);
+            // toast.success(`Mod "${asset.name}" ${newIsEnabledState ? 'enabled' : 'disabled'}.`); // Optional: Simple success toast
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown toggle error');
             console.error(`[ModCard ${asset.id}] Failed to toggle:`, errorString);
-            setToggleError(`Toggle failed: ${errorString.length > 100 ? errorString.substring(0, 97) + '...' : errorString}`); // Truncate long errors
+            // Use toast for error feedback
+            toast.error(`Toggle failed for "${asset.name}": ${errorString.length > 100 ? errorString.substring(0, 97) + '...' : errorString}`);
         } finally {
             setIsToggling(false);
         }
@@ -87,10 +99,11 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error');
             console.error(`Failed to fetch keybinds for asset ${asset.id}:`, errorString);
             setKeybindsError(`Failed to load keybinds: ${errorString}`);
+            toast.error(`Failed to load keybinds for "${asset.name}".`); // Toast feedback
         } finally {
             setKeybindsLoading(false);
         }
-    }, [asset.id]);
+    }, [asset.id, asset.name]);
 
     const handleCloseKeybindsPopup = useCallback(() => {
         setIsKeybindsPopupOpen(false);
@@ -99,6 +112,12 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
         setKeybinds([]);
     }, []);
     // --- END NEW Keybinds Popup Handlers ---
+
+    // --- NEW Checkbox change handler ---
+    const handleCheckboxChange = useCallback((e) => {
+         onSelectChange(asset.id, e.target.checked);
+    }, [asset.id, onSelectChange]);
+    // ---------------------------------
 
 
     // Effect to load image data (only relevant for grid view display)
@@ -116,16 +135,16 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
 
         if (asset.image_filename && folderNameOnDisk) {
             setImageLoading(true);
-            console.log(`[ModCard ${asset.id}] Image Effect: Attempting load for ${asset.image_filename} in ${folderNameOnDisk}`);
+            // console.log(`[ModCard ${asset.id}] Image Effect: Attempting load for ${asset.image_filename} in ${folderNameOnDisk}`);
             invoke('get_asset_image_path', { entitySlug: entitySlug, folderNameOnDisk: folderNameOnDisk, imageFilename: asset.image_filename })
             .then(filePath => {
                 if (!isMounted) return Promise.reject(new Error("Component unmounted"));
-                console.log(`[ModCard ${asset.id}] Got absolute path: ${filePath}`);
+                // console.log(`[ModCard ${asset.id}] Got absolute path: ${filePath}`);
                 return invoke('read_binary_file', { path: filePath });
             })
             .then(fileData => {
                  if (!isMounted || !fileData) return Promise.reject(new Error("Component unmounted or no file data"));
-                console.log(`[ModCard ${asset.id}] Read binary data (length: ${fileData.length})`);
+                // console.log(`[ModCard ${asset.id}] Read binary data (length: ${fileData.length})`);
                  try {
                     const extension = asset.image_filename.split('.').pop().toLowerCase();
                     let mimeType = 'image/png';
@@ -138,7 +157,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
                     if (isMounted) {
                         setImageBgCss(`url('${url}')`);
                         setImageError(false);
-                        console.log(`[ModCard ${asset.id}] Created Object URL: ${url}`);
+                        // console.log(`[ModCard ${asset.id}] Created Object URL: ${url}`);
                     } else {
                          URL.revokeObjectURL(url);
                          objectUrlRef.current = null;
@@ -165,7 +184,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
                 }
             });
         } else {
-             console.log(`[ModCard ${asset.id}] No image filename or folder name defined.`);
+             // console.log(`[ModCard ${asset.id}] No image filename or folder name defined.`);
              setImageBgCss(FALLBACK_MOD_IMAGE_BG);
         }
         return () => {
@@ -174,12 +193,6 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
         };
 
     }, [asset.id, asset.image_filename, folderNameOnDisk, entitySlug, cleanupObjectUrl, isOtherEntity, viewMode]); // Rerun if viewMode changes back to grid
-
-    // Reset toggle error when asset changes or its enabled state is updated from parent
-     useEffect(() => {
-        setToggleError(null);
-     }, [asset.id, isEnabled]);
-
 
     // Style for Image Container (only used in grid mode)
     const imageContainerStyle = useMemo(() => ({
@@ -209,7 +222,19 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
                 <div
                     className={`mod-card-list ${!isEnabled ? 'mod-disabled-visual' : ''}`}
                     title={`Folder: ${folderNameOnDisk}\n${asset.description || ''}`}
+                    // Add slight background change on selection if desired
+                    style={ isSelected ? { backgroundColor: 'rgba(156, 136, 255, 0.1)' } : {} }
                 >
+                     {/* --- Add Checkbox --- */}
+                     <input
+                         type="checkbox"
+                         checked={isSelected}
+                         onChange={handleCheckboxChange}
+                         onClick={(e) => e.stopPropagation()} // Prevent row click when clicking checkbox
+                         style={{ marginRight: '10px', cursor: 'pointer', width: '16px', height: '16px' }}
+                         aria-label={`Select mod ${asset.name}`}
+                     />
+                     {/* ------------------ */}
                     <label className="toggle-switch compact-toggle">
                         <input type="checkbox" checked={isEnabled} onChange={handleToggle} disabled={isToggling} aria-label={`Enable/Disable ${asset.name} mod`} />
                         <span className="slider"></span>
@@ -222,7 +247,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
                             By: {asset.author}
                         </div>
                     )}
-                    {toggleError && <div className="mod-list-error" title={toggleError}> <i className="fas fa-exclamation-triangle"></i> </div>}
+                    {/* Error display removed - handled by toast */}
                     <div className="mod-list-actions">
                         <button onClick={handleOpenKeybindsPopup} className="btn-icon compact-btn" title="View Keybinds" disabled={isToggling}>
                             <i className="fas fa-keyboard fa-fw"></i>
@@ -284,7 +309,7 @@ function ModCard({ asset, entitySlug, onToggleComplete, onEdit, onDelete, viewMo
                     </div>
                 )}
                 {asset.description ? ( <p className="mod-description">{asset.description}</p> ) : ( <p className="mod-description placeholder-text" style={{padding:0, textAlign:'left', fontStyle:'italic'}}>(No description)</p> )}
-                {toggleError && <p style={gridStyles.errorTextGrid}>{toggleError}</p>}
+                {/* Error display removed - handled by toast */}
                 <div className="mod-details">
                     <div className="mod-author">{asset.author ? `By: ${asset.author}` : '(Unknown author)'}</div>
                     {/* --- Replace static keybind div with a button --- */}
@@ -321,10 +346,6 @@ const gridButtonStyles = {
     edit: { ...gridButtonBase },
     delete: { ...gridButtonBase, color:'var(--danger)' },
     keybind: { ...gridButtonBase } // Style for the keybind button
-};
-// Style for grid toggle error
-const gridStyles = {
-     errorTextGrid: { color: 'var(--danger)', fontSize: '12px', marginTop: 'auto', paddingTop:'5px', flexShrink:0, textAlign:'right' }
 };
 
 export default ModCard;

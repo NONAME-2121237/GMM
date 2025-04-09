@@ -1,3 +1,4 @@
+// src/pages/EntityPage.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/tauri';
@@ -8,6 +9,7 @@ import { getLocalStorageItem, setLocalStorageItem } from '../utils/localStorage'
 import ModCardSkeleton from '../components/ModCardSkeleton';
 import { FixedSizeList, FixedSizeGrid } from 'react-window';
 import useMeasure from 'react-use-measure';
+import { toast } from 'react-toastify';
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -36,9 +38,9 @@ const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.png';
 
 // Global View Mode Key
 const VIEW_MODE_STORAGE_KEY = 'entityViewMode';
-const LIST_ITEM_HEIGHT = 60;
+const LIST_ITEM_HEIGHT = 60; // Height including padding/margin
 const GRID_ITEM_WIDTH = 330;
-const GRID_ITEM_HEIGHT = 350;
+const GRID_ITEM_HEIGHT = 350; // Includes padding inside the cell
 
 function EntityPage() {
     const { entitySlug } = useParams();
@@ -56,6 +58,10 @@ function EntityPage() {
     const [viewMode, setViewMode] = useState('grid'); // Default, loaded in useEffect
     const [modSearchTerm, setModSearchTerm] = useState('');
     const [listContainerRef, bounds] = useMeasure();
+    // --- New State for Bulk Actions ---
+    const [selectedAssetIds, setSelectedAssetIds] = useState(new Set());
+    const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+    // ----------------------------------
 
     // Fetch data (includes loading view mode)
     const fetchData = useCallback(async () => {
@@ -67,6 +73,7 @@ function EntityPage() {
         setError(null);
         setEntity(null);
         setAssets([]);
+        setSelectedAssetIds(new Set()); // Reset selection on fetch
         try {
             const entityDetails = await invoke('get_entity_details', { entitySlug });
             setEntity(entityDetails);
@@ -93,19 +100,26 @@ function EntityPage() {
         setAssets(currentAssets =>
             currentAssets.map(asset => {
                 if (asset.id === assetId) {
-                    const currentFolderName = asset.folder_name;
-                    const isCurrentlyDisabledPrefixed = currentFolderName.startsWith('DISABLED_');
-                    const baseFolderName = isCurrentlyDisabledPrefixed ? currentFolderName.substring(9) : currentFolderName;
-                    const parts = baseFolderName.split('/');
-                    const filename = parts.pop() || '';
-                    const parentPath = parts.join('/');
+                    // Logic to calculate the potentially new folder_name based on state
+                    // This is needed if ModCard itself doesn't know the "clean" relative path
+                    const isCurrentlyDisabledPrefixed = asset.folder_name.startsWith('DISABLED_');
+                    let cleanRelativePath = asset.folder_name;
+                    if (isCurrentlyDisabledPrefixed) {
+                        const parts = asset.folder_name.split('/');
+                        const filename = parts.pop() || '';
+                        cleanRelativePath = parts.length > 0 ? `${parts.join('/')}/${filename.substring(9)}` : filename.substring(9);
+                    }
+
                     let updatedFolderName;
                     if (newIsEnabledState) {
-                        updatedFolderName = baseFolderName;
+                         updatedFolderName = cleanRelativePath; // Use clean path if enabled
                     } else {
-                        const disabledFilename = `DISABLED_${filename}`;
-                        updatedFolderName = parentPath ? `${parentPath}/${disabledFilename}` : disabledFilename;
-                    }
+                         const parts = cleanRelativePath.split('/');
+                         const filename = parts.pop() || '';
+                         const disabledFilename = `DISABLED_${filename}`;
+                         updatedFolderName = parts.length > 0 ? `${parts.join('/')}/${disabledFilename}` : disabledFilename;
+                     }
+
                     const updatedAsset = { ...asset, is_enabled: newIsEnabledState, folder_name: updatedFolderName };
                     console.log(`[EntityPage ${entitySlug}] Updated asset ${assetId} state:`, updatedAsset);
                     return updatedAsset;
@@ -113,23 +127,23 @@ function EntityPage() {
                 return asset;
             })
         );
-        // Refetch entity details (includes mod_count) - moved inside the callback for consistency
-         invoke('get_entity_details', { entitySlug })
+        // Refetch entity details only if counts might change (for simplicity, always refetch)
+        invoke('get_entity_details', { entitySlug })
             .then(updatedEntityDetails => {
                 console.log(`[EntityPage ${entitySlug}] Refetched entity details after toggle:`, updatedEntityDetails);
                 setEntity(updatedEntityDetails);
             })
             .catch(err => console.error(`[EntityPage ${entitySlug}] Failed to refetch entity details after toggle:`, err));
 
-    }, [entitySlug]); // Removed fetchData dependency here, explicit call inside
+    }, [entitySlug]);
 
     // goBack function
     const goBack = () => {
          if (window.history.length > 2) {
             navigate(-1);
          } else {
-             // Fallback logic (adjust as needed)
-             const fallbackCategory = entity?.category_id === 1 ? 'characters' : 'characters';
+             // Fallback logic
+             const fallbackCategory = entity?.category_id === 1 ? 'characters' : 'characters'; // Simple default
              navigate(`/category/${fallbackCategory}`);
          }
     };
@@ -146,18 +160,22 @@ function EntityPage() {
         setEditingAsset(null);
     }, []);
 
-    const handleSaveEditSuccess = useCallback((originalAssetId, newTargetEntitySlug) => {
-        console.log("Save successful, processing result for asset ID:", originalAssetId, "New Slug:", newTargetEntitySlug);
+    const handleSaveEditSuccess = useCallback((targetSlug) => {
+        // Called when save is successful, receives the NEW target entity slug
+        console.log("Save successful, processing result. New Target Slug:", targetSlug);
         handleCloseEditModal();
-        if (newTargetEntitySlug && newTargetEntitySlug !== entitySlug) {
-             console.log(`Asset ${originalAssetId} relocated from ${entitySlug} to ${newTargetEntitySlug}. Removing from list.`);
-             setAssets(currentAssets => currentAssets.filter(asset => asset.id !== originalAssetId));
-              setEntity(currentEntity => ({ ...currentEntity, mod_count: Math.max(0, (currentEntity?.mod_count || 0) - 1) }));
+        if (targetSlug && targetSlug !== entitySlug) {
+             console.log(`Asset relocated from ${entitySlug} to ${targetSlug}. Refreshing data.`);
+             toast.info(`Mod relocated to ${targetSlug}. Refreshing list...`);
+             // Refresh the current page's data (which will now exclude the moved mod)
+             fetchData();
         } else {
-            console.log(`Asset ${originalAssetId} updated within ${entitySlug}. Refreshing data.`);
+            console.log(`Asset updated within ${entitySlug}. Refreshing data.`);
+            toast.success(`Mod details updated.`);
             fetchData(); // Refetch all data for the current entity
         }
     }, [handleCloseEditModal, entitySlug, fetchData]);
+
 
     // Delete Modal Handlers
     const handleOpenDeleteModal = useCallback((asset) => {
@@ -180,14 +198,16 @@ function EntityPage() {
         try {
             await invoke('delete_asset', { assetId: assetToDelete.id });
             console.log(`Asset ${assetToDelete.id} deleted successfully.`);
+            toast.success(`Mod "${assetToDelete.name}" deleted.`);
             setAssets(currentAssets => currentAssets.filter(asset => asset.id !== assetToDelete.id));
              setEntity(currentEntity => ({ ...currentEntity, mod_count: Math.max(0, (currentEntity?.mod_count || 0) - 1) }));
              handleCloseDeleteModal();
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown delete error');
             console.error(`Failed to delete asset ${assetToDelete.id}:`, errorString);
-            setDeleteError(`Failed to delete: ${errorString}`);
-             setIsDeleting(false);
+            setDeleteError(`Failed to delete: ${errorString}`); // Show error in modal
+            toast.error(`Failed to delete "${assetToDelete.name}": ${errorString}`); // Also show toast
+             setIsDeleting(false); // Keep modal open on error
         }
     }, [assetToDelete, handleCloseDeleteModal]);
 
@@ -196,6 +216,7 @@ function EntityPage() {
         if (newMode !== viewMode) {
             setViewMode(newMode);
             setLocalStorageItem(VIEW_MODE_STORAGE_KEY, newMode); // Save preference globally
+            setSelectedAssetIds(new Set()); // Clear selection when changing view mode
         }
     };
 
@@ -211,18 +232,124 @@ function EntityPage() {
         );
     }, [assets, modSearchTerm]);
 
+    // --- Bulk Action Handlers ---
+    const handleSelectAllChange = (event) => {
+        const isChecked = event.target.checked;
+        if (isChecked) {
+            // Select all *filtered* assets
+            setSelectedAssetIds(new Set(filteredAssets.map(asset => asset.id)));
+        } else {
+            setSelectedAssetIds(new Set());
+        }
+    };
+
+    const handleAssetSelectChange = useCallback((assetId, isSelected) => {
+        setSelectedAssetIds(prevSet => {
+            const newSet = new Set(prevSet);
+            if (isSelected) {
+                newSet.add(assetId);
+            } else {
+                newSet.delete(assetId);
+            }
+            return newSet;
+        });
+    }, []);
+
+    const handleBulkToggle = async (enable) => {
+        if (selectedAssetIds.size === 0 || isBulkProcessing) return;
+
+        setIsBulkProcessing(true);
+        let successCount = 0;
+        let failCount = 0;
+        const updatedAssetsMap = new Map(assets.map(a => [a.id, { ...a }])); // Create a mutable map
+
+        // Use toast for progress indication
+        const toastId = toast.loading(`Processing ${selectedAssetIds.size} mods...`, { closeButton: false });
+
+        // Process items sequentially to avoid overwhelming backend/UI updates too rapidly
+        for (const assetId of selectedAssetIds) {
+            const currentAsset = updatedAssetsMap.get(assetId);
+            if (!currentAsset || currentAsset.is_enabled === enable) {
+                // Skip if asset not found or already in the desired state
+                continue;
+            }
+
+            try {
+                // Use the existing single toggle command
+                const newIsEnabledState = await invoke('toggle_asset_enabled', {
+                    entitySlug,
+                    asset: currentAsset // Pass the current asset state
+                });
+
+                // Update the asset in our map immediately after successful toggle
+                const isCurrentlyDisabledPrefixed = currentAsset.folder_name.startsWith('DISABLED_');
+                 let cleanRelativePath = currentAsset.folder_name;
+                 if (isCurrentlyDisabledPrefixed) {
+                     const parts = currentAsset.folder_name.split('/');
+                     const filename = parts.pop() || '';
+                     cleanRelativePath = parts.length > 0 ? `${parts.join('/')}/${filename.substring(9)}` : filename.substring(9);
+                 }
+                 let updatedFolderName;
+                 if (newIsEnabledState) {
+                      updatedFolderName = cleanRelativePath;
+                 } else {
+                      const parts = cleanRelativePath.split('/');
+                      const filename = parts.pop() || '';
+                      const disabledFilename = `DISABLED_${filename}`;
+                      updatedFolderName = parts.length > 0 ? `${parts.join('/')}/${disabledFilename}` : disabledFilename;
+                  }
+                updatedAssetsMap.set(assetId, { ...currentAsset, is_enabled: newIsEnabledState, folder_name: updatedFolderName });
+
+                successCount++;
+                toast.update(toastId, { render: `${enable ? 'Enabling' : 'Disabling'} mod ${successCount}/${selectedAssetIds.size}...` });
+            } catch (err) {
+                failCount++;
+                const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown toggle error');
+                console.error(`Bulk toggle failed for asset ${assetId}:`, errorString);
+                // Optionally show individual errors, but might be too noisy.
+                // toast.error(`Failed for "${currentAsset.name}": ${errorString.substring(0,50)}`);
+            }
+        }
+
+        // Update the main assets state once after all processing
+        setAssets(Array.from(updatedAssetsMap.values()));
+        setSelectedAssetIds(new Set()); // Clear selection
+
+        // Update toast based on outcome
+        if (failCount === 0) {
+             toast.update(toastId, { render: `${enable ? 'Enabled' : 'Disabled'} ${successCount} mods successfully!`, type: 'success', isLoading: false, autoClose: 3000 });
+        } else {
+             toast.update(toastId, { render: `Bulk action completed. ${successCount} succeeded, ${failCount} failed.`, type: 'warning', isLoading: false, autoClose: 5000 });
+        }
+
+        setIsBulkProcessing(false);
+
+        // Refetch entity details to update counts
+        invoke('get_entity_details', { entitySlug })
+            .then(updatedEntityDetails => setEntity(updatedEntityDetails))
+            .catch(err => console.error("Failed refetch entity details after bulk toggle:", err));
+    };
+
+    // --- End Bulk Action Handlers ---
+
     const ListItem = ({ index, style }) => {
         const asset = filteredAssets[index];
+        // --- Pass selection props ---
+        const isSelected = selectedAssetIds.has(asset.id);
         return (
-             <div style={style}> {/* Apply style for positioning */}
+             <div style={style}>
                  <ModCard
-                     key={asset.id} // Key should ideally be here, but react-window manages keys
+                     key={asset.id}
                      asset={asset}
                      entitySlug={entitySlug}
                      onToggleComplete={handleToggleComplete}
                      onEdit={handleOpenEditModal}
                      onDelete={handleOpenDeleteModal}
                      viewMode="list"
+                     // --- Pass selection props ---
+                     isSelected={isSelected}
+                     onSelectChange={handleAssetSelectChange}
+                     // -------------------------
                  />
              </div>
         );
@@ -234,8 +361,7 @@ function EntityPage() {
         if (index >= filteredAssets.length) return null; // Out of bounds
         const asset = filteredAssets[index];
         return (
-             <div style={style}> {/* Apply style for positioning */}
-                {/* Add padding inside the cell if needed */}
+             <div style={style}>
                 <div style={{ padding: '0 10px 10px 10px', height:'100%' }}>
                     <ModCard
                         key={asset.id}
@@ -245,6 +371,7 @@ function EntityPage() {
                         onEdit={handleOpenEditModal}
                         onDelete={handleOpenDeleteModal}
                         viewMode="grid"
+                        // Selection not implemented for grid view
                     />
                  </div>
              </div>
@@ -266,13 +393,17 @@ function EntityPage() {
     const handleAvatarError = (e) => {
         if (e.target.src !== DEFAULT_ENTITY_PLACEHOLDER_IMAGE) {
             console.warn(`Failed to load entity avatar: ${avatarUrl}, falling back to placeholder.`);
-            // Use background style fallback for div
             e.target.style.backgroundImage = `url('${DEFAULT_ENTITY_PLACEHOLDER_IMAGE}')`;
         }
      };
 
     const gridColumnCount = Math.max(1, Math.floor(bounds.width / GRID_ITEM_WIDTH));
     const gridRowCount = Math.ceil(filteredAssets.length / gridColumnCount);
+
+    // --- Calculate "select all" checkbox state ---
+    const isAllFilteredSelected = filteredAssets.length > 0 && selectedAssetIds.size === filteredAssets.length;
+    const isIndeterminate = selectedAssetIds.size > 0 && selectedAssetIds.size < filteredAssets.length;
+    // -------------------------------------------
 
 
     return (
@@ -297,7 +428,6 @@ function EntityPage() {
                 <div
                     className="character-avatar"
                     style={{ backgroundImage: `url('${avatarUrl}')` }}
-                    // onError doesn't work directly on div background, handle indirectly if needed
                 >
                 </div>
 
@@ -328,22 +458,54 @@ function EntityPage() {
 
             {/* Mods Section */}
             <div className="mods-section">
-                <div className="section-header">
-                    <h2 className="section-title">Available Mods ({filteredAssets.length})</h2>
-                    <div className="search-bar-container">
-                        <div className="search-bar">
-                            <i className="fas fa-search"></i>
-                            <input type="text" placeholder={`Search mods...`} value={modSearchTerm} onChange={(e) => setModSearchTerm(e.target.value)} aria-label={`Search mods`} data-global-search="true" />
-                        </div>
+                 {/* --- Updated Section Header --- */}
+                 <div className="section-header" style={{ alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                         <h2 className="section-title" style={{ marginBottom: 0 }}>Available Mods ({filteredAssets.length})</h2>
+                         {/* Select All Checkbox (only in list view) */}
+                         {viewMode === 'list' && filteredAssets.length > 0 && (
+                              <input
+                                  type="checkbox"
+                                  title={isAllFilteredSelected ? "Deselect All" : "Select All Visible"}
+                                  checked={isAllFilteredSelected}
+                                  ref={el => el && (el.indeterminate = isIndeterminate)} // Set indeterminate state
+                                  onChange={handleSelectAllChange}
+                                  disabled={isBulkProcessing}
+                                  style={{ cursor: 'pointer', width:'16px', height:'16px' }}
+                                  aria-label="Select all mods"
+                              />
+                         )}
                     </div>
-                    <div className="view-mode-toggle">
-                         <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => toggleViewMode('grid')} title="Grid View"><i className="fas fa-th fa-fw"></i></button>
-                         <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => toggleViewMode('list')} title="List View"><i className="fas fa-list fa-fw"></i></button>
-                    </div>
-                </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginLeft: 'auto' }}> {/* Wrap right-side controls */}
+                         {/* Bulk Action Buttons (only in list view & when items selected) */}
+                         {viewMode === 'list' && selectedAssetIds.size > 0 && (
+                             <div style={{ display: 'flex', gap: '10px' }}>
+                                 <button className="btn btn-primary" onClick={() => handleBulkToggle(true)} disabled={isBulkProcessing} title="Enable selected mods">
+                                     {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-check fa-fw"></i>} Enable ({selectedAssetIds.size})
+                                 </button>
+                                 <button className="btn btn-outline" onClick={() => handleBulkToggle(false)} disabled={isBulkProcessing} title="Disable selected mods">
+                                     {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-times fa-fw"></i>} Disable ({selectedAssetIds.size})
+                                 </button>
+                                 {/* Add bulk delete later if needed */}
+                             </div>
+                         )}
+                         <div className="search-bar-container">
+                             <div className="search-bar">
+                                 <i className="fas fa-search"></i>
+                                 <input type="text" placeholder={`Search mods...`} value={modSearchTerm} onChange={(e) => setModSearchTerm(e.target.value)} aria-label={`Search mods`} data-global-search="true" />
+                             </div>
+                         </div>
+                         <div className="view-mode-toggle">
+                              <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => toggleViewMode('grid')} title="Grid View"><i className="fas fa-th fa-fw"></i></button>
+                              <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => toggleViewMode('list')} title="List View"><i className="fas fa-list fa-fw"></i></button>
+                         </div>
+                     </div>
+                 </div>
+                 {/* --- End Updated Section Header --- */}
 
-                {/* --- List/Grid Container (measured) --- */}
-                <div ref={listContainerRef} style={{ height: 'calc(100vh - 200px)', minHeight: '300px' /* Adjust based on profile height */, overflow: 'hidden' }}>
+                {/* List/Grid Container */}
+                {/* Use a fixed height container and let react-window handle scrolling */}
+                 <div ref={listContainerRef} style={{ height: 'calc(100vh - 200px)', /* Adjust based on profile height etc */ minHeight: '300px', overflow: 'hidden', marginTop: '10px' /* Add margin if needed */}}>
                     {loading ? (
                          <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'} style={{height: '100%'}}>
                              {Array.from({ length: 6 }).map((_, i) => <ModCardSkeleton key={i} viewMode={viewMode} />)}
@@ -357,7 +519,7 @@ function EntityPage() {
                             <FixedSizeList
                                 height={bounds.height}
                                 itemCount={filteredAssets.length}
-                                itemSize={LIST_ITEM_HEIGHT}
+                                itemSize={LIST_ITEM_HEIGHT} // Ensure this matches the actual item height including margins/padding
                                 width={bounds.width}
                                 style={{overflowX:'hidden'}} // Prevent horizontal scrollbar
                             >
@@ -369,9 +531,9 @@ function EntityPage() {
                                 columnWidth={GRID_ITEM_WIDTH}
                                 height={bounds.height}
                                 rowCount={gridRowCount}
-                                rowHeight={GRID_ITEM_HEIGHT}
+                                rowHeight={GRID_ITEM_HEIGHT} // Ensure this matches actual grid item height
                                 width={bounds.width}
-                                itemData={filteredAssets} // Pass data if needed inside item renderer
+                                itemData={filteredAssets}
                             >
                                 {GridItem}
                             </FixedSizeGrid>

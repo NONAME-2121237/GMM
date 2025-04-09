@@ -4,6 +4,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import ScanProgressPopup from '../components/ScanProgressPopup';
+import { toast } from 'react-toastify';
 
 // Event names constants
 const SCAN_PROGRESS_EVENT = "scan://progress";
@@ -35,7 +36,6 @@ function SettingsPage() {
     // State for path changing
     const [isChangingFolder, setIsChangingFolder] = useState(false);
     const [isChangingFile, setIsChangingFile] = useState(false);
-    const [changeError, setChangeError] = useState('');
 
     // State for the manual scan button and its popup
     const [isManualScanning, setIsManualScanning] = useState(false);
@@ -55,17 +55,17 @@ function SettingsPage() {
     // --- Path Changing Logic ---
     const handleChangeModsFolder = useCallback(async () => {
         setIsChangingFolder(true);
-        setChangeError('');
         setScanSummary(''); setScanError(''); closeScanPopup();
         try {
             const result = await invoke('select_directory');
             if (result) {
                 const success = await updateSetting(SETTINGS_KEY_MODS_FOLDER, result);
                 if (!success) throw new Error("Failed to save setting via context.");
+                if (success) toast.success("Mods Folder updated successfully!");
             }
         } catch (err) {
             console.error("Error changing mods folder:", err);
-            setChangeError(`Failed to update Mods Folder: ${err.message || String(err)}`);
+            toast.error(`Failed to update Mods Folder: ${err.message || String(err)}`);
         } finally {
             setIsChangingFolder(false);
         }
@@ -73,17 +73,17 @@ function SettingsPage() {
 
     const handleChangeQuickLaunch = useCallback(async () => {
         setIsChangingFile(true);
-        setChangeError('');
         setScanSummary(''); setScanError(''); closeScanPopup();
         try {
             const result = await invoke('select_file');
             if (result) {
                 const success = await updateSetting(SETTINGS_KEY_QUICK_LAUNCH, result);
                  if (!success) throw new Error("Failed to save setting via context.");
+                if (success) toast.success("Quick Launch File updated successfully!");
             }
         } catch (err) {
             console.error("Error changing quick launch file:", err);
-             setChangeError(`Failed to update Quick Launch File: ${err.message || String(err)}`);
+            toast.error(`Failed to update Quick Launch File: ${err.message || String(err)}`);
         } finally {
             setIsChangingFile(false);
         }
@@ -93,7 +93,6 @@ function SettingsPage() {
     // --- Custom URL Save Logic ---
     const handleSaveCustomUrl = async () => {
         setIsSavingUrl(true);
-        setChangeError('');
         try {
             // Simple validation: check if it looks like a URL (optional)
             if (localCustomUrl && !localCustomUrl.startsWith('http://') && !localCustomUrl.startsWith('https://')) {
@@ -103,10 +102,10 @@ function SettingsPage() {
             }
             const success = await updateSetting(SETTINGS_KEY_CUSTOM_LIBRARY_URL, localCustomUrl);
             if (!success) throw new Error("Failed to save setting via context.");
-            // Maybe add a temporary success indicator?
+            if (success) toast.success("Custom Library URL updated successfully!");
         } catch (err) {
             console.error("Error saving custom URL:", err);
-            setChangeError(`Failed to save Custom Library URL: ${err.message || String(err)}`);
+            toast.error(`Failed to save Custom Library URL: ${err.message || String(err)}`);
         } finally {
             setIsSavingUrl(false);
         }
@@ -119,7 +118,6 @@ function SettingsPage() {
         setScanProgressData(null);
         setScanSummary('');
         setScanError('');
-        setChangeError('');
 
         try {
             await invoke('scan_mods_directory');
@@ -245,9 +243,6 @@ function SettingsPage() {
                              {' '}Save URL
                         </button>
                      </div>
-
-                    {/* Display path change/save errors */}
-                     {changeError && <p style={styles.errorText}>{changeError}</p>}
 
                     {/* --- Mod Management Section --- */}
                     <h3 style={styles.sectionHeader}>Mod Management</h3>

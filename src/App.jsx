@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
@@ -8,6 +9,8 @@ import SettingsPage from './pages/SettingsPage';
 import PresetPage from './pages/PresetPage';
 import HomeDashboard from './pages/HomeDashboard';
 import FirstLaunchSetup from './components/FirstLaunchSetup';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 function AppContent() {
     const { isLoading, isSetupComplete } = useSettings();
@@ -64,6 +67,18 @@ function AppContent() {
                     <Route path="*" element={<HomeDashboard />} />
                 </Routes>
             </main>
+            <ToastContainer
+                position="bottom-right"
+                autoClose={4000}
+                hideProgressBar={false}
+                newestOnTop={false}
+                closeOnClick
+                rtl={false}
+                pauseOnFocusLoss
+                draggable
+                pauseOnHover
+                theme="dark"
+            />
         </div>
     );
 }

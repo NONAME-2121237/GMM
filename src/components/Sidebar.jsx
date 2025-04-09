@@ -278,7 +278,7 @@ function Sidebar() {
         setApplySummarySidebar('');
         try {
             await invoke('apply_preset', { presetId });
-            // Let listeners handle popup, maybe refresh data or notify user on completion listener
+            window.location.reload();   // Reload the page after applying the preset
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Failed to start preset application');
             console.error(`Failed to invoke apply_preset ${presetId} from sidebar:`, errorString);

@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useNavigate } from 'react-router-dom';
 import ConfirmationModal from '../components/ConfirmationModal';
 import ScanProgressPopup from '../components/ScanProgressPopup';
+import { toast } from 'react-toastify';
 
 // Event names constants
 const PRESET_APPLY_START_EVENT = "preset://apply_start";
@@ -57,7 +58,6 @@ function PresetPage() {
     const navigate = useNavigate();
     const [presets, setPresets] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState('');
     const [newPresetName, setNewPresetName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
     const [applyingPresetId, setApplyingPresetId] = useState(null);
@@ -65,12 +65,10 @@ function PresetPage() {
     const [presetToDelete, setPresetToDelete] = useState(null);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
-    const [deleteError, setDeleteError] = useState('');
     // Overwrite State
     const [presetToOverwrite, setPresetToOverwrite] = useState(null);
     const [isOverwriteModalOpen, setIsOverwriteModalOpen] = useState(false);
     const [isOverwriting, setIsOverwriting] = useState(false);
-    const [overwriteError, setOverwriteError] = useState('');
     // Apply Popup state
     const [showApplyPopup, setShowApplyPopup] = useState(false);
     const [applyProgressData, setApplyProgressData] = useState(null);
@@ -81,13 +79,12 @@ function PresetPage() {
     // Fetch Presets
     const fetchPresets = useCallback(async () => {
         setIsLoading(true);
-        setError('');
         try {
             const fetchedPresets = await invoke('get_presets');
             setPresets(fetchedPresets);
         } catch (err) {
             console.error("Failed to fetch presets:", err);
-            setError(typeof err === 'string' ? err : 'Failed to load presets.');
+            toast.error('Failed to load presets.');
         } finally {
             setIsLoading(false);
         }
@@ -105,7 +102,6 @@ function PresetPage() {
                     console.log("Preset Apply Start:", event.payload);
                     setApplyProgressData({ processed: 0, total: event.payload || 0, message: 'Starting...' });
                     setApplySummary('');
-                    setApplyError('');
                     setShowApplyPopup(true);
                 }
             });
@@ -121,7 +117,6 @@ function PresetPage() {
                     console.log("Preset Apply Complete:", event.payload);
                     setApplySummary(event.payload || 'Preset applied successfully!');
                     setApplyProgressData(null);
-                    setApplyError('');
                     setShowApplyPopup(true); // Ensure popup shows completion
                     setApplyingPresetId(null); // Re-enable button
                  }
@@ -129,7 +124,7 @@ function PresetPage() {
             applyListenersRef.current.unlistenError = await listen(PRESET_APPLY_ERROR_EVENT, (event) => {
                 if (applyingPresetId !== null) { // Only process if related to an ongoing apply
                     console.error("Preset Apply Error:", event.payload);
-                    setApplyError(event.payload || 'An unknown error occurred during preset application.');
+                    toast.error(event.payload || 'An unknown error occurred during preset application.');
                     setApplyProgressData(null);
                     setApplySummary('');
                     setShowApplyPopup(true); // Ensure popup shows error
@@ -155,7 +150,6 @@ function PresetPage() {
         e.preventDefault();
         if (!newPresetName.trim()) return;
         setIsCreating(true);
-        setError('');
         try {
             await invoke('create_preset', { name: newPresetName.trim() });
             console.log(`Preset '${newPresetName.trim()}' created successfully.`);
@@ -163,7 +157,7 @@ function PresetPage() {
             window.location.reload(); // Reload to fetch new preset list
         } catch (err) {
             console.error("Failed to create preset:", err);
-            setError(typeof err === 'string' ? err : 'Failed to create preset.');
+            toast.error('Failed to create preset.');
         } finally {
             setIsCreating(false);
         }
@@ -172,7 +166,6 @@ function PresetPage() {
     // Apply Preset Logic
     const handleApplyPreset = async (presetId) => {
         setApplyingPresetId(presetId);
-        setError(''); // Clear general errors
         setApplyError(''); // Clear specific apply error
         setShowApplyPopup(false); // Hide previous popup if any
         setApplyProgressData(null);
@@ -185,6 +178,7 @@ function PresetPage() {
             console.error("Failed to invoke apply_preset:", err);
             const errorString = typeof err === 'string' ? err : (err?.message || 'Failed to start preset application');
             setApplyError(errorString);
+            toast.error(errorString);
             setShowApplyPopup(true); // Show popup to display the invocation error
             setApplyingPresetId(null);
         }
@@ -203,7 +197,6 @@ function PresetPage() {
 
     // Toggle Favorite Logic
     const handleToggleFavorite = async (preset) => {
-        setError('');
         const newFavState = !preset.is_favorite;
         try {
             await invoke('toggle_preset_favorite', { presetId: preset.id, isFavorite: newFavState });
@@ -213,7 +206,7 @@ function PresetPage() {
             ));
         } catch (err) {
              console.error("Failed to toggle favorite:", err);
-             setError(typeof err === 'string' ? err : 'Failed to update favorite status.');
+                toast.error('Failed to update favorite status.');
              // Optionally revert local state change on error
              setPresets(current => current.map(p =>
                  p.id === preset.id ? { ...p, is_favorite: preset.is_favorite } : p // Revert to original
@@ -225,28 +218,25 @@ function PresetPage() {
     const openDeleteModal = (preset) => {
         setPresetToDelete(preset);
         setIsDeleteModalOpen(true);
-        setDeleteError('');
     };
 
     const closeDeleteModal = () => {
         setPresetToDelete(null);
         setIsDeleteModalOpen(false);
         setIsDeleting(false);
-        setDeleteError('');
     };
 
     const confirmDeletePreset = async () => {
         if (!presetToDelete) return;
         setIsDeleting(true);
-        setDeleteError('');
-        setError(''); // Clear general errors
         try {
             await invoke('delete_preset', { presetId: presetToDelete.id });
             await fetchPresets(); // Refetch list after deleting
             closeDeleteModal();
+            toast.success(`Preset ${presetToDelete.name} deleted successfully.`);
         } catch (err) {
              console.error("Failed to delete preset:", err);
-             setDeleteError(typeof err === 'string' ? err : 'Failed to delete preset.');
+                toast.error('Failed to delete preset.');
              setIsDeleting(false); // Keep modal open
         }
     };
@@ -255,30 +245,26 @@ function PresetPage() {
     const openOverwriteModal = (preset) => {
         setPresetToOverwrite(preset);
         setIsOverwriteModalOpen(true);
-        setOverwriteError('');
     };
 
     const closeOverwriteModal = () => {
         setPresetToOverwrite(null);
         setIsOverwriteModalOpen(false);
         setIsOverwriting(false);
-        setOverwriteError('');
     };
 
     const confirmOverwritePreset = async () => {
         if (!presetToOverwrite) return;
         setIsOverwriting(true);
-        setOverwriteError('');
-        setError('');
         try {
             await invoke('overwrite_preset', { presetId: presetToOverwrite.id });
             console.log(`Preset ${presetToOverwrite.id} overwritten successfully.`);
             closeOverwriteModal();
-            // Add a user feedback mechanism here (e.g., toast notification) if desired
+            toast.success(`Preset ${presetToOverwrite.name} overwritten successfully.`);
         } catch (err) {
              const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown overwrite error');
              console.error(`Failed to overwrite preset ${presetToOverwrite.id}:`, errorString);
-             setOverwriteError(`Failed to overwrite: ${errorString}`);
+                toast.error(`Failed to overwrite preset: ${errorString}`);
              setIsOverwriting(false); // Keep modal open
         }
     };
@@ -314,8 +300,6 @@ function PresetPage() {
                     )}
                 </button>
             </form>
-
-             {error && <p style={styles.errorText}>{error}</p>}
 
             <div>
                 {isLoading ? (
@@ -389,7 +373,6 @@ function PresetPage() {
                     confirmText="Overwrite"
                     confirmButtonVariant="primary" // Keep primary for save-like action
                     isLoading={isOverwriting}
-                    errorMessage={overwriteError}
                  >
                     Are you sure you want to overwrite the preset "{presetToOverwrite.name}"
                     with your current mod enabled/disabled states? This cannot be undone.
@@ -406,7 +389,6 @@ function PresetPage() {
                     confirmText="Delete"
                     confirmButtonVariant="danger"
                     isLoading={isDeleting}
-                    errorMessage={deleteError}
                  >
                     Are you sure you want to permanently delete the preset "{presetToDelete.name}"?
                     This action cannot be undone.
