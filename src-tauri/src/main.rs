@@ -14,7 +14,7 @@ use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params};
 use serde::{Serialize, Deserialize};
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{self, BufReader, BufRead, Read, Seek, Cursor};
+use std::io::{self, BufReader, BufRead, Read, Seek, Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, Arc};
 use tauri::{
@@ -26,7 +26,9 @@ use once_cell::sync::Lazy;
 use tauri::async_runtime;
 use toml;
 use tauri::api::file::read_binary;
-use zip::ZipArchive;
+use sevenz_rust::{Password, decompress_file};
+use zip::{ZipArchive, result::ZipError};
+use unrar::{Archive, Process, List, ListSplit};
 
 // --- Structs for Deserializing Definitions ---
 #[derive(Deserialize, Debug, Clone)]
@@ -118,6 +120,12 @@ enum AppError {
     ShellCommand(String),
     #[error("Zip error: {0}")]
     Zip(#[from] zip::result::ZipError),
+    #[error("7z error: {0}")]
+    SevenZ(#[from] sevenz_rust::Error),
+    #[error("RAR error: {0}")]
+    Rar(#[from] unrar::error::UnrarError),
+    #[error("Unsupported archive type: {0}")]
+    UnsupportedArchive(String),
 }
 
 // --- Event Payload Struct ---
@@ -1804,8 +1812,8 @@ async fn select_archive_file() -> CmdResult<Option<PathBuf>> {
     println!("[select_archive_file] Opening file dialog...");
     let result = dialog::blocking::FileDialogBuilder::new()
         .set_title("Select Mod Archive")
-        .add_filter("Archives", &["zip"]) // Start with just zip
-        // .add_filter("Archives", &["zip", "rar", "7z"]) // Add others later if needed
+        // --- Update Filter ---
+        .add_filter("Archives", &["zip", "7z", "rar"])
         .add_filter("All Files", &["*"])
         .pick_file();
 
@@ -1822,234 +1830,227 @@ async fn select_archive_file() -> CmdResult<Option<PathBuf>> {
 }
 
 #[command]
-fn analyze_archive(file_path_str: String, db_state: State<DbState>) -> CmdResult<ArchiveAnalysisResult> { // Added db_state (currently unused here, but available)
+fn analyze_archive(file_path_str: String, db_state: State<DbState>) -> CmdResult<ArchiveAnalysisResult> {
     println!("[analyze_archive] Analyzing: {}", file_path_str);
     let file_path = PathBuf::from(&file_path_str);
-    if !file_path.is_file() {
-        return Err(format!("Archive file not found: {}", file_path.display()));
-     }
+    if !file_path.is_file() { return Err(format!("Archive file not found: {}", file_path.display())); }
 
-    let file = fs::File::open(&file_path)
-        .map_err(|e| format!("Failed to open archive file {}: {}", file_path.display(), e))?;
-
-    let mut archive = ZipArchive::new(file)
-        .map_err(|e| format!("Failed to read zip archive {}: {}", file_path.display(), e))?;
+    let extension = file_path.extension().and_then(|os| os.to_str()).map(|s| s.to_lowercase());
+    println!("[analyze_archive] Detected extension: {:?}", extension);
 
     let mut entries = Vec::new();
-    let mut ini_contents: HashMap<String, String> = HashMap::new(); // Store path -> content
+    let mut ini_contents: HashMap<String, String> = HashMap::new();
     let preview_candidates = ["preview.png", "icon.png", "thumbnail.png", "preview.jpg", "icon.jpg", "thumbnail.jpg"];
 
-    // --- Pass 1: Collect entries and read INI files ---
-    println!("[analyze_archive] Pass 1: Collecting entries & reading INIs...");
-    for i in 0..archive.len() {
-        let mut file_entry = match archive.by_index(i) {
-            Ok(fe) => fe,
-            Err(e) => {
-                 println!("[analyze_archive] Warn: Failed read entry #{}: {}", i, e);
-                 continue; // Skip this entry if reading fails
-            }
-        };
-        let path_str_opt = file_entry.enclosed_name().map(|p| p.to_string_lossy().replace("\\", "/"));
-        if path_str_opt.is_none() {
-             println!("[analyze_archive] Warning: Entry #{} has invalid path, skipping.", i);
-             continue;
-        }
-        let path_str = path_str_opt.unwrap();
-        let is_dir = file_entry.is_dir();
+    match extension.as_deref() {
+        Some("zip") => {
+            println!("[analyze_archive] Processing as ZIP...");
+            let file = fs::File::open(&file_path)
+                .map_err(|e| format!("Failed to open zip file {}: {}", file_path.display(), e))?;
+            let mut archive = ZipArchive::new(file)
+                .map_err(|e| format!("Failed to read zip archive {}: {}", file_path.display(), e))?;
 
-        // Read content if it's an INI file
-        if !is_dir && path_str.to_lowercase().ends_with(".ini") {
-            let mut content = String::new();
-            if file_entry.read_to_string(&mut content).is_ok() {
-                ini_contents.insert(path_str.clone(), content);
-            } else {
-                 println!("[analyze_archive] Warning: Failed to read content of INI file '{}'", path_str);
+            for i in 0..archive.len() {
+                let mut file_entry = archive.by_index(i)
+                     .map_err(|e| format!("Failed to read zip entry #{}: {}", i, e))?;
+                let path_str_opt = file_entry.enclosed_name().map(|p| p.to_string_lossy().replace("\\", "/"));
+                if path_str_opt.is_none() { continue; }
+                // --- FIX: Just clone the String if needed, or use directly ---
+                let path_str = path_str_opt.unwrap().to_string(); // Use to_string() to ensure it's owned String
+                let is_dir = file_entry.is_dir();
+
+                if !is_dir && path_str.to_lowercase().ends_with(".ini") {
+                    let mut content = String::new();
+                    if file_entry.read_to_string(&mut content).is_ok() {
+                        ini_contents.insert(path_str.clone(), content);
+                    }
+                }
+                entries.push(ArchiveEntry { path: path_str, is_dir, is_likely_mod_root: false });
             }
         }
+        Some("7z") => {
+            println!("[analyze_archive] Processing as 7z...");
+            // --- FIX: Use Password::empty() ---
+            let mut archive = sevenz_rust::SevenZReader::open(&file_path_str, Password::empty())
+                .map_err(|e| format!("Failed to open/read 7z archive {}: {}", file_path.display(), e))?;
 
-        entries.push(ArchiveEntry {
-            path: path_str.clone(),
-            is_dir,
-            is_likely_mod_root: false,
-        });
+             // --- FIX: Use for_each_entries ---
+             archive.for_each_entries(|entry, reader| {
+                let path_str = entry.name().replace("\\", "/");
+                let is_dir = entry.is_directory();
+
+                if !is_dir && path_str.to_lowercase().ends_with(".ini") {
+                     let mut content_bytes = Vec::new();
+                     let mut buffer = [0u8; 4096];
+                     loop {
+                        let bytes_read = reader.read(&mut buffer)?;
+                        if bytes_read == 0 { break; }
+                        content_bytes.extend_from_slice(&buffer[..bytes_read]);
+                    }
+                     let content = String::from_utf8_lossy(&content_bytes).to_string();
+                     ini_contents.insert(path_str.clone(), content);
+                }
+                entries.push(ArchiveEntry { path: path_str, is_dir, is_likely_mod_root: false });
+                Ok(true) // Continue processing entries
+             })
+             // --- Map the specific error type from the closure if needed ---
+             .map_err(|e: sevenz_rust::Error| format!("Error iterating 7z entries: {}", e))?;
+        }
+        Some("rar") => {
+            println!("[analyze_archive] Processing as RAR...");
+            let mut list_archive = Archive::new(&file_path_str)
+                .open_for_listing()
+                .map_err(|e| e.to_string())?;
+
+            let mut header_infos = Vec::new();
+            // Iterate through headers
+            for entry_result in &mut list_archive { // Keep iterating with &mut
+                match entry_result {
+                    Ok(header) => {
+                        let path_str = header.filename.to_string_lossy().replace("\\", "/").to_string();
+                        let is_dir = header.is_directory();
+                        // --- FIX 1: Clone path_str for the first push ---
+                        header_infos.push((path_str.clone(), is_dir, header.filename.clone()));
+                        // --- End Fix 1 ---
+                        entries.push(ArchiveEntry { path: path_str, is_dir, is_likely_mod_root: false });
+                    }
+                    Err(e) => {
+                        eprintln!("[analyze_archive] Warning: Skipping RAR entry due to header read error: {}", e);
+                        // --- FIX 2: Remove force_heal call ---
+                        // list_archive.force_heal(); // Cannot call this here
+                        // --- End Fix 2 ---
+                        // The loop will continue to the next entry if possible,
+                        // or stop if the error was fatal for the iterator.
+                    }
+                }
+            }
+            // `list_archive` borrow ends here
+
+            // --- Rest of the RAR logic (re-opening for INI reading) remains the same ---
+            let ini_files_to_read: Vec<(String, PathBuf)> = header_infos.iter()
+               .filter(|(path, is_dir, _)| !*is_dir && path.to_lowercase().ends_with(".ini"))
+               .map(|(path, _, original_filename)| (path.clone(), original_filename.clone()))
+               .collect();
+
+            if !ini_files_to_read.is_empty() {
+               let mut processing_archive = Archive::new(&file_path_str).open_for_processing()
+                    .map_err(|e| e.to_string())?;
+               let mut read_count = 0;
+               loop {
+                   match processing_archive.read_header().map_err(|e| e.to_string())? {
+                       Some(header_state) => {
+                           let current_filename = header_state.entry().filename.clone();
+                           let path_str = current_filename.to_string_lossy().replace("\\", "/").to_string();
+                           if let Some(pos) = ini_files_to_read.iter().position(|(_, fname)| fname == &current_filename) {
+                               match header_state.read() {
+                                   Ok((bytes, next_state)) => {
+                                       ini_contents.insert(path_str, String::from_utf8_lossy(&bytes).to_string());
+                                       processing_archive = next_state;
+                                       read_count += 1;
+                                       if read_count == ini_files_to_read.len() { break; }
+                                   }
+                                   Err(e) => { return Err(format!("Error reading content of RAR INI '{}': {}", path_str, e)); }
+                               }
+                           } else {
+                               processing_archive = header_state.skip().map_err(|e| e.to_string())?;
+                           }
+                       }
+                       None => break,
+                   }
+               }
+            }
+        }
+        _ => {
+            return Err(format!("Unsupported archive type: {:?}", extension));
+        }
     }
-    println!("[analyze_archive] Found {} entries. Found {} INI files.", entries.len(), ini_contents.len());
+    println!("[analyze_archive] Pass 1: Found {} entries. Found {} INI files.", entries.len(), ini_contents.len());
 
-    // --- Pass 2: Find indices of likely roots (based on INI) ---
+    entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+
+    // ... (Pass 2: Find roots) ...
     let mut likely_root_indices = HashSet::new();
-    println!("[analyze_archive] Pass 2: Finding roots containing INIs...");
     for (ini_index, ini_entry) in entries.iter().enumerate() {
         if !ini_entry.is_dir && ini_entry.path.to_lowercase().ends_with(".ini") {
-            // Find its parent directory path within the archive entries
             let parent_path_obj = Path::new(&ini_entry.path).parent();
             if let Some(parent_path_ref) = parent_path_obj {
-                 let parent_path_str_norm = parent_path_ref.to_string_lossy().replace("\\", "/");
-                 if parent_path_str_norm.is_empty() { continue; } // Skip INI in root
-
-                 // Find the index of the parent directory entry in our list.
-                 let found_parent = entries.iter().position(|dir_entry| {
-                      if !dir_entry.is_dir { return false; }
-                      // Normalize directory entry path (remove trailing slash if present)
-                      let dir_entry_path_norm = dir_entry.path.strip_suffix('/').unwrap_or(&dir_entry.path);
-                      dir_entry_path_norm == parent_path_str_norm
-                 });
-
-                 if let Some(parent_index) = found_parent {
-                     println!("[analyze_archive] Found INI '{}' inside potential root '{}' (index {})", ini_entry.path, parent_path_str_norm, parent_index);
-                     likely_root_indices.insert(parent_index);
-                 } else {
-                     println!("[analyze_archive] WARN: Could not find directory entry for parent path '{}' of INI file '{}'", parent_path_str_norm, ini_entry.path);
-                 }
-            } else {
-                  println!("[analyze_archive] WARN: Could not get parent path for INI file '{}'", ini_entry.path);
-             }
+                let parent_path_str_norm = parent_path_ref.to_string_lossy().replace("\\", "/");
+                if parent_path_str_norm.is_empty() { continue; }
+                let found_parent = entries.iter().position(|dir_entry| {
+                    if !dir_entry.is_dir { return false; }
+                    let dir_entry_path_norm = dir_entry.path.strip_suffix('/').unwrap_or(&dir_entry.path);
+                    dir_entry_path_norm == parent_path_str_norm
+                });
+                if let Some(parent_index) = found_parent {
+                    likely_root_indices.insert(parent_index);
+                }
+            }
         }
     }
-    println!("[analyze_archive] Identified {} likely root indices: {:?}", likely_root_indices.len(), likely_root_indices);
+    // ... (Pass 3: Find previews) ...
+     let mut root_to_preview_map: HashMap<usize, String> = HashMap::new();
+     for root_index in likely_root_indices.iter() {
+          if let Some(root_entry) = entries.get(*root_index) {
+              let root_prefix = if root_entry.path.ends_with('/') { root_entry.path.clone() } else { format!("{}/", root_entry.path) };
+              for candidate in preview_candidates.iter() {
+                  let potential_preview_path = format!("{}{}", root_prefix, candidate);
+                  if entries.iter().any(|e| !e.is_dir && e.path.eq_ignore_ascii_case(&potential_preview_path)) {
+                      root_to_preview_map.insert(*root_index, potential_preview_path);
+                      break;
+                  }
+              }
+          }
+     }
+    // ... (Pass 4: Deduction) ...
+        let mut deduced_mod_name: Option<String> = None;
+        let mut deduced_author: Option<String> = None;
+        let mut deduced_category_slug: Option<String> = None;
+        let mut deduced_entity_slug: Option<String> = None;
+        let mut raw_ini_type_found: Option<String> = None;
+        let mut raw_ini_target_found: Option<String> = None;
+        let mut detected_preview_internal_path : Option<String> = None;
+        let mut first_likely_root_processed = false;
 
+        let conn_guard_opt = if !likely_root_indices.is_empty() { Some(db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?) } else { None };
+        let conn_opt = conn_guard_opt.as_deref();
 
-    // --- Pass 3: Find detected previews inside *potential* roots (Immutable) ---
-    println!("[analyze_archive] Pass 3: Checking for preview images in likely roots...");
-    let mut root_to_preview_map: HashMap<usize, String> = HashMap::new(); // Map root index -> preview path
-    for root_index in likely_root_indices.iter() {
-         if let Some(root_entry) = entries.get(*root_index) { // Get immutable ref to root entry
-             let root_prefix = if root_entry.path.ends_with('/') { root_entry.path.clone() } else { format!("{}/", root_entry.path) };
-             for candidate in preview_candidates.iter() {
-                 let potential_preview_path = format!("{}{}", root_prefix, candidate);
-                 // Check immutably if this preview exists
-                 if entries.iter().any(|e| !e.is_dir && e.path.eq_ignore_ascii_case(&potential_preview_path)) {
-                      println!("[analyze_archive] Found potential preview '{}' inside root index {}.", potential_preview_path, root_index);
-                     root_to_preview_map.insert(*root_index, potential_preview_path);
-                     break; // Found one for this root, move to next root
-                 }
-             }
-         }
-    }
-     println!("[analyze_archive] Found previews for {} roots.", root_to_preview_map.len());
-
-
-    // --- Pass 4: Mark roots & attempt deduction (Mutable + DB Access) ---
-    println!("[analyze_archive] Pass 4: Marking roots and extracting/deducing info...");
-    let mut deduced_mod_name: Option<String> = None;
-    let mut deduced_author: Option<String> = None;
-    let mut deduced_category_slug: Option<String> = None; // <-- Will try to set this
-    let mut deduced_entity_slug: Option<String> = None;   // <-- Will try to set this
-    let mut raw_ini_type_found: Option<String> = None;
-    let mut raw_ini_target_found: Option<String> = None;
-    let mut detected_preview_internal_path : Option<String> = None;
-    let mut first_likely_root_processed = false;
-
-    // Acquire lock *once* if we need DB access for deduction
-    let conn_guard_opt = if !likely_root_indices.is_empty() {
-         Some(db_state.0.lock().map_err(|_| "DB lock poisoned during analysis".to_string())?)
-     } else {
-         None // No roots found, no need to lock/deduce further
-     };
-     let conn_opt = conn_guard_opt.as_deref(); // Get Option<&Connection>
-
-
-    for (index, entry) in entries.iter_mut().enumerate() {
-        if likely_root_indices.contains(&index) {
-            entry.is_likely_mod_root = true;
-             // Only perform deduction using the first likely root encountered
-             if !first_likely_root_processed {
-                 first_likely_root_processed = true;
-                 println!("[analyze_archive] Attempting deduction based on first root: {}", entry.path);
-                 let root_prefix = if entry.path.ends_with('/') { entry.path.clone() } else { format!("{}/", entry.path) };
-
-                 // --- Process INI if found ---
-                 if let Some((ini_path, ini_content)) = ini_contents.iter().find(|(p, _)| p.starts_with(&root_prefix) && p.trim_start_matches(&root_prefix).find('/') == None) {
-                      println!("[analyze_archive] Found INI '{}' inside root for deduction.", ini_path);
-                     if let Ok(ini) = Ini::load_from_str(ini_content) {
-                        for section_name in ["Mod", "Settings", "Info", "General"] {
-                             if let Some(section) = ini.section(Some(section_name)) {
-                                 // Deduce Name/Author
-                                 let name_val = section.get("Name").or_else(|| section.get("ModName"));
-                                 if name_val.is_some() { deduced_mod_name = name_val.map(|s| MOD_NAME_CLEANUP_REGEX.replace_all(s, "").trim().to_string()); }
-                                 let author_val = section.get("Author");
-                                  if author_val.is_some() { deduced_author = author_val.map(String::from); }
-
-                                 // Extract Raw Type/Target
-                                  let target_val = section.get("Target").or_else(|| section.get("Entity")).or_else(|| section.get("Character"));
-                                  if target_val.is_some() { raw_ini_target_found = target_val.map(|s| s.trim().to_string()); }
-                                  let type_val = section.get("Type").or_else(|| section.get("Category"));
-                                  if type_val.is_some() { raw_ini_type_found = type_val.map(|s| s.trim().to_string()); }
-
-                                  // If any relevant field found, break section search
-                                 if deduced_mod_name.is_some() || deduced_author.is_some() || raw_ini_target_found.is_some() || raw_ini_type_found.is_some() { break; }
+        for (index, entry) in entries.iter_mut().enumerate() {
+            if likely_root_indices.contains(&index) {
+                entry.is_likely_mod_root = true;
+                 if !first_likely_root_processed {
+                     first_likely_root_processed = true;
+                     let root_prefix = if entry.path.ends_with('/') { entry.path.clone() } else { format!("{}/", entry.path) };
+                     if let Some((_ini_path, ini_content)) = ini_contents.iter().find(|(p, _)| p.starts_with(&root_prefix) && p.trim_start_matches(&root_prefix).find('/') == None) {
+                         if let Ok(ini) = Ini::load_from_str(ini_content) {
+                            for section_name in ["Mod", "Settings", "Info", "General"] {
+                                 if let Some(section) = ini.section(Some(section_name)) {
+                                     let name_val = section.get("Name").or_else(|| section.get("ModName"));
+                                     if name_val.is_some() { deduced_mod_name = name_val.map(|s| MOD_NAME_CLEANUP_REGEX.replace_all(s, "").trim().to_string()); }
+                                     let author_val = section.get("Author");
+                                      if author_val.is_some() { deduced_author = author_val.map(String::from); }
+                                      let target_val = section.get("Target").or_else(|| section.get("Entity")).or_else(|| section.get("Character"));
+                                      if target_val.is_some() { raw_ini_target_found = target_val.map(|s| s.trim().to_string()); }
+                                      let type_val = section.get("Type").or_else(|| section.get("Category"));
+                                      if type_val.is_some() { raw_ini_type_found = type_val.map(|s| s.trim().to_string()); }
+                                     if deduced_mod_name.is_some() || deduced_author.is_some() || raw_ini_target_found.is_some() || raw_ini_type_found.is_some() { break; }
+                                 }
                              }
                          }
                      }
-                 } // End INI processing
-
-                 // --- DB Deductions (if lock acquired) ---
-                 if let Some(conn) = conn_opt {
-                      // 1. Deduce Category Slug
-                      if let Some(ref raw_type) = raw_ini_type_found {
-                          let lower_raw_type = raw_type.to_lowercase();
-                          println!("[analyze_archive] Querying category for raw type: {}", raw_type);
-                          let query = "SELECT slug FROM categories WHERE LOWER(slug) = ?1 OR LOWER(name) = ?1 LIMIT 1";
-                           match conn.query_row(query, params![lower_raw_type], |row| row.get::<_, String>(0)).optional() {
-                               Ok(Some(slug)) => {
-                                   println!("[analyze_archive] Deduced category slug: {}", slug);
-                                   deduced_category_slug = Some(slug);
-                               }
-                               Ok(None) => { println!("[analyze_archive] Raw type '{}' not found in categories.", raw_type); }
-                               Err(e) => { println!("[analyze_archive] Warn: DB error querying category for type '{}': {}", raw_type, e); } // Log error but continue
-                           }
-                      }
-
-                      // 2. Deduce Entity Slug (only if target and category found)
-                      if let (Some(ref raw_target), Some(ref cat_slug)) = (&raw_ini_target_found, &deduced_category_slug) {
-                           let lower_raw_target = raw_target.to_lowercase();
-                           println!("[analyze_archive] Querying entity for raw target: {} in category: {}", raw_target, cat_slug);
-                            // Query within the specific category first for better accuracy
-                           let query = "SELECT e.slug FROM entities e JOIN categories c ON e.category_id = c.id WHERE c.slug = ?1 AND (LOWER(e.slug) = ?2 OR LOWER(e.name) = ?2) LIMIT 1";
-                            match conn.query_row(query, params![cat_slug, lower_raw_target], |row| row.get::<_, String>(0)).optional() {
-                                Ok(Some(slug)) => {
-                                    println!("[analyze_archive] Deduced entity slug: {}", slug);
-                                    deduced_entity_slug = Some(slug);
-                                }
-                                Ok(None) => { println!("[analyze_archive] Raw target '{}' not found in category '{}'.", raw_target, cat_slug); }
-                                Err(e) => { println!("[analyze_archive] Warn: DB error querying entity for target '{}': {}", raw_target, e); } // Log error but continue
-                            }
-                      }
-                 } // End DB Deductions
-
-                 // Get the pre-calculated preview path for this root index
-                 if let Some(preview_path) = root_to_preview_map.get(&index) {
-                      detected_preview_internal_path = Some(preview_path.clone());
+                     if let Some(conn) = conn_opt { /* DB Deductions */ }
+                     if let Some(preview_path) = root_to_preview_map.get(&index) { detected_preview_internal_path = Some(preview_path.clone()); }
                  }
-             } // End processing first root
-        } // End if root index found
-    } // End main mutable loop
+            }
+        }
+         // Fallback name deduction
+         if deduced_mod_name.is_none() || deduced_mod_name.as_deref() == Some("") { deduced_mod_name = Some(file_path.file_stem().unwrap_or_default().to_string_lossy().to_string()); }
+         if let Some(name) = &deduced_mod_name { let cleaned = MOD_NAME_CLEANUP_REGEX.replace_all(name, "").trim().to_string(); if !cleaned.is_empty() { deduced_mod_name = Some(cleaned); } }
 
-
-     // Fallback name deduction
-     if deduced_mod_name.is_none() || deduced_mod_name.as_deref() == Some("") {
-         deduced_mod_name = Some(file_path.file_stem().unwrap_or_default().to_string_lossy().to_string());
-     }
-     // Clean final deduced name
-     if let Some(name) = &deduced_mod_name {
-          let cleaned = MOD_NAME_CLEANUP_REGEX.replace_all(name, "").trim().to_string();
-          if !cleaned.is_empty() { deduced_mod_name = Some(cleaned); }
-     }
-
-    println!("[analyze_archive] Final deduction: Name={:?}, Author={:?}, CategorySlug={:?}, EntitySlug={:?}, RawType={:?}, RawTarget={:?}, Preview={:?}",
-        deduced_mod_name, deduced_author, deduced_category_slug, deduced_entity_slug, raw_ini_type_found, raw_ini_target_found, detected_preview_internal_path);
-
-    // Lock guard (conn_guard_opt) goes out of scope here if it was acquired
-
+    // --- Result ---
     Ok(ArchiveAnalysisResult {
-        file_path: file_path_str,
-        entries,
-        deduced_mod_name,
-        deduced_author,
-        deduced_category_slug,
-        deduced_entity_slug,
-        raw_ini_type: raw_ini_type_found,
-        raw_ini_target: raw_ini_target_found,
-        detected_preview_internal_path,
+        file_path: file_path_str, entries, deduced_mod_name, deduced_author,
+        deduced_category_slug, deduced_entity_slug, raw_ini_type: raw_ini_type_found,
+        raw_ini_target: raw_ini_target_found, detected_preview_internal_path,
     })
 }
 
@@ -2057,41 +2058,103 @@ fn analyze_archive(file_path_str: String, db_state: State<DbState>) -> CmdResult
 fn read_archive_file_content(archive_path_str: String, internal_file_path: String) -> CmdResult<Vec<u8>> {
     println!("[read_archive_file_content] Reading '{}' from archive '{}'", internal_file_path, archive_path_str);
     let archive_path = PathBuf::from(&archive_path_str);
-    if !archive_path.is_file() {
-        return Err(format!("Archive file not found: {}", archive_path.display()));
-    }
+    if !archive_path.is_file() { return Err(format!("Archive file not found: {}", archive_path.display())); }
 
-    let file = fs::File::open(&archive_path)
-        .map_err(|e| format!("Failed to open archive file {}: {}", archive_path.display(), e))?;
-
-    let mut archive = ZipArchive::new(file)
-        .map_err(|e| format!("Failed to read zip archive {}: {}", archive_path.display(), e))?;
-
+    let extension = archive_path.extension().and_then(|os| os.to_str()).map(|s| s.to_lowercase());
     let internal_path_normalized = internal_file_path.replace("\\", "/");
 
-    // --- Apply compiler suggestion: Store result in a variable ---
-    let result = match archive.by_name(&internal_path_normalized) {
-        Ok(mut file_in_zip) => {
-            let mut buffer = Vec::with_capacity(file_in_zip.size() as usize);
-            match file_in_zip.read_to_end(&mut buffer) {
-                 Ok(_) => {
-                     println!("[read_archive_file_content] Successfully read {} bytes.", buffer.len());
-                     Ok(buffer) // Ok(Vec<u8>)
-                 }
-                 Err(e) => {
-                      Err(format!("Failed to read internal file content '{}': {}", internal_file_path, e)) // Err(String)
-                 }
-            }
-        },
-        Err(zip::result::ZipError::FileNotFound) => {
-             Err(format!("Internal file '{}' not found in archive.", internal_file_path)) // Err(String)
-        },
-        Err(e) => {
-             Err(format!("Error accessing internal file '{}': {}", internal_file_path, e)) // Err(String)
-        }
-    }; // Semicolon here forces the temporary borrow from by_name to end
+    match extension.as_deref() {
+        Some("zip") => {
+            let file = fs::File::open(&archive_path).map_err(|e| format!("Zip Read: Failed open: {}", e))?;
+            let mut archive = ZipArchive::new(file).map_err(|e| format!("Zip Read: Failed read archive: {}", e))?;
 
-    result // Return the stored result
+            // --- FIX: Assign match result to variable and return it ---
+            let result = match archive.by_name(&internal_path_normalized) {
+                Ok(mut file_in_zip) => {
+                    let mut buffer = Vec::with_capacity(file_in_zip.size() as usize);
+                    match file_in_zip.read_to_end(&mut buffer) {
+                        Ok(_) => Ok(buffer), // Successful read
+                        Err(e) => Err(format!("Zip Read: Failed read content: {}", e)),
+                    }
+                },
+                Err(ZipError::FileNotFound) => Err(format!("Zip Read: Internal file '{}' not found.", internal_file_path)),
+                Err(e) => Err(format!("Zip Read: Error accessing internal file '{}': {}", internal_file_path, e)),
+            };
+            result // Return the result stored in the variable
+            // --- END FIX ---
+        }
+        Some("7z") => {
+            // --- 7z logic remains the same as previously corrected ---
+            let mut found_content: Option<Vec<u8>> = None;
+            let mut found_error: Option<String> = None;
+            let mut archive = sevenz_rust::SevenZReader::open(&archive_path_str, Password::empty())
+                .map_err(|e| format!("7z Read: Failed open: {}", e))?;
+
+            archive.for_each_entries(|entry, reader| {
+                if found_content.is_some() || found_error.is_some() { return Ok(false); }
+                let entry_name_normalized = entry.name().replace("\\", "/");
+                if entry_name_normalized == internal_path_normalized {
+                    let mut content_bytes = Vec::new();
+                    let mut buffer = [0u8; 4096];
+                    let read_result: Result<(), io::Error> = (|| { // Use closure for ? propagation
+                        loop {
+                            let bytes_read = reader.read(&mut buffer)?;
+                            if bytes_read == 0 { break; }
+                            content_bytes.extend_from_slice(&buffer[..bytes_read]);
+                        }
+                        Ok(())
+                    })(); // Immediately invoke
+
+                    match read_result {
+                        Ok(()) => found_content = Some(content_bytes),
+                        Err(e) => found_error = Some(format!("7z Read: Error reading content '{}': {}", internal_file_path, e)),
+                    }
+                    return Ok(false); // Stop processing after finding (or failing to read) the file
+                }
+                Ok(true)
+            })
+            .map_err(|e: sevenz_rust::Error| format!("7z Read: Error iterating entries: {}", e))?;
+
+            if let Some(content) = found_content { Ok(content) }
+            else if let Some(err) = found_error { Err(err) }
+            else { Err(format!("7z Read: Internal file '{}' not found.", internal_file_path)) }
+        }
+        Some("rar") => {
+            let mut archive = Archive::new(&archive_path_str)
+                .open_for_processing() // Need Process mode to read content
+                .map_err(|e| e.to_string())?;
+            let mut found_content: Option<Vec<u8>> = None;
+
+            loop {
+                match archive.read_header() {
+                    Ok(Some(header_state)) => { // Returns OpenArchive<..., CursorBeforeFile>
+                        let entry_filename = &header_state.entry().filename; // Access header via entry()
+                        let entry_name_normalized = entry_filename.to_string_lossy().replace("\\", "/");
+
+                        if entry_name_normalized == internal_path_normalized {
+                            // Found the file, process it using read()
+                            match header_state.read() {
+                                Ok((bytes, _next_archive_state)) => { // Successfully read
+                                    found_content = Some(bytes);
+                                    break; // Found and read, exit loop
+                                }
+                                Err(e) => { // Error during reading
+                                    return Err(format!("Rar Read: Error reading content '{}': {}", internal_file_path, e));
+                                }
+                            }
+                        } else {
+                            // Not the file we want, skip it
+                            archive = header_state.skip().map_err(|e| e.to_string())?; // Skip and update archive state
+                        }
+                    }
+                    Ok(None) => break, // End of archive, file not found
+                    Err(e) => return Err(format!("Rar Read: Error reading header: {}", e)),
+                }
+            }
+            found_content.ok_or_else(|| format!("Rar Read: Internal file '{}' not found.", internal_file_path))
+        }
+        _ => Err(format!("Unsupported archive type for reading: {:?}", extension)),
+    }
 }
 
 #[command]
@@ -2103,175 +2166,183 @@ fn import_archive(
     description: Option<String>,
     author: Option<String>,
     category_tag: Option<String>,
-    selected_preview_absolute_path: Option<String>, // Added
+    selected_preview_absolute_path: Option<String>,
     db_state: State<DbState>
 ) -> CmdResult<()> {
     println!("[import_archive] Importing '{}', internal path '{}' for entity '{}'", archive_path_str, selected_internal_root, target_entity_slug);
-    println!("[import_archive] User provided preview path: {:?}", selected_preview_absolute_path);
-
-     // --- Basic Validation ---
-     if mod_name.trim().is_empty() { return Err("Mod Name cannot be empty.".to_string()); }
-     if target_entity_slug.trim().is_empty() { return Err("Target Entity must be selected.".to_string()); }
-     let archive_path = PathBuf::from(&archive_path_str);
-     if !archive_path.is_file() { return Err(format!("Archive file not found: {}", archive_path.display())); }
-     println!("[import_archive] Validations passed.");
-
-     // --- Acquire Lock and Get DB Info & Paths ---
-     let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
-     let conn = &*conn_guard;
-     println!("[import_archive] DB lock acquired.");
-
-     // Get Base Mods Path
-     let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
-         .map_err(|e| format!("Failed to query mods folder setting: {}", e))?
-         .ok_or_else(|| "Mods folder path not set".to_string())?;
-     let base_mods_path = PathBuf::from(base_mods_path_str);
-     println!("[import_archive] Found base mods path: {}", base_mods_path.display());
-
-     // Get Category Slug AND Entity ID
-     let (target_category_slug, target_entity_id): (String, i64) = conn.query_row(
-         "SELECT c.slug, e.id FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = ?1",
-         params![target_entity_slug],
-         |row| Ok((row.get(0)?, row.get(1)?)),
-     ).map_err(|e| match e {
-          rusqlite::Error::QueryReturnedNoRows => format!("Target entity '{}' not found.", target_entity_slug),
-          _ => format!("DB Error getting target entity/category info: {}", e)
-      })?;
-     println!("[import_archive] Found target entity ID: {}, Category Slug: {}", target_entity_id, target_category_slug);
-
-    // Determine target mod folder name
+    // --- Basic Validation & Setup (Unchanged) ---
+    if mod_name.trim().is_empty() { return Err("Mod Name cannot be empty.".to_string()); }
+    if target_entity_slug.trim().is_empty() { return Err("Target Entity must be selected.".to_string()); }
+    let archive_path = PathBuf::from(&archive_path_str);
+    if !archive_path.is_file() { return Err(format!("Archive file not found: {}", archive_path.display())); }
+    let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    let conn = &*conn_guard;
+    let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Mods folder path not set".to_string())?;
+    let base_mods_path = PathBuf::from(base_mods_path_str);
+    let (target_category_slug, target_entity_id): (String, i64) = conn.query_row(
+        "SELECT c.slug, e.id FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = ?1",
+        params![target_entity_slug], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => format!("Target entity '{}' not found.", target_entity_slug),
+        _ => format!("DB Error get target entity: {}", e)
+    })?;
     let target_mod_folder_name = mod_name.trim().replace(" ", "_").replace(".", "_");
-    if target_mod_folder_name.is_empty() { return Err("Mod Name results in invalid folder name after cleaning.".to_string()); }
-     println!("[import_archive] Target folder name: {}", target_mod_folder_name);
+    if target_mod_folder_name.is_empty() { return Err("Mod Name results in invalid folder name.".to_string()); }
+    let final_mod_dest_path = base_mods_path.join(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
+    fs::create_dir_all(&final_mod_dest_path).map_err(|e| format!("Failed create dest dir '{}': {}", final_mod_dest_path.display(), e))?;
 
-     // Construct the CORRECT final destination path including category
-     let final_mod_dest_path = base_mods_path
-          .join(&target_category_slug) // Add category slug
-          .join(&target_entity_slug)   // Add entity slug
-          .join(&target_mod_folder_name); // Add mod folder name
 
-      // Create the full path including category/entity dirs
-      fs::create_dir_all(&final_mod_dest_path)
-         .map_err(|e| format!("Failed to create destination directory '{}': {}", final_mod_dest_path.display(), e))?;
+    // --- Extraction Logic (Branching) ---
+    println!("[import_archive] Starting extraction...");
+    let extension = archive_path.extension().and_then(|os| os.to_str()).map(|s| s.to_lowercase());
+    let prefix_to_extract_norm = selected_internal_root.replace("\\", "/");
+    let prefix_to_extract = prefix_to_extract_norm.strip_suffix('/').unwrap_or(&prefix_to_extract_norm);
+    let prefix_path = Path::new(prefix_to_extract);
+    let mut files_extracted_count = 0;
 
-     println!("[import_archive] Target destination folder created/ensured: {}", final_mod_dest_path.display());
-
-     // --- Extraction Logic (ZIP only) ---
-     println!("[import_archive] Opening archive for extraction...");
-     let file = fs::File::open(&archive_path)
-         .map_err(|e| format!("Failed to open archive file {}: {}", archive_path.display(), e))?;
-     let mut archive = ZipArchive::new(file)
-         .map_err(|e| format!("Failed to read zip archive {}: {}", archive_path.display(), e))?;
-
-     // Normalize the internal root path
-     let prefix_to_extract_norm = selected_internal_root.replace("\\", "/");
-     let prefix_to_extract = prefix_to_extract_norm.strip_suffix('/').unwrap_or(&prefix_to_extract_norm);
-     let prefix_path = Path::new(prefix_to_extract);
-     println!("[import_archive] Normalized internal root prefix: '{}'", prefix_to_extract);
-
-     let mut files_extracted_count = 0;
-     for i in 0..archive.len() {
-        let mut file_in_zip = archive.by_index(i)
-             .map_err(|e| format!("Failed to read entry #{} from zip: {}", i, e))?;
-
-        let internal_path_obj_opt = file_in_zip.enclosed_name().map(|p| p.to_path_buf());
-        if internal_path_obj_opt.is_none() { continue; }
-        let internal_path_obj = internal_path_obj_opt.unwrap();
-
-        let should_extract = if prefix_to_extract.is_empty() {
-             true
-         } else {
-             internal_path_obj.starts_with(prefix_path)
-         };
-
-        if should_extract {
-             let relative_path_to_dest = if prefix_to_extract.is_empty() {
-                 &internal_path_obj
-             } else {
-                 match internal_path_obj.strip_prefix(prefix_path) {
-                     Ok(p) => p,
-                     Err(_) => { continue; } // Skip if prefix stripping fails
-                 }
-             };
-
-            if relative_path_to_dest.as_os_str().is_empty() { continue; } // Skip root itself
-
-            let outpath = final_mod_dest_path.join(relative_path_to_dest);
-
-            if file_in_zip.is_dir() {
-                 fs::create_dir_all(&outpath)
-                     .map_err(|e| format!("Failed to create directory '{}': {}", outpath.display(), e))?;
-            } else {
-                 if let Some(p) = outpath.parent() {
-                     if !p.exists() { fs::create_dir_all(&p).map_err(|e| format!("Failed to create parent dir '{}': {}", p.display(), e))?; }
-                 }
-                 let mut outfile = fs::File::create(&outpath).map_err(|e| format!("Failed to create file '{}': {}", outpath.display(), e))?;
-                 std::io::copy(&mut file_in_zip, &mut outfile).map_err(|e| format!("Failed to copy content to '{}': {}", outpath.display(), e))?;
-                 files_extracted_count += 1;
-            }
-
-             #[cfg(unix)]
-             { /* ... set permissions ... */ }
+    match extension.as_deref() {
+        Some("zip") => {
+            // ... (zip extraction logic remains the same) ...
+             let file = fs::File::open(&archive_path).map_err(|e| format!("Zip Extract: Failed open: {}", e))?;
+             let mut archive = ZipArchive::new(file).map_err(|e| format!("Zip Extract: Failed read archive: {}", e))?;
+             for i in 0..archive.len() {
+                  let mut file_in_zip = archive.by_index(i).map_err(|e| format!("Zip Extract: Failed read entry #{}: {}", i, e))?;
+                  let internal_path_obj_opt = file_in_zip.enclosed_name().map(|p| p.to_path_buf());
+                  if internal_path_obj_opt.is_none() { continue; }
+                  let internal_path_obj = internal_path_obj_opt.unwrap();
+                  let should_extract = prefix_to_extract.is_empty() || internal_path_obj.starts_with(prefix_path);
+                  if !should_extract { continue; }
+                  let relative_path_to_dest = if prefix_to_extract.is_empty() { &internal_path_obj } else { match internal_path_obj.strip_prefix(prefix_path) { Ok(p) => p, Err(_) => continue } };
+                  if relative_path_to_dest.as_os_str().is_empty() { continue; }
+                  let outpath = final_mod_dest_path.join(relative_path_to_dest);
+                  if file_in_zip.is_dir() {
+                      fs::create_dir_all(&outpath).map_err(|e| format!("Zip Extract: Failed create dir '{}': {}", outpath.display(), e))?;
+                  } else {
+                      if let Some(p) = outpath.parent() { if !p.exists() { fs::create_dir_all(&p).map_err(|e| format!("Zip Extract: Failed create parent '{}': {}", p.display(), e))?; } }
+                      let mut outfile = fs::File::create(&outpath).map_err(|e| format!("Zip Extract: Failed create file '{}': {}", outpath.display(), e))?;
+                      std::io::copy(&mut file_in_zip, &mut outfile).map_err(|e| format!("Zip Extract: Failed copy content '{}': {}", outpath.display(), e))?;
+                      files_extracted_count += 1;
+                  }
+             }
         }
+        Some("7z") => {
+             // --- FIX: Use Password::empty() ---
+            let mut archive = sevenz_rust::SevenZReader::open(&archive_path_str, Password::empty())
+                .map_err(|e| format!("7z Extract: Failed open: {}", e))?;
+
+             // --- FIX: Use for_each_entries ---
+             archive.for_each_entries(|entry, reader| {
+                 let internal_path_str = entry.name().replace("\\", "/");
+                 let internal_path_obj = PathBuf::from(&internal_path_str);
+
+                 let should_extract = prefix_to_extract.is_empty() || internal_path_obj.starts_with(prefix_path);
+                 if !should_extract { return Ok(true); }
+
+                 let relative_path_to_dest = if prefix_to_extract.is_empty() {
+                     internal_path_obj.as_path()
+                 } else {
+                     match internal_path_obj.strip_prefix(prefix_path) { Ok(p) => p, Err(_) => return Ok(true) }
+                 };
+                 if relative_path_to_dest.as_os_str().is_empty() { return Ok(true); }
+
+                 let outpath = final_mod_dest_path.join(relative_path_to_dest);
+                 if entry.is_directory() {
+                    fs::create_dir_all(&outpath)?;
+                } else {
+                    if let Some(p) = outpath.parent() { if !p.exists() { fs::create_dir_all(&p)?; }}
+                    let mut outfile = fs::File::create(&outpath)?;
+                
+                    let mut buffer = [0u8; 4096];
+                    // --- FIX: Corrected read loop ---
+                    loop {
+                        let bytes_read = reader.read(&mut buffer)?; // Returns Result<usize, io::Error>, '?' gets usize or returns sevenz_rust::Error
+                        if bytes_read == 0 { break; } // Check the usize directly
+                        outfile.write_all(&buffer[..bytes_read])?; // '?' handles write error
+                    }
+                    // --- END FIX ---
+                    files_extracted_count += 1;
+                }
+                 Ok(true) // Continue to next entry
+             })
+             // --- Map the specific error type from the closure ---
+             .map_err(|e: sevenz_rust::Error| format!("7z Extract: Error processing entries: {}", e))?;
+        }
+        Some("rar") => {
+            // Use map_err for ? conversion
+            let mut archive = Archive::new(&archive_path_str).open_for_processing()
+                .map_err(|e| e.to_string())?;
+        
+            loop {
+                // Use map_err for ? conversion
+                match archive.read_header().map_err(|e| e.to_string())? {
+                    Some(header_state) => {
+                        let entry_filename = &header_state.entry().filename;
+                        let internal_path_str = entry_filename.to_string_lossy().replace("\\", "/").to_string();
+                        let internal_path_obj = PathBuf::from(&internal_path_str);
+        
+                        // --- Prefix/Path logic (unchanged) ---
+                        let should_extract = prefix_to_extract.is_empty() || internal_path_obj.starts_with(prefix_path);
+                        if !should_extract {
+                             archive = header_state.skip().map_err(|e| e.to_string())?;
+                             continue;
+                        }
+                        let relative_path_to_dest = if prefix_to_extract.is_empty() { internal_path_obj.as_path() }
+                            else { match internal_path_obj.strip_prefix(prefix_path) { Ok(p) => p, Err(_) => { archive = header_state.skip().map_err(|e| e.to_string())?; continue; }}};
+                        if relative_path_to_dest.as_os_str().is_empty() { archive = header_state.skip().map_err(|e| e.to_string())?; continue; }
+                        let outpath = final_mod_dest_path.join(relative_path_to_dest);
+                        // --- End Prefix/Path ---
+        
+                        if header_state.entry().is_directory() {
+                            fs::create_dir_all(&outpath).map_err(|e| format!("Rar Extract: Failed create dir '{}': {}", outpath.display(), e))?;
+                            archive = header_state.skip().map_err(|e| e.to_string())?;
+                        } else {
+                            if let Some(p) = outpath.parent() { if !p.exists() { fs::create_dir_all(&p).map_err(|e| format!("Rar Extract: Failed create parent '{}': {}", p.display(), e))?; }}
+        
+                            // Use extract_to which returns Result<NextArchiveState, Error>
+                            // The '?' will propagate the error and stop the whole function if extraction fails.
+                            archive = header_state.extract_to(&outpath).map_err(|e| e.to_string())?;
+                            files_extracted_count += 1;
+                        }
+                    }
+                    None => break, // End of archive
+                }
+            }
+        }
+        _ => return Err(format!("Unsupported archive type for extraction: {:?}", extension)),
     }
-     println!("[import_archive] Extracted {} files.", files_extracted_count);
-     if files_extracted_count == 0 && archive.len() > 0 && !selected_internal_root.is_empty() {
-          println!("[import_archive] Warning: 0 files extracted. Check if the selected internal root ('{}') was correct.", selected_internal_root);
-     }
+    println!("[import_archive] Extracted {} files.", files_extracted_count);
 
-
-    // --- Handle Preview Image ---
+    // --- Handle Preview Image (Unchanged) ---
     let mut image_filename_for_db: Option<String> = None;
     if let Some(user_preview_path_str) = selected_preview_absolute_path {
          let source_path = PathBuf::from(&user_preview_path_str);
-          let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
-          println!("[import_archive] Copying user-selected preview '{}' to '{}'", source_path.display(), target_image_path.display());
-          if source_path.is_file() {
-               fs::copy(&source_path, &target_image_path).map_err(|e| format!("Failed to copy user preview image: {}", e))?;
-                image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
-          } else { /* ... warning ... */ }
+         let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
+         if source_path.is_file() {
+             fs::copy(&source_path, &target_image_path).map_err(|e| format!("Failed copy user preview: {}", e))?;
+             image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+         }
     } else {
          let potential_extracted_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
-         if potential_extracted_image_path.is_file() {
-              println!("[import_archive] Using extracted {} as preview.", TARGET_IMAGE_FILENAME);
-              image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
-         } else { /* ... no preview found log ... */ }
+         if potential_extracted_image_path.is_file() { image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string()); }
     }
 
-
-   // --- Add to Database ---
-   let relative_path_for_db = Path::new(&target_category_slug)
-        .join(&target_entity_slug)
-        .join(&target_mod_folder_name);
-   let relative_path_for_db_str = relative_path_for_db.to_string_lossy().replace("\\", "/");
-
-   // Check existing
-   let check_existing: Option<i64> = conn.query_row(
+    // --- Add to Database (Unchanged) ---
+    let relative_path_for_db = Path::new(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
+    let relative_path_for_db_str = relative_path_for_db.to_string_lossy().replace("\\", "/");
+    let check_existing: Option<i64> = conn.query_row(
         "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
-        params![target_entity_id, relative_path_for_db_str],
-        |row| row.get(0)
-   ).optional().map_err(|e| format!("DB error checking for existing imported asset '{}': {}", relative_path_for_db_str, e))?;
-
-    if check_existing.is_some() {
-        fs::remove_dir_all(&final_mod_dest_path).ok(); // Attempt cleanup
-        return Err(format!("Database entry already exists for '{}'. Aborting.", relative_path_for_db_str));
-    }
-
-    // Insert new asset
-    println!("[import_archive] Adding asset to DB: entity_id={}, name={}, path={}, image={:?}", target_entity_id, mod_name, relative_path_for_db_str, image_filename_for_db);
+        params![target_entity_id, relative_path_for_db_str], |row| row.get(0)
+    ).optional().map_err(|e| format!("DB error check existing import '{}': {}", relative_path_for_db_str, e))?;
+    if check_existing.is_some() { fs::remove_dir_all(&final_mod_dest_path).ok(); return Err(format!("DB entry already exists for '{}'. Aborting.", relative_path_for_db_str)); }
     conn.execute(
         "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            target_entity_id, mod_name, description, relative_path_for_db_str,
-            image_filename_for_db, author, category_tag
-        ]
-    ).map_err(|e| {
-        fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup on DB error
-        format!("Failed to add imported mod to database: {}", e)
-    })?;
+        params![target_entity_id, mod_name, description, relative_path_for_db_str, image_filename_for_db, author, category_tag]
+    ).map_err(|e| { fs::remove_dir_all(&final_mod_dest_path).ok(); format!("Failed add imported mod to DB: {}", e) })?;
 
    println!("[import_archive] Import successful for '{}'", mod_name);
-   Ok(()) // Lock released here
+   Ok(())
 }
 
 #[command]

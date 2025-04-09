@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useSettings } from '../contexts/SettingsContext';
 import ImportModModal from './ImportModModal';
 import ScanProgressPopup from './ScanProgressPopup';
+import { appWindow } from '@tauri-apps/api/window';
 
 // Event names constants
 const PRESET_APPLY_START_EVENT = "preset://apply_start";
@@ -29,6 +30,110 @@ function Sidebar() {
     const [applySummarySidebar, setApplySummarySidebar] = useState('');
     const applyListenersSidebarRef = useRef({ unlistenStart: null, unlistenProgress: null, unlistenComplete: null, unlistenError: null });
     const [isLaunching, setIsLaunching] = useState(false);
+    const [isDraggingOver, setIsDraggingOver] = useState(false);
+    const [dropError, setDropError] = useState('');
+
+    const handleDragOver = useCallback((event) => {
+        event.preventDefault(); // Necessary to allow drop
+        event.stopPropagation();
+        setDropError(''); // Clear error on drag over
+        if (!isDraggingOver) {
+            setIsDraggingOver(true);
+        }
+    }, [isDraggingOver]);
+
+    const handleDragLeave = useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        // Only deactivate if leaving the sidebar element itself, not its children
+        // A simpler approach is to just set it false, maybe with a small delay if needed,
+        // but this direct check can be tricky. Let's keep it simple for now.
+        setIsDraggingOver(false);
+    }, []);
+
+    const processDroppedFiles = useCallback(async (files) => {
+         setIsDraggingOver(false);
+         setDropError('');
+         const validFiles = Array.from(files).filter(file =>
+             /\.(zip|7z|rar)$/i.test(file.name)
+         );
+
+         if (validFiles.length === 0) {
+             console.log("No valid archive files dropped.");
+             setDropError("Please drop .zip, .7z, or .rar files.");
+             return;
+         }
+
+         // For now, process only the first valid file
+         const fileToProcess = validFiles[0];
+         console.log("Processing dropped file:", fileToProcess.path || fileToProcess.name); // file.path might not be available in browser drop
+
+         console.warn("Browser onDrop event cannot reliably access file paths. Relying on Tauri window drop event.")
+         setDropError("Drop files onto the window area, not just the sidebar."); // Guide user
+
+    }, []); // Add dependencies if needed
+
+    const handleDrop = useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDraggingOver(false); // Ensure feedback stops
+        console.log("Browser onDrop event triggered.");
+        processDroppedFiles(event.dataTransfer.files);
+    }, [processDroppedFiles]); // processDroppedFiles is stable
+
+    // --- Tauri Window Drop Listener ---
+    useEffect(() => {
+         let unlisten = null;
+         const setupWindowDropListener = async () => {
+             unlisten = await appWindow.onFileDropEvent(async (event) => {
+                 console.log('File drop event on window:', event.payload);
+                 if (event.payload.type === 'drop') {
+                     setDropError(''); // Clear previous errors
+                     const validFiles = event.payload.paths.filter(path =>
+                         /\.(zip|7z|rar)$/i.test(path)
+                     );
+
+                     if (validFiles.length === 0) {
+                         console.log("No valid archive files dropped on window.");
+                         setDropError("Only .zip, .7z, or .rar files are supported.");
+                         return;
+                     }
+
+                     // Process the first valid file dropped onto the window
+                     // (Can be extended later to handle multiple files, e.g., queuing imports)
+                     if (validFiles.length > 0) {
+                         console.log("Initiating import for dropped file:", validFiles[0]);
+                         // Directly call the import initiation logic with the path
+                         try {
+                             setImportError(''); // Clear previous import errors
+                             setImportAnalysisResult(null);
+                             const analysis = await invoke('analyze_archive', { filePathStr: validFiles[0] });
+                             setImportAnalysisResult(analysis);
+                             setIsImportModalOpen(true);
+                          } catch (err) {
+                             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error during dropped import');
+                             console.error("Failed to initiate dropped mod import:", errorString);
+                             setImportError(`Dropped Import Error: ${errorString}`); // Show error near import button
+                             setIsImportModalOpen(false);
+                          }
+                     }
+                 } else if (event.payload.type === 'hover') {
+                     // Optional: Visual feedback on window hover? More complex.
+                 } else if (event.payload.type === 'cancel') {
+                     // Optional: Handle cancelled drop outside window?
+                 }
+             });
+         };
+         setupWindowDropListener();
+
+         // Cleanup
+         return () => {
+             if (unlisten) {
+                 unlisten();
+                 console.log("Window file drop listener removed.");
+             }
+         };
+    }, []); // Run once on mount
 
     const isNavItemActive = useCallback((navPath) => {
         const currentPath = location.pathname;
@@ -125,24 +230,27 @@ function Sidebar() {
      };
      // --- End Updated Quick Launch Logic ---
 
-    const handleInitiateImport = async () => {
+     const handleInitiateImport = useCallback(async (filePath = null) => {
         setImportError('');
         setImportAnalysisResult(null);
+        setDropError(''); // Clear drop error
         try {
-            const selectedPath = await invoke('select_archive_file');
-            if (!selectedPath) { console.log("Import cancelled by user."); return; }
+            const selectedPath = filePath ? filePath : await invoke('select_archive_file'); // Use provided path or open dialog
+            if (!selectedPath) { console.log("Import cancelled."); return; }
+            console.log("Selected/Provided archive:", selectedPath);
             const analysis = await invoke('analyze_archive', { filePathStr: selectedPath });
+            console.log("Analysis result:", analysis);
             setImportAnalysisResult(analysis);
             setIsImportModalOpen(true);
         } catch (err) {
-            const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+            const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error during import initiation');
             console.error("Failed to initiate mod import:", errorString);
             setImportError(`Error: ${errorString}`);
             setIsImportModalOpen(false);
         }
-     };
+     }, []); // Removed dependency on handleInitiateImport itself
 
-    const handleCloseImportModal = useCallback(() => {
+     const handleCloseImportModal = useCallback(() => {
         setIsImportModalOpen(false);
         setImportAnalysisResult(null);
         setImportError('');
@@ -191,34 +299,32 @@ function Sidebar() {
     };
 
     const isApplyingAnyPresetSidebar = showApplyPopupSidebar && !applySummarySidebar && !applyErrorSidebar;
+    const isActionDisabled = isLoading || isApplyingAnyPresetSidebar || isDraggingOver || isLaunching;
 
     return (
-        <div className="sidebar">
+        <div
+            className={`sidebar ${isDraggingOver ? 'dragging-over' : ''}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop} // This handles drops *directly* on the sidebar
+        >
             <div className="logo">
                  <svg width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="var(--primary)" /><stop offset="100%" stopColor="var(--accent)" /></linearGradient></defs><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="url(#logo-gradient)"></path></svg>
                  <span>Genshin Modder</span>
             </div>
 
-            <button
-                className="btn btn-primary"
-                style={{ width: '100%', marginBottom: '15px' }}
-                onClick={handleQuickLaunch}
-                // Disable if loading settings, no path set, or already launching/applying preset
-                disabled={!quickLaunchPath || isLoading || isLaunching || isApplyingAnyPresetSidebar}
-                title={quickLaunchPath ? `Launch: ${quickLaunchPath}`: "Set Quick Launch path in Settings"}
-            >
-                {isLaunching ? (
-                    <><i className="fas fa-spinner fa-spin fa-fw"></i> Launching...</>
-                ) : (
-                    <><i className="fas fa-play fa-fw"></i> Quick Launch</>
-                )}
-            </button>
+            {/* Update disabled states */}
+            <button className="btn btn-primary" style={{ width: '100%', marginBottom: '15px' }} onClick={handleQuickLaunch} disabled={!quickLaunchPath || isActionDisabled} title={quickLaunchPath ? `Launch: ${quickLaunchPath}`: "Set Quick Launch path in Settings"} >
+                 {isLaunching ? <><i className="fas fa-spinner fa-spin fa-fw"></i> Launching...</> : <><i className="fas fa-play fa-fw"></i> Quick Launch</>}
+             </button>
              {launchError && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{launchError}</p>}
 
-            <button className="btn btn-outline" style={{ width: '100%', marginBottom: '15px' }} onClick={handleInitiateImport} disabled={isLoading || !modsFolder || isApplyingAnyPresetSidebar} title={!modsFolder ? "Set Mods Folder path first" : "Import Mod from Archive"} >
+            <button className="btn btn-outline" style={{ width: '100%', marginBottom: '15px' }} onClick={() => handleInitiateImport()} disabled={!modsFolder || isActionDisabled} title={!modsFolder ? "Set Mods Folder path first" : "Import Mod from Archive"} >
                  <i className="fas fa-file-import fa-fw"></i> Import Mod
             </button>
-             {importError && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{importError}</p>}
+             {/* Show Import or Drop errors */}
+             {(importError || dropError) && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{importError || dropError}</p>}
+             {launchError && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{launchError}</p>}
 
             {/* Nav Items */}
             <ul className="nav-items">
@@ -240,9 +346,9 @@ function Sidebar() {
 
             <div className="separator"></div>
 
-            <button className="btn btn-outline" style={{ width: '100%', marginBottom: '15px' }} onClick={handleOpenModsFolder} title="Open the configured mods folder" disabled={isLoading || isApplyingAnyPresetSidebar} >
-                 <i className="fas fa-folder-open fa-fw"></i> Open Mods Folder
-             </button>
+            <button className="btn btn-outline" style={{ width: '100%', marginBottom: '15px' }} onClick={handleOpenModsFolder} title="Open the configured mods folder" disabled={isActionDisabled} >
+                  <i className="fas fa-folder-open fa-fw"></i> Open Mods Folder
+              </button>
 
             {/* Favorites Section */}
             <div className="preset-section">

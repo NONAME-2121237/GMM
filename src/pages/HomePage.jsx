@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/tauri';
 import EntityCard from '../components/EntityCard';
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/localStorage';
+import EntityCardSkeleton from '../components/EntityCardSkeleton';
 
 // Element data
 const elements = [
@@ -178,35 +179,37 @@ function HomePage() {
                              value={searchTerm}
                              onChange={(e) => setSearchTerm(e.target.value)}
                              aria-label={`Search ${pageTitle}`}
+                             data-global-search="true"
                          />
                      </div>
                  </div>
             </div>
 
             {/* Content Area */}
-            {loadingEntities && <div className="placeholder-text">Loading {pageTitle ? pageTitle.toLowerCase() : 'items'}... <i className="fas fa-spinner fa-spin"></i></div>}
-            {error && <div className="placeholder-text" style={{ color: 'var(--danger)' }}>Error: {error}</div>}
-
-            {!loadingEntities && !error && (
+            {loadingEntities ? (
                 <div className="cards-grid">
-                    {filteredAndSortedEntities.length > 0 ? (
-                        // Ensure the correct object structure is passed to EntityCard
+                    {/* Render Skeleton loaders */}
+                    {Array.from({ length: 12 }).map((_, i) => <EntityCardSkeleton key={i} />)}
+                </div>
+            ) : error ? (
+                 <div className="placeholder-text" style={{ color: 'var(--danger)' }}>Error: {error}</div>
+             ) : (
+                 <div className="cards-grid">
+                     {filteredAndSortedEntities.length > 0 ? (
                         filteredAndSortedEntities.map(entityData => (
                             <EntityCard key={entityData.slug} entity={entityData} />
                         ))
-                    ) : entitiesWithCounts.length > 0 ? (
-                         // Message when filters/search yield no results
-                         <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
-                             No {pageTitle ? pageTitle.toLowerCase() : 'items'} found matching your criteria.
-                         </p>
-                     ) : (
-                         // Message when the category is genuinely empty
-                         <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
-                            No {pageTitle ? pageTitle.toLowerCase() : 'items'} have been added yet.
-                         </p>
-                    )}
-                </div>
-            )}
+                     ) : entitiesWithCounts.length > 0 ? (
+                          <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
+                              No {pageTitle ? pageTitle.toLowerCase() : 'items'} found matching your criteria.
+                          </p>
+                      ) : (
+                          <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
+                             No {pageTitle ? pageTitle.toLowerCase() : 'items'} have been added yet.
+                          </p>
+                     )}
+                 </div>
+             )}
         </div>
     );
 }

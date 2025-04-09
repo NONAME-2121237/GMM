@@ -1279,3 +1279,10 @@ input:disabled + .slider {
     padding-right: 10px; /* Space for scrollbar if it appears */
     margin-bottom: 15px; /* Space before footer */
 }
+
+/* Sidebar Drag Feedback */
+.sidebar.dragging-over {
+    outline: 3px dashed var(--primary);
+    outline-offset: -4px; /* Inside the element */
+    background-color: rgba(156, 136, 255, 0.05); /* Subtle background change */
+}

@@ -5,6 +5,9 @@ import ModCard from '../components/ModCard';
 import ModEditModal from '../components/ModEditModal';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/localStorage';
+import ModCardSkeleton from '../components/ModCardSkeleton';
+import { FixedSizeList, FixedSizeGrid } from 'react-window';
+import useMeasure from 'react-use-measure';
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -33,6 +36,9 @@ const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.png';
 
 // Global View Mode Key
 const VIEW_MODE_STORAGE_KEY = 'entityViewMode';
+const LIST_ITEM_HEIGHT = 72;
+const GRID_ITEM_WIDTH = 330;
+const GRID_ITEM_HEIGHT = 350;
 
 function EntityPage() {
     const { entitySlug } = useParams();
@@ -49,6 +55,7 @@ function EntityPage() {
     const [deleteError, setDeleteError] = useState('');
     const [viewMode, setViewMode] = useState('grid'); // Default, loaded in useEffect
     const [modSearchTerm, setModSearchTerm] = useState('');
+    const [listContainerRef, bounds] = useMeasure();
 
     // Fetch data (includes loading view mode)
     const fetchData = useCallback(async () => {
@@ -204,6 +211,46 @@ function EntityPage() {
         );
     }, [assets, modSearchTerm]);
 
+    const ListItem = ({ index, style }) => {
+        const asset = filteredAssets[index];
+        return (
+             <div style={style}> {/* Apply style for positioning */}
+                 <ModCard
+                     key={asset.id} // Key should ideally be here, but react-window manages keys
+                     asset={asset}
+                     entitySlug={entitySlug}
+                     onToggleComplete={handleToggleComplete}
+                     onEdit={handleOpenEditModal}
+                     onDelete={handleOpenDeleteModal}
+                     viewMode="list"
+                 />
+             </div>
+        );
+    };
+
+    const GridItem = ({ columnIndex, rowIndex, style }) => {
+        const columnCount = Math.max(1, Math.floor(bounds.width / GRID_ITEM_WIDTH));
+        const index = rowIndex * columnCount + columnIndex;
+        if (index >= filteredAssets.length) return null; // Out of bounds
+        const asset = filteredAssets[index];
+        return (
+             <div style={style}> {/* Apply style for positioning */}
+                {/* Add padding inside the cell if needed */}
+                <div style={{ padding: '0 10px 10px 10px', height:'100%' }}>
+                    <ModCard
+                        key={asset.id}
+                        asset={asset}
+                        entitySlug={entitySlug}
+                        onToggleComplete={handleToggleComplete}
+                        onEdit={handleOpenEditModal}
+                        onDelete={handleOpenDeleteModal}
+                        viewMode="grid"
+                    />
+                 </div>
+             </div>
+        );
+    };
+
     // Loading/Error/No Entity checks
     if (loading) return <div className="placeholder-text">Loading entity details for {entitySlug}... <i className="fas fa-spinner fa-spin"></i></div>;
     if (error) return <div className="placeholder-text" style={{ color: 'var(--danger)' }}>Error: {error}</div>;
@@ -223,6 +270,9 @@ function EntityPage() {
             e.target.style.backgroundImage = `url('${DEFAULT_ENTITY_PLACEHOLDER_IMAGE}')`;
         }
      };
+
+    const gridColumnCount = Math.max(1, Math.floor(bounds.width / GRID_ITEM_WIDTH));
+    const gridRowCount = Math.ceil(filteredAssets.length / gridColumnCount);
 
 
     return (
@@ -279,62 +329,55 @@ function EntityPage() {
             {/* Mods Section */}
             <div className="mods-section">
                 <div className="section-header">
-                    <h2 className="section-title">Available Mods ({assets.length})</h2>
-                        <div className="search-bar-container">
+                    <h2 className="section-title">Available Mods ({filteredAssets.length})</h2>
+                    <div className="search-bar-container">
                         <div className="search-bar">
                             <i className="fas fa-search"></i>
-                            <input
-                                type="text"
-                                placeholder={`Search ${filteredAssets.length} mods...`}
-                                value={modSearchTerm}
-                                onChange={(e) => setModSearchTerm(e.target.value)}
-                                aria-label={`Search mods for ${entity.name}`}
-                            />
+                            <input type="text" placeholder={`Search mods...`} value={modSearchTerm} onChange={(e) => setModSearchTerm(e.target.value)} aria-label={`Search mods`} data-global-search="true" />
                         </div>
                     </div>
-                    {/* View Mode Toggle Buttons */}
-                    <div className="view-mode-toggle" /* Style this container in CSS */ >
-                         <button
-                            className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} // Class determines styling
-                            onClick={() => toggleViewMode('grid')}
-                            title="Grid View"
-                            aria-label="Switch to grid view"
-                         >
-                             <i className="fas fa-th fa-fw"></i>
-                         </button>
-                         <button
-                             className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} // Class determines styling
-                             onClick={() => toggleViewMode('list')}
-                             title="List View"
-                             aria-label="Switch to list view"
-                         >
-                             <i className="fas fa-list fa-fw"></i>
-                         </button>
+                    <div className="view-mode-toggle">
+                         <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => toggleViewMode('grid')} title="Grid View"><i className="fas fa-th fa-fw"></i></button>
+                         <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => toggleViewMode('list')} title="List View"><i className="fas fa-list fa-fw"></i></button>
                     </div>
                 </div>
 
-                {/* Dynamic Class based on viewMode */}
-                <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'}>
-                    {assets.length === 0 ? ( // Check original assets length for the initial "no mods" message
-                         <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%' }}>
-                            No mods found for {entity.name}. You can import mods via the sidebar.
+                {/* --- List/Grid Container (measured) --- */}
+                <div ref={listContainerRef} style={{ height: 'calc(100vh - 450px)', minHeight: '300px' /* Adjust based on profile height */, overflow: 'hidden' }}>
+                    {loading ? (
+                         <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'} style={{height: '100%'}}>
+                             {Array.from({ length: 6 }).map((_, i) => <ModCardSkeleton key={i} viewMode={viewMode} />)}
+                         </div>
+                     ) : !filteredAssets.length ? (
+                         <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%', paddingTop: '30px' }}>
+                             {assets.length === 0 ? `No mods found for ${entity.name}.` : 'No mods found matching search.'}
                          </p>
-                    ) : filteredAssets.length === 0 ? ( // Check filtered length for "no results" message
-                         <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%' }}>
-                            No mods found matching your search criteria.
-                         </p>
+                     ) : bounds.width > 0 && bounds.height > 0 ? ( // Only render list/grid when bounds are measured
+                        viewMode === 'list' ? (
+                            <FixedSizeList
+                                height={bounds.height}
+                                itemCount={filteredAssets.length}
+                                itemSize={LIST_ITEM_HEIGHT}
+                                width={bounds.width}
+                                style={{overflowX:'hidden'}} // Prevent horizontal scrollbar
+                            >
+                                {ListItem}
+                            </FixedSizeList>
+                        ) : (
+                            <FixedSizeGrid
+                                columnCount={gridColumnCount}
+                                columnWidth={GRID_ITEM_WIDTH}
+                                height={bounds.height}
+                                rowCount={gridRowCount}
+                                rowHeight={GRID_ITEM_HEIGHT}
+                                width={bounds.width}
+                                itemData={filteredAssets} // Pass data if needed inside item renderer
+                            >
+                                {GridItem}
+                            </FixedSizeGrid>
+                        )
                     ) : (
-                        filteredAssets.map(asset => ( // Map over filtered list
-                            <ModCard
-                                key={asset.id}
-                                asset={asset}
-                                entitySlug={entitySlug}
-                                onToggleComplete={handleToggleComplete}
-                                onEdit={handleOpenEditModal}
-                                onDelete={handleOpenDeleteModal}
-                                viewMode={viewMode}
-                            />
-                        ))
+                         <p className="placeholder-text">Calculating layout...</p> // Fallback while measuring
                     )}
                 </div>
             </div>

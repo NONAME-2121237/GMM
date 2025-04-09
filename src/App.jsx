@@ -1,5 +1,4 @@
-// src/App.jsx
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
 import Sidebar from './components/Sidebar';
@@ -10,16 +9,40 @@ import PresetPage from './pages/PresetPage';
 import HomeDashboard from './pages/HomeDashboard';
 import FirstLaunchSetup from './components/FirstLaunchSetup';
 
-
 function AppContent() {
     const { isLoading, isSetupComplete } = useSettings();
 
+    // --- Ctrl+F Handler ---
+    useEffect(() => {
+        const handleGlobalKeyDown = (event) => {
+            if (event.ctrlKey && event.key === 'f') {
+                event.preventDefault(); // Prevent default browser search
+                // Find the currently relevant search input
+                // Use a specific data attribute for targeting
+                const searchInput = document.querySelector('input[data-global-search="true"]');
+                if (searchInput) {
+                    searchInput.focus();
+                    searchInput.select(); // Optional: select existing text
+                }
+            }
+        };
+
+        document.addEventListener('keydown', handleGlobalKeyDown);
+        console.log("Global Ctrl+F listener added.");
+
+        // Cleanup listener on component unmount
+        return () => {
+            document.removeEventListener('keydown', handleGlobalKeyDown);
+            console.log("Global Ctrl+F listener removed.");
+        };
+    }, []); // Empty dependency array ensures this runs only once
+
     if (isLoading) {
-         return (
-             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100vw', background: 'var(--darker)', color: 'var(--light)' }}>
-                <i className="fas fa-spinner fa-spin fa-2x"></i>  Loading Settings...
-             </div>
-        );
+        return (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100vw', background: 'var(--darker)', color: 'var(--light)' }}>
+               <i className="fas fa-spinner fa-spin fa-2x"></i>  Loading Settings...
+            </div>
+       );
     }
 
     if (!isSetupComplete) {
@@ -44,7 +67,6 @@ function AppContent() {
         </div>
     );
 }
-
 
 function App() {
   return (
