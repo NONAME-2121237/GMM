@@ -28,22 +28,12 @@ function Sidebar() {
     const [applyProgressDataSidebar, setApplyProgressDataSidebar] = useState(null);
     const [applySummarySidebar, setApplySummarySidebar] = useState('');
     const applyListenersSidebarRef = useRef({ unlistenStart: null, unlistenProgress: null, unlistenComplete: null, unlistenError: null });
+    const [isLaunching, setIsLaunching] = useState(false);
 
     const isNavItemActive = useCallback((navPath) => {
         const currentPath = location.pathname;
-
-        // Handle exact matches first for non-category pages
-        if (['/', '/presets', '/settings'].includes(navPath)) {
-            return currentPath === navPath;
-        }
-
-        // Handle category pages: Only active if the *current path* is *exactly* this category path.
-        // This prevents highlighting a category when viewing an entity page.
-        if (navPath.startsWith('/category/')) {
-            return currentPath === navPath;
-        }
-
-        // Default: not active
+        if (['/', '/presets', '/settings'].includes(navPath)) return currentPath === navPath;
+        if (navPath.startsWith('/category/')) return currentPath === navPath;
         return false;
     }, [location.pathname]);
 
@@ -58,12 +48,8 @@ function Sidebar() {
         try {
             const favs = await invoke('get_favorite_presets');
             setFavoritePresets(favs);
-        } catch (err) {
-            console.error("Failed to fetch favorite presets:", err);
-            setFavoritePresets([]);
-        } finally {
-            setIsLoadingFavs(false);
-        }
+        } catch (err) { console.error("Failed to fetch favorite presets:", err); setFavoritePresets([]); }
+        finally { setIsLoadingFavs(false); }
     }, [isLoading, modsFolder]);
 
     useEffect(() => {
@@ -74,43 +60,13 @@ function Sidebar() {
 
     useEffect(() => {
         const setupSidebarListeners = async () => {
-            applyListenersSidebarRef.current.unlistenStart = await listen(PRESET_APPLY_START_EVENT, (event) => {
-                 if (applyingPresetIdSidebar !== null) {
-                    setApplyProgressDataSidebar({ processed: 0, total: event.payload || 0, message: 'Starting...' });
-                    setApplySummarySidebar('');
-                    setApplyErrorSidebar('');
-                    setShowApplyPopupSidebar(true);
-                 }
-            });
-             applyListenersSidebarRef.current.unlistenProgress = await listen(PRESET_APPLY_PROGRESS_EVENT, (event) => {
-                 if (applyingPresetIdSidebar !== null && showApplyPopupSidebar) {
-                     setApplyProgressDataSidebar(event.payload);
-                 }
-             });
-            applyListenersSidebarRef.current.unlistenComplete = await listen(PRESET_APPLY_COMPLETE_EVENT, (event) => {
-                 if (applyingPresetIdSidebar !== null && showApplyPopupSidebar) {
-                     setApplySummarySidebar(event.payload || 'Preset applied successfully!');
-                     setApplyProgressDataSidebar(null);
-                     setApplyingPresetIdSidebar(null);
-                 } else if (applyingPresetIdSidebar !== null) {
-                      setApplyingPresetIdSidebar(null);
-                 }
-             });
-             applyListenersSidebarRef.current.unlistenError = await listen(PRESET_APPLY_ERROR_EVENT, (event) => {
-                  if (applyingPresetIdSidebar !== null && showApplyPopupSidebar) {
-                      setApplyErrorSidebar(event.payload || 'An unknown error occurred during preset application.');
-                      setApplyProgressDataSidebar(null);
-                      setApplySummarySidebar('');
-                      setApplyingPresetIdSidebar(null);
-                  } else if (applyingPresetIdSidebar !== null) {
-                       setApplyingPresetIdSidebar(null);
-                       setApplyErrorSidebar(event.payload || 'An unknown error occurred'); // Show error even if popup closed
-                  }
-             });
+            applyListenersSidebarRef.current.unlistenStart = await listen(PRESET_APPLY_START_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { setApplyProgressDataSidebar({ processed: 0, total: event.payload || 0, message: 'Starting...' }); setApplySummarySidebar(''); setApplyErrorSidebar(''); setShowApplyPopupSidebar(true); }});
+            applyListenersSidebarRef.current.unlistenProgress = await listen(PRESET_APPLY_PROGRESS_EVENT, (event) => { if (applyingPresetIdSidebar !== null && showApplyPopupSidebar) setApplyProgressDataSidebar(event.payload); });
+            applyListenersSidebarRef.current.unlistenComplete = await listen(PRESET_APPLY_COMPLETE_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { if(showApplyPopupSidebar) {setApplySummarySidebar(event.payload || 'Preset applied successfully!'); setApplyProgressDataSidebar(null);} setApplyingPresetIdSidebar(null); } });
+            applyListenersSidebarRef.current.unlistenError = await listen(PRESET_APPLY_ERROR_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { if(showApplyPopupSidebar) { setApplyErrorSidebar(event.payload || 'An unknown error occurred.'); setApplyProgressDataSidebar(null); setApplySummarySidebar('');} else { setApplyErrorSidebar(event.payload || 'An unknown error occurred.'); } setApplyingPresetIdSidebar(null); } });
         };
         setupSidebarListeners();
         return () => {
-            console.log("Cleaning up sidebar preset apply listeners...");
             applyListenersSidebarRef.current.unlistenStart?.();
             applyListenersSidebarRef.current.unlistenProgress?.();
             applyListenersSidebarRef.current.unlistenComplete?.();
@@ -123,12 +79,51 @@ function Sidebar() {
         catch (error) { console.error("Failed to open mods folder:", error); }
     };
 
+    // --- Updated Quick Launch Logic ---
     const handleQuickLaunch = async () => {
         setLaunchError('');
         if (!quickLaunchPath) { setLaunchError("Quick Launch path not set in Settings."); return; }
-        try { await invoke('launch_executable', { path: quickLaunchPath }); }
-        catch (error) { console.error("Failed to quick launch:", error); setLaunchError(`Launch Failed: ${error}`); }
+        if (isLaunching) return; // Prevent double-clicks
+
+        setIsLaunching(true); // Set launching state
+
+        console.log("Quick Launch: Attempting normal launch...");
+        try {
+            await invoke('launch_executable', { path: quickLaunchPath });
+            console.log("Quick Launch: Normal launch successful or detached.");
+            // Success, no need to do anything else
+        } catch (normalError) {
+            const errorString = typeof normalError === 'string' ? normalError : String(normalError);
+            console.warn("Quick Launch: Normal launch failed:", errorString);
+
+            // --- Check for Elevation Error ---
+            // Check for the OS error code or the specific message from backend
+            if (errorString.includes("os error 740") || errorString.includes("requires administrator privileges")) {
+                console.log("Quick Launch: Normal launch failed due to elevation requirement. Attempting elevated launch...");
+
+                try {
+                    await invoke('launch_executable_elevated', { path: quickLaunchPath });
+                    console.log("Quick Launch: Elevated launch initiated.");
+                    setLaunchError(''); // Clear message on successful initiation
+                } catch (elevatedError) {
+                    const elevatedErrorString = typeof elevatedError === 'string' ? elevatedError : String(elevatedError);
+                    console.error("Quick Launch: Elevated launch failed:", elevatedErrorString);
+                    if (elevatedErrorString.includes("cancelled by user")) {
+                         setLaunchError("Admin launch cancelled by user.");
+                     } else {
+                         setLaunchError(`Admin Launch Failed: ${elevatedErrorString}`);
+                    }
+                }
+            } else {
+                // It's a different error (file not found, etc.)
+                console.error("Quick Launch: Normal launch failed for other reason:", errorString);
+                setLaunchError(`Launch Failed: ${errorString}`);
+            }
+        } finally {
+             setIsLaunching(false); // Reset launching state regardless of outcome
+        }
      };
+     // --- End Updated Quick Launch Logic ---
 
     const handleInitiateImport = async () => {
         setImportError('');
@@ -136,13 +131,11 @@ function Sidebar() {
         try {
             const selectedPath = await invoke('select_archive_file');
             if (!selectedPath) { console.log("Import cancelled by user."); return; }
-            console.log("Selected archive:", selectedPath);
             const analysis = await invoke('analyze_archive', { filePathStr: selectedPath });
-            console.log("Analysis result:", analysis);
             setImportAnalysisResult(analysis);
             setIsImportModalOpen(true);
         } catch (err) {
-            const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error during import initiation');
+            const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error');
             console.error("Failed to initiate mod import:", errorString);
             setImportError(`Error: ${errorString}`);
             setIsImportModalOpen(false);
@@ -156,20 +149,16 @@ function Sidebar() {
      }, []);
 
     const handleImportSuccess = useCallback((importedEntitySlug, importedCategorySlug) => {
-        console.log(`Import successful. Navigating to entity: ${importedEntitySlug} in category: ${importedCategorySlug}`);
         handleCloseImportModal();
-        if (importedEntitySlug) {
-             if (location.pathname === `/entity/${importedEntitySlug}`) {
-                 window.location.reload();
-             } else {
-                 navigate(`/entity/${importedEntitySlug}`);
-             }
+        if (importedEntitySlug && location.pathname === `/entity/${importedEntitySlug}`) {
+            window.location.reload();
+        } else if (importedEntitySlug) {
+            navigate(`/entity/${importedEntitySlug}`);
         } else if (importedCategorySlug) {
              navigate(`/category/${importedCategorySlug}`);
-        }
-         else {
+        } else {
             navigate('/');
-             window.location.reload();
+            window.location.reload();
         }
      }, [handleCloseImportModal, navigate, location.pathname]);
 
@@ -181,14 +170,13 @@ function Sidebar() {
         setApplySummarySidebar('');
         try {
             await invoke('apply_preset', { presetId });
-            window.location.reload();
-            // The listeners will still handle the popup display/updates
+            // Let listeners handle popup, maybe refresh data or notify user on completion listener
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Failed to start preset application');
             console.error(`Failed to invoke apply_preset ${presetId} from sidebar:`, errorString);
             setApplyErrorSidebar(`Error: ${errorString}`);
-            setShowApplyPopupSidebar(true); // Show error immediately
-            setApplyingPresetIdSidebar(null); // Reset button state on immediate failure
+            setShowApplyPopupSidebar(true);
+            setApplyingPresetIdSidebar(null);
         }
     };
 
@@ -211,8 +199,19 @@ function Sidebar() {
                  <span>Genshin Modder</span>
             </div>
 
-            <button className="btn btn-primary" style={{ width: '100%', marginBottom: '15px' }} onClick={handleQuickLaunch} disabled={!quickLaunchPath || isLoading || isApplyingAnyPresetSidebar} title={quickLaunchPath ? `Launch: ${quickLaunchPath}`: "Set Quick Launch path in Settings"} >
-                 <i className="fas fa-play fa-fw"></i> Quick Launch
+            <button
+                className="btn btn-primary"
+                style={{ width: '100%', marginBottom: '15px' }}
+                onClick={handleQuickLaunch}
+                // Disable if loading settings, no path set, or already launching/applying preset
+                disabled={!quickLaunchPath || isLoading || isLaunching || isApplyingAnyPresetSidebar}
+                title={quickLaunchPath ? `Launch: ${quickLaunchPath}`: "Set Quick Launch path in Settings"}
+            >
+                {isLaunching ? (
+                    <><i className="fas fa-spinner fa-spin fa-fw"></i> Launching...</>
+                ) : (
+                    <><i className="fas fa-play fa-fw"></i> Quick Launch</>
+                )}
             </button>
              {launchError && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{launchError}</p>}
 
@@ -221,26 +220,23 @@ function Sidebar() {
             </button>
              {importError && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{importError}</p>}
 
-            {/* === Nav Items Section 1 === */}
+            {/* Nav Items */}
             <ul className="nav-items">
-            <NavLink to="/" end className={({ isActive }) => `nav-item ${isNavItemActive('/') ? 'active' : ''}`}> <i className="fas fa-home fa-fw"></i> Home </NavLink>
-                 <NavLink to="/category/characters" className={({ isActive }) => `nav-item ${isNavItemActive('/category/characters') ? 'active' : ''}`}><i className="fas fa-user fa-fw"></i> Characters</NavLink>
-                 <NavLink to="/category/npcs" className={({ isActive }) => `nav-item ${isNavItemActive('/category/npcs') ? 'active' : ''}`}><i className="fas fa-users fa-fw"></i> NPCs</NavLink>
-                 <NavLink to="/category/objects" className={({ isActive }) => `nav-item ${isNavItemActive('/category/objects') ? 'active' : ''}`}><i className="fas fa-cube fa-fw"></i> Objects</NavLink>
-                 <NavLink to="/category/enemies" className={({ isActive }) => `nav-item ${isNavItemActive('/category/enemies') ? 'active' : ''}`}><i className="fas fa-ghost fa-fw"></i> Enemies</NavLink>
-                 <NavLink to="/category/weapons" className={({ isActive }) => `nav-item ${isNavItemActive('/category/weapons') ? 'active' : ''}`}><i className="fas fa-shield-halved fa-fw"></i> Weapons</NavLink>
-                 <NavLink to="/category/ui" className={({ isActive }) => `nav-item ${isNavItemActive('/category/ui') ? 'active' : ''}`}><i className="fas fa-palette fa-fw"></i> UI</NavLink>
+                <NavLink to="/" end className={({ isActive }) => `nav-item ${isNavItemActive('/') ? 'active' : ''}`}> <i className="fas fa-home fa-fw"></i> Home </NavLink>
+                <NavLink to="/category/characters" className={({ isActive }) => `nav-item ${isNavItemActive('/category/characters') ? 'active' : ''}`}><i className="fas fa-user fa-fw"></i> Characters</NavLink>
+                <NavLink to="/category/npcs" className={({ isActive }) => `nav-item ${isNavItemActive('/category/npcs') ? 'active' : ''}`}><i className="fas fa-users fa-fw"></i> NPCs</NavLink>
+                <NavLink to="/category/objects" className={({ isActive }) => `nav-item ${isNavItemActive('/category/objects') ? 'active' : ''}`}><i className="fas fa-cube fa-fw"></i> Objects</NavLink>
+                <NavLink to="/category/enemies" className={({ isActive }) => `nav-item ${isNavItemActive('/category/enemies') ? 'active' : ''}`}><i className="fas fa-ghost fa-fw"></i> Enemies</NavLink>
+                <NavLink to="/category/weapons" className={({ isActive }) => `nav-item ${isNavItemActive('/category/weapons') ? 'active' : ''}`}><i className="fas fa-shield-halved fa-fw"></i> Weapons</NavLink>
+                <NavLink to="/category/ui" className={({ isActive }) => `nav-item ${isNavItemActive('/category/ui') ? 'active' : ''}`}><i className="fas fa-palette fa-fw"></i> UI</NavLink>
             </ul>
 
-            {/* === Separator === */}
             <div className="separator" style={{margin: '5px 0 15px 0'}}></div>
 
-            {/* === Nav Items Section 2 === */}
-             <ul className="nav-items" style={{paddingTop:0}}> {/* Remove default top padding */}
+             <ul className="nav-items" style={{paddingTop:0}}>
                 <NavLink to="/presets" className={({ isActive }) => `nav-item ${isNavItemActive('/presets') ? 'active' : ''}`}> <i className="fas fa-layer-group fa-fw"></i> Presets </NavLink>
                 <NavLink to="/settings" className={({ isActive }) => `nav-item ${isNavItemActive('/settings') ? 'active' : ''}`}> <i className="fas fa-cog fa-fw"></i> Settings </NavLink>
             </ul>
-
 
             <div className="separator"></div>
 
@@ -258,7 +254,7 @@ function Sidebar() {
                          <div key={preset.id} className="preset" title={`Apply preset: ${preset.name}`}>
                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: '10px' }}> <i className="fas fa-star" style={{color:'var(--accent)', marginRight:'6px', fontSize:'12px'}}></i> {preset.name} </span>
                              <div className="preset-actions">
-                                 <button onClick={() => handleApplyPresetSidebar(preset.id)} disabled={applyingPresetIdSidebar === preset.id || isApplyingAnyPresetSidebar} title="Apply Preset" style={{background:'none', border:'none', color:'var(--primary)', cursor:'pointer', padding:0, opacity:0.8, ':hover':{opacity:1}}} >
+                                 <button onClick={() => handleApplyPresetSidebar(preset.id)} disabled={applyingPresetIdSidebar === preset.id || isApplyingAnyPresetSidebar || isLaunching} title="Apply Preset" style={{background:'none', border:'none', color:'var(--primary)', cursor:'pointer', padding:0, opacity:0.8, ':hover':{opacity:1}}} >
                                      {applyingPresetIdSidebar === preset.id ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-play-circle"></i>}
                                  </button>
                             </div>

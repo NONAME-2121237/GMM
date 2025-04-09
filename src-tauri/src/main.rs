@@ -731,9 +731,67 @@ async fn select_file() -> CmdResult<Option<PathBuf>> { // Removed AppHandle
     }
 }
 
+#[cfg(target_os = "windows")]
+#[command]
+fn launch_executable_elevated(path: String) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    println!("Attempting elevated launch for: {}", path);
+
+    // Convert the path and verb to Windows wide strings (UTF-16)
+    let path_wide: Vec<u16> = std::ffi::OsStr::new(&path)
+        .encode_wide()
+        .chain(std::iter::once(0)) // Null-terminate
+        .collect();
+    let operation_wide: Vec<u16> = std::ffi::OsStr::new("runas") // "runas" verb requests elevation
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    // Call ShellExecuteW to request elevation
+    // HINSTANCE returned is actually an integer value; > 32 indicates success.
+    let result = unsafe {
+        ShellExecuteW(
+            Some(HWND::default()),               // Pass as Option<HWND>
+            PCWSTR(operation_wide.as_ptr()),     // Operation: "runas"
+            PCWSTR(path_wide.as_ptr()),          // File path
+            None,                                // No parameters
+            None,                                // Default working directory
+            SW_SHOWNORMAL,                       // Show command normal state
+        )
+    };
+
+    // --- FIX 1: Explicitly cast result.0 to isize BEFORE comparison ---
+    let result_value = result.0 as isize;
+
+    if result_value > 32 { // Compare the casted value
+        println!("Elevated launch initiated successfully via ShellExecuteW.");
+        Ok(())
+    } else {
+        // result.0 contains the error code as an isize, cast to i32 if needed elsewhere
+        let error_code = result_value as i32; // Cast for error reporting
+        let error_message = format!(
+            "Failed to request elevated launch for '{}'. ShellExecuteW error code: {}",
+            path, error_code
+        );
+        eprintln!("{}", error_message);
+
+        // --- FIX 2: Cast the ERROR_CANCELLED constant to i32 for comparison ---
+        if error_code == windows::Win32::Foundation::ERROR_CANCELLED.0 as i32 {
+             Err("Operation cancelled by user.".to_string())
+        } else {
+             Err(error_message)
+        }
+    }
+}
+
 #[command]
 async fn launch_executable(path: String, _app_handle: AppHandle) -> CmdResult<()> { // app_handle might not be needed now
-    println!("Attempting to launch via Command::new: {}", path);
+    println!("Attempting to launch (non-elevated) via Command::new: {}", path);
 
     // FIX: Use Command::new for launching executables
     let cmd = Command::new(path) // Use the path directly as the command
@@ -753,7 +811,11 @@ async fn launch_executable(path: String, _app_handle: AppHandle) -> CmdResult<()
                     }
                     tauri::api::process::CommandEvent::Error(e) => {
                          eprintln!("Launcher error event: {}", e);
-                         // Decide if this constitutes a failure
+                         // If we get the elevation error here, we could suggest the elevated launch
+                         if e.contains("os error 740") {
+                             return Err(format!("Failed to launch: The application requires administrator privileges. Try the 'Launch as Admin' button if available, or run GMM as administrator (not recommended). Original error: {}", e));
+                         }
+                         // Decide if other errors constitute a failure
                          // return Err(format!("Launcher process event error: {}", e));
                     }
                      tauri::api::process::CommandEvent::Terminated(payload) => {
@@ -770,15 +832,20 @@ async fn launch_executable(path: String, _app_handle: AppHandle) -> CmdResult<()
                          // Process terminated, break the loop
                          break;
                      }
-                    _ => {} // Ignore other events like Terminated
+                    _ => {} // Ignore other events
                 }
              }
              println!("Launcher process finished or detached.");
              Ok(()) // Assume success if spawn worked and process finished/detached
         }
         Err(e) => {
-            eprintln!("Failed to spawn launcher: {}", e);
-            Err(format!("Failed to spawn executable: {}", e)) // Convert error to string
+             eprintln!("Failed to spawn launcher: {}", e);
+             // Check for the specific error here too
+             if e.to_string().contains("os error 740") {
+                 Err(format!("Failed to launch: The application requires administrator privileges. Try running GMM as administrator (not recommended). Error: {}", e))
+             } else {
+                  Err(format!("Failed to spawn executable: {}", e)) // Convert error to string
+             }
         }
     }
 }
@@ -3069,6 +3136,7 @@ fn main() {
         .invoke_handler(generate_handler![
             // Settings
             get_setting, set_setting, select_directory, select_file, launch_executable,
+            launch_executable_elevated,
             // Core
             get_categories, get_category_entities, get_entities_by_category,
             get_entity_details, get_assets_for_entity, toggle_asset_enabled,
