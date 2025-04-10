@@ -1,6 +1,6 @@
 # Genshin Mod Manager (GMM)
 
-![image](https://github.com/user-attachments/assets/2f59164f-c769-4fdf-852d-0e3d9c6226b2)
+![image](https://github.com/user-attachments/assets/b70e9905-e7b4-404e-b117-dc0ab9df3fe5)
 
 **A modern, cross-platform manager for your Genshin Impact mods, built with Tauri and React.**
 
@@ -30,9 +30,9 @@ GMM aims to simplify the process of installing, organizing, and switching betwee
 
 ## 📸 Screenshots
 
-![image](https://github.com/user-attachments/assets/b4be13ac-8a3e-48c2-a449-bb93f803bc7d)
+![image](https://github.com/user-attachments/assets/8f378729-6029-48ed-a609-ac52f68bf961)
 
-![image](https://github.com/user-attachments/assets/8cbd12ed-7bc8-4474-960c-319976905d56)
+![image](https://github.com/user-attachments/assets/3c695fec-b311-4940-8948-e198b5db0f48)
 
 ---
 
@@ -105,3 +105,14 @@ GMM aims to simplify the process of installing, organizing, and switching betwee
 
 ```bash
 npm run tauri build
+```
+
+This will build the frontend and bundle the final application according to your tauri.conf.json settings.
+
+## 💻 Technology Stack
+
+- **Framework:** Tauri
+- **Backend:** Rust
+- **Frontend:** React, Vite
+- **Database:** SQLite (via rusqlite)
+- **Icons:** Font Awesome
