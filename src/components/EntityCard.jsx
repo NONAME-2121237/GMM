@@ -20,7 +20,7 @@ const elementIconsFA = {
     Dendro: "fas fa-leaf",
 };
 const RarityIcon = () => <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i>;
-const DEFAULT_PLACEHOLDER_IMAGE = '/images/unknown.png';
+const DEFAULT_PLACEHOLDER_IMAGE = '/images/unknown.jpg';
 
 function EntityCard({ entity }) {
     // Destructure props including counts
@@ -30,7 +30,7 @@ function EntityCard({ entity }) {
     const element = details?.element;
     const elementIconClass = element ? (elementIconsFA[element] || 'fas fa-question-circle') : null;
 
-    const imageUrl = base_image ? `/images/entities/${base_image}` : DEFAULT_PLACEHOLDER_IMAGE;
+    const imageUrl = base_image ? `/images/entities/${slug}_base.jpg` : DEFAULT_PLACEHOLDER_IMAGE;
 
     const handleImageError = (e) => {
         // If the specific image fails, fall back to the generic placeholder

@@ -34,7 +34,7 @@ const weaponIconsFA = {
     Catalyst: "fas fa-book-sparkles"
 };
 const RarityIcon = () => <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i>;
-const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.png';
+const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.jpg';
 
 // Global View Mode Key
 const VIEW_MODE_STORAGE_KEY = 'entityViewMode';
