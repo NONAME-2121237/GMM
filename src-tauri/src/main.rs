@@ -165,6 +165,18 @@ static DB_CONNECTION: Lazy<Mutex<SqlResult<Connection>>> = Lazy::new(|| {
 lazy_static! {
     static ref MOD_NAME_CLEANUP_REGEX: Regex = Regex::new(r"(?i)(_v\d+(\.\d+)*|_DISABLED|DISABLED_|\(disabled\)|^DISABLED_)").unwrap();
     static ref CHARACTER_NAME_REGEX: Regex = Regex::new(r"(?i)(Raiden|Shogun|HuTao|Tao|Zhongli|Ganyu|Ayaka|Kazuha|Yelan|Eula|Klee|Nahida)").unwrap();
+    static ref EXCLUDED_INI_FILENAMES: HashSet<String> = {
+        let mut set = HashSet::new();
+        set.insert("orfix.ini".to_string());
+        set.insert("region.ini".to_string());
+        set.insert("offset.ini".to_string());
+        set.insert("water.ini".to_string());
+        set.insert("fixdash.ini".to_string());
+        set.insert("deltatime.ini".to_string());
+        set.insert("object.ini".to_string());
+        set.insert("timer.ini".to_string());
+        set
+    };
 }
 
 #[derive(Debug)]
@@ -519,17 +531,53 @@ fn get_asset_location_info(conn: &Connection, asset_id: i64) -> Result<AssetLoca
 
 fn has_ini_file(dir_path: &PathBuf) -> bool {
     if !dir_path.is_dir() { return false; }
-    // Use walkdir limited to depth 1 to avoid iterating too deep if not needed
-    for entry in WalkDir::new(dir_path).max_depth(1).min_depth(1).into_iter().filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() {
-            if let Some(ext) = entry.path().extension() {
-                if ext.to_ascii_lowercase() == "ini" {
-                    return true;
+
+    let mut has_any_ini = false;
+    let mut has_non_excluded_ini = false;
+
+    // Use walkdir limited to depth 1
+    for entry_result in WalkDir::new(dir_path).max_depth(1).min_depth(1).into_iter() {
+        match entry_result {
+            Ok(entry) => {
+                if entry.file_type().is_file() {
+                    if let Some(ext) = entry.path().extension() {
+                        if ext.eq_ignore_ascii_case("ini") {
+                            has_any_ini = true; // Found at least one INI file
+
+                            // Get the filename, convert to lowercase
+                            if let Some(filename_osstr) = entry.path().file_name() {
+                                let filename_lower = filename_osstr.to_string_lossy().to_lowercase();
+
+                                // Check if it's an excluded file (considering DISABLED_ prefix)
+                                let base_filename = if filename_lower.starts_with(DISABLED_PREFIX.to_lowercase().as_str()) {
+                                    filename_lower.trim_start_matches(DISABLED_PREFIX.to_lowercase().as_str())
+                                } else {
+                                    filename_lower.as_str()
+                                };
+
+                                if !EXCLUDED_INI_FILENAMES.contains(base_filename) {
+                                    // Found an INI file that is NOT excluded
+                                    has_non_excluded_ini = true;
+                                    // Optimization: We can stop searching as soon as we find one non-excluded INI
+                                    return true;
+                                }
+                                // If it IS excluded, we continue searching other files in the directory
+                            }
+                        }
+                    }
                 }
+            },
+            Err(e) => {
+                // Log error accessing entry but continue scan if possible
+                eprintln!("[has_ini_file] Error accessing entry in {}: {}", dir_path.display(), e);
             }
         }
     }
-    false
+
+    // If the loop finishes, return true only if a non-excluded INI was found.
+    // This implicitly handles the case where only excluded INIs were found (has_any_ini=true, has_non_excluded_ini=false -> returns false)
+    // and the case where no INIs were found (has_any_ini=false, has_non_excluded_ini=false -> returns false).
+    has_non_excluded_ini
 }
 
 fn find_preview_image(dir_path: &PathBuf) -> Option<String> {
