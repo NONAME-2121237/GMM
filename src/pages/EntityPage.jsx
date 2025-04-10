@@ -389,7 +389,7 @@ function EntityPage() {
     const elementIconClass = element ? (elementIconsFA[element] || 'fas fa-question-circle') : null;
     const weapon = details?.weapon;
     const weaponIconClass = weapon ? (weaponIconsFA[weapon] || 'fas fa-question-circle') : null;
-    const avatarUrl = entity.base_image ? `/images/entities/${entity.base_image}` : DEFAULT_ENTITY_PLACEHOLDER_IMAGE;
+    const avatarUrl = entity.base_image ? `/images/entities/${entitySlug}_base.jpg` : DEFAULT_ENTITY_PLACEHOLDER_IMAGE;
     const handleAvatarError = (e) => {
         if (e.target.src !== DEFAULT_ENTITY_PLACEHOLDER_IMAGE) {
             console.warn(`Failed to load entity avatar: ${avatarUrl}, falling back to placeholder.`);
