@@ -117,6 +117,7 @@ name = "NPCs"
 entities = [
     { name = "Katheryne", slug = "katheryne", description = "The receptionist of the Adventurers' Guild, found in every major city.", details = '{"location": "Multiple Cities"}', base_image = "katheryne.jpg" },
     { name = "Paimon",    slug = "paimon",    description = "A mysterious, energetic companion who guides the Traveler. Loves food.", details = '{"type": "Companion"}', base_image = "paimon.jpg" },
+    { name = "Saurians", slug = "saurians", description = "Saurians are the dragons of Natlan. They have undergone long years of development and evolution, and unlike dragons in other nations of Teyvat, Saurians are common in Natlan and closely coexist with humanity.", details = '{"type": "Saurians"}', base_image = "saurian_base.jpg" },
 ]
 
 # ===================
