@@ -42,6 +42,18 @@ const LIST_ITEM_HEIGHT = 60; // Height including padding/margin
 const GRID_ITEM_WIDTH = 330;
 const GRID_ITEM_HEIGHT = 350; // Includes padding inside the cell
 
+// --- NEW: Sort Options ---
+const SORT_OPTIONS = [
+    { value: 'name-asc', label: 'Name (A-Z)' },
+    { value: 'name-desc', label: 'Name (Z-A)' },
+    { value: 'id-desc', label: 'Date Added (Newest First)' },
+    { value: 'id-asc', label: 'Date Added (Oldest First)' },
+    { value: 'enabled-desc', label: 'Status (Enabled First)' },
+    { value: 'enabled-asc', label: 'Status (Disabled First)' },
+];
+const DEFAULT_SORT_OPTION = 'name-asc';
+// ----------------------
+
 function EntityPage() {
     const { entitySlug } = useParams();
     const navigate = useNavigate();
@@ -57,16 +69,22 @@ function EntityPage() {
     const [deleteError, setDeleteError] = useState('');
     const [viewMode, setViewMode] = useState('grid'); // Default, loaded in useEffect
     const [modSearchTerm, setModSearchTerm] = useState('');
+    // --- NEW: Sort State ---
+    const [sortOption, setSortOption] = useState(DEFAULT_SORT_OPTION);
+    const sortStorageKey = `entitySort_${entitySlug}`; // Per-entity sort storage
+    // ---------------------
     const [listContainerRef, bounds] = useMeasure();
-    // --- New State for Bulk Actions ---
     const [selectedAssetIds, setSelectedAssetIds] = useState(new Set());
     const [isBulkProcessing, setIsBulkProcessing] = useState(false);
-    // ----------------------------------
 
-    // Fetch data (includes loading view mode)
+    // Fetch data (includes loading view mode and sort option)
     const fetchData = useCallback(async () => {
         const savedViewMode = getLocalStorageItem(VIEW_MODE_STORAGE_KEY, 'grid');
         setViewMode(savedViewMode);
+        // --- NEW: Load saved sort option ---
+        const savedSort = getLocalStorageItem(sortStorageKey, DEFAULT_SORT_OPTION);
+        setSortOption(savedSort);
+        // ---------------------------------
 
         console.log(`[EntityPage ${entitySlug}] Fetching data...`);
         setLoading(true);
@@ -88,7 +106,7 @@ function EntityPage() {
             setLoading(false);
             console.log(`[EntityPage ${entitySlug}] Fetching complete. Loading: ${false}`);
         }
-    }, [entitySlug]);
+    }, [entitySlug, sortStorageKey]); // Added sortStorageKey dependency
 
     useEffect(() => {
         fetchData();
@@ -220,24 +238,58 @@ function EntityPage() {
         }
     };
 
-    const filteredAssets = useMemo(() => {
-        if (!modSearchTerm) {
-            return assets; // No filter applied
+    // --- NEW: Sort Change Handler ---
+    const handleSortChange = useCallback((event) => {
+        const newSortOption = event.target.value;
+        setSortOption(newSortOption);
+        setLocalStorageItem(sortStorageKey, newSortOption);
+    }, [sortStorageKey]);
+    // --------------------------------
+
+    // --- UPDATED: useMemo for filtering AND sorting ---
+    const filteredAndSortedAssets = useMemo(() => {
+        let tempAssets = [...assets]; // Create shallow copy
+
+        // Filtering Logic
+        if (modSearchTerm) {
+            const lowerSearchTerm = modSearchTerm.toLowerCase();
+            tempAssets = tempAssets.filter(asset =>
+                asset.name.toLowerCase().includes(lowerSearchTerm) ||
+                (asset.author && asset.author.toLowerCase().includes(lowerSearchTerm)) ||
+                (asset.category_tag && asset.category_tag.toLowerCase().includes(lowerSearchTerm))
+            );
         }
-        const lowerSearchTerm = modSearchTerm.toLowerCase();
-        return assets.filter(asset =>
-            asset.name.toLowerCase().includes(lowerSearchTerm) ||
-            (asset.author && asset.author.toLowerCase().includes(lowerSearchTerm)) ||
-            (asset.category_tag && asset.category_tag.toLowerCase().includes(lowerSearchTerm))
-        );
-    }, [assets, modSearchTerm]);
+
+        // Sorting Logic
+        tempAssets.sort((a, b) => {
+            switch (sortOption) {
+                case 'name-asc':
+                    return a.name.localeCompare(b.name);
+                case 'name-desc':
+                    return b.name.localeCompare(a.name);
+                case 'id-desc': // Newest first
+                    return b.id - a.id;
+                case 'id-asc': // Oldest first
+                    return a.id - b.id;
+                case 'enabled-desc': // Enabled first (true > false)
+                    return (b.is_enabled === a.is_enabled) ? 0 : b.is_enabled ? 1 : -1;
+                case 'enabled-asc': // Disabled first (false < true)
+                    return (a.is_enabled === b.is_enabled) ? 0 : a.is_enabled ? 1 : -1;
+                default:
+                    return a.name.localeCompare(b.name); // Fallback
+            }
+        });
+
+        return tempAssets;
+    }, [assets, modSearchTerm, sortOption]); // Add sortOption dependency
+    // --- END UPDATED useMemo ---
 
     // --- Bulk Action Handlers ---
     const handleSelectAllChange = (event) => {
         const isChecked = event.target.checked;
         if (isChecked) {
             // Select all *filtered* assets
-            setSelectedAssetIds(new Set(filteredAssets.map(asset => asset.id)));
+            setSelectedAssetIds(new Set(filteredAndSortedAssets.map(asset => asset.id))); // Use sorted/filtered list
         } else {
             setSelectedAssetIds(new Set());
         }
@@ -333,8 +385,7 @@ function EntityPage() {
     // --- End Bulk Action Handlers ---
 
     const ListItem = ({ index, style }) => {
-        const asset = filteredAssets[index];
-        // --- Pass selection props ---
+        const asset = filteredAndSortedAssets[index]; // Use sorted/filtered list
         const isSelected = selectedAssetIds.has(asset.id);
         return (
              <div style={style}>
@@ -346,10 +397,8 @@ function EntityPage() {
                      onEdit={handleOpenEditModal}
                      onDelete={handleOpenDeleteModal}
                      viewMode="list"
-                     // --- Pass selection props ---
                      isSelected={isSelected}
                      onSelectChange={handleAssetSelectChange}
-                     // -------------------------
                  />
              </div>
         );
@@ -358,8 +407,8 @@ function EntityPage() {
     const GridItem = ({ columnIndex, rowIndex, style }) => {
         const columnCount = Math.max(1, Math.floor(bounds.width / GRID_ITEM_WIDTH));
         const index = rowIndex * columnCount + columnIndex;
-        if (index >= filteredAssets.length) return null; // Out of bounds
-        const asset = filteredAssets[index];
+        if (index >= filteredAndSortedAssets.length) return null; // Out of bounds
+        const asset = filteredAndSortedAssets[index]; // Use sorted/filtered list
         return (
              <div style={style}>
                 <div style={{ padding: '0 10px 10px 10px', height:'100%' }}>
@@ -398,11 +447,11 @@ function EntityPage() {
      };
 
     const gridColumnCount = Math.max(1, Math.floor(bounds.width / GRID_ITEM_WIDTH));
-    const gridRowCount = Math.ceil(filteredAssets.length / gridColumnCount);
+    const gridRowCount = Math.ceil(filteredAndSortedAssets.length / gridColumnCount); // Use sorted/filtered list
 
     // --- Calculate "select all" checkbox state ---
-    const isAllFilteredSelected = filteredAssets.length > 0 && selectedAssetIds.size === filteredAssets.length;
-    const isIndeterminate = selectedAssetIds.size > 0 && selectedAssetIds.size < filteredAssets.length;
+    const isAllFilteredSelected = filteredAndSortedAssets.length > 0 && selectedAssetIds.size === filteredAndSortedAssets.length;
+    const isIndeterminate = selectedAssetIds.size > 0 && selectedAssetIds.size < filteredAndSortedAssets.length;
     // -------------------------------------------
 
 
@@ -428,6 +477,7 @@ function EntityPage() {
                 <div
                     className="character-avatar"
                     style={{ backgroundImage: `url('${avatarUrl}')` }}
+                    onError={handleAvatarError} // Handle potential errors loading the image
                 >
                 </div>
 
@@ -460,15 +510,15 @@ function EntityPage() {
             <div className="mods-section">
                  {/* --- Updated Section Header --- */}
                  <div className="section-header" style={{ alignItems: 'center' }}>
+                     {/* --- Left Aligned Group (Title & Select All) --- */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                         <h2 className="section-title" style={{ marginBottom: 0 }}>Available Mods ({filteredAssets.length})</h2>
-                         {/* Select All Checkbox (only in list view) */}
-                         {viewMode === 'list' && filteredAssets.length > 0 && (
+                         <h2 className="section-title" style={{ marginBottom: 0 }}>Available Mods ({filteredAndSortedAssets.length})</h2>
+                         {viewMode === 'list' && filteredAndSortedAssets.length > 0 && (
                               <input
                                   type="checkbox"
                                   title={isAllFilteredSelected ? "Deselect All" : "Select All Visible"}
                                   checked={isAllFilteredSelected}
-                                  ref={el => el && (el.indeterminate = isIndeterminate)} // Set indeterminate state
+                                  ref={el => el && (el.indeterminate = isIndeterminate)}
                                   onChange={handleSelectAllChange}
                                   disabled={isBulkProcessing}
                                   style={{ cursor: 'pointer', width:'16px', height:'16px' }}
@@ -476,8 +526,8 @@ function EntityPage() {
                               />
                          )}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginLeft: 'auto' }}> {/* Wrap right-side controls */}
-                         {/* Bulk Action Buttons (only in list view & when items selected) */}
+                    {/* --- Right Aligned Group (Bulk Actions, Sort, Search, View Mode) --- */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginLeft: 'auto' }}>
                          {viewMode === 'list' && selectedAssetIds.size > 0 && (
                              <div style={{ display: 'flex', gap: '10px' }}>
                                  <button className="btn btn-primary" onClick={() => handleBulkToggle(true)} disabled={isBulkProcessing} title="Enable selected mods">
@@ -486,9 +536,16 @@ function EntityPage() {
                                  <button className="btn btn-outline" onClick={() => handleBulkToggle(false)} disabled={isBulkProcessing} title="Disable selected mods">
                                      {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-times fa-fw"></i>} Disable ({selectedAssetIds.size})
                                  </button>
-                                 {/* Add bulk delete later if needed */}
                              </div>
                          )}
+                        {/* --- NEW: Sort Dropdown --- */}
+                        <div className="sort-dropdown-container">
+                            <label htmlFor="mod-sort-select" style={sortStyles.sortLabel}>Sort by:</label>
+                            <select id="mod-sort-select" value={sortOption} onChange={handleSortChange} style={sortStyles.sortSelect} aria-label="Sort mods">
+                                {SORT_OPTIONS.map(option => ( <option key={option.value} value={option.value}>{option.label}</option> ))}
+                            </select>
+                        </div>
+                        {/* --- End Sort Dropdown --- */}
                          <div className="search-bar-container">
                              <div className="search-bar">
                                  <i className="fas fa-search"></i>
@@ -503,25 +560,23 @@ function EntityPage() {
                  </div>
                  {/* --- End Updated Section Header --- */}
 
-                {/* List/Grid Container */}
-                {/* Use a fixed height container and let react-window handle scrolling */}
-                 <div ref={listContainerRef} style={{ height: 'calc(100vh - 200px)', /* Adjust based on profile height etc */ minHeight: '300px', overflow: 'hidden', marginTop: '10px' /* Add margin if needed */}}>
+                 <div ref={listContainerRef} style={{ height: 'calc(100vh - 200px)', /* Adjust based on profile height etc */ minHeight: '300px', overflow: 'hidden', marginTop: '10px' }}>
                     {loading ? (
                          <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'} style={{height: '100%'}}>
                              {Array.from({ length: 6 }).map((_, i) => <ModCardSkeleton key={i} viewMode={viewMode} />)}
                          </div>
-                     ) : !filteredAssets.length ? (
+                     ) : !filteredAndSortedAssets.length ? (
                          <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%', paddingTop: '30px' }}>
-                             {assets.length === 0 ? `No mods found for ${entity.name}.` : 'No mods found matching search.'}
+                             {assets.length === 0 ? `No mods found for ${entity.name}.` : 'No mods found matching search/filters.'}
                          </p>
-                     ) : bounds.width > 0 && bounds.height > 0 ? ( // Only render list/grid when bounds are measured
+                     ) : bounds.width > 0 && bounds.height > 0 ? (
                         viewMode === 'list' ? (
                             <FixedSizeList
                                 height={bounds.height}
-                                itemCount={filteredAssets.length}
-                                itemSize={LIST_ITEM_HEIGHT} // Ensure this matches the actual item height including margins/padding
+                                itemCount={filteredAndSortedAssets.length}
+                                itemSize={LIST_ITEM_HEIGHT}
                                 width={bounds.width}
-                                style={{overflowX:'hidden'}} // Prevent horizontal scrollbar
+                                style={{overflowX:'hidden'}}
                             >
                                 {ListItem}
                             </FixedSizeList>
@@ -531,15 +586,15 @@ function EntityPage() {
                                 columnWidth={GRID_ITEM_WIDTH}
                                 height={bounds.height}
                                 rowCount={gridRowCount}
-                                rowHeight={GRID_ITEM_HEIGHT} // Ensure this matches actual grid item height
+                                rowHeight={GRID_ITEM_HEIGHT}
                                 width={bounds.width}
-                                itemData={filteredAssets}
+                                itemData={filteredAndSortedAssets} // Pass sorted list here
                             >
                                 {GridItem}
                             </FixedSizeGrid>
                         )
                     ) : (
-                         <p className="placeholder-text">Calculating layout...</p> // Fallback while measuring
+                         <p className="placeholder-text">Calculating layout...</p>
                     )}
                 </div>
             </div>
@@ -564,5 +619,27 @@ function EntityPage() {
         </div>
     );
 }
+
+// --- NEW: Styles for sort dropdown ---
+const sortStyles = {
+    sortLabel: {
+        fontSize: '13px',
+        color: 'rgba(255, 255, 255, 0.7)',
+        marginRight: '8px',
+        whiteSpace: 'nowrap', // Prevent label wrapping
+    },
+    sortSelect: {
+        padding: '6px 10px',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '6px',
+        color: 'var(--light)',
+        fontSize: '13px',
+        cursor: 'pointer',
+        minWidth: '180px', // Adjust width as needed
+        height: '34px', // Match height with filter buttons roughly
+    },
+};
+// --- End new styles ---
 
 export default EntityPage;
