@@ -1,6 +1,6 @@
 [package]
 name = "gmm"
-version = "1.4.3"
+version = "1.4.4"
 description = "Genshin Mod Manager"
 authors = ["Eidenz"]
 edition = "2021"

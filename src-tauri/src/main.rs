@@ -29,6 +29,7 @@ use tauri::api::file::read_binary;
 use sevenz_rust::{Password, decompress_file};
 use zip::{ZipArchive, result::ZipError};
 use unrar::{Archive, Process, List, ListSplit};
+use rusqlite::Transaction;
 
 // --- Structs for Deserializing Definitions ---
 #[derive(Deserialize, Debug, Clone)]
@@ -594,6 +595,24 @@ fn find_preview_image(dir_path: &PathBuf) -> Option<String> {
         }
     }
     None
+}
+
+// --- Helper Function to get current enabled state (reusable) ---
+fn get_current_asset_enabled_state(conn: &Connection, asset_id: i64, base_mods_path: &PathBuf) -> Result<bool, AppError> {
+    let asset_info = get_asset_location_info(conn, asset_id)?; // Reuse existing helper
+
+    let relative_path_buf = PathBuf::from(&asset_info.clean_relative_path);
+    let filename_osstr = relative_path_buf.file_name()
+        .ok_or_else(|| AppError::ModOperation(format!("Could not extract filename from DB path: {}", asset_info.clean_relative_path)))?;
+    let filename_str = filename_osstr.to_string_lossy();
+    if filename_str.is_empty() {
+        return Err(AppError::ModOperation("Current filename is empty".to_string()));
+    }
+
+    // Check ONLY the enabled path based on the CLEAN relative path from DB
+    let full_path_if_enabled = base_mods_path.join(&relative_path_buf);
+
+    Ok(full_path_if_enabled.is_dir()) // Return true if the 'enabled' path exists
 }
 
 // --- Database Initialization (Result type uses AppError internally) ---
@@ -1204,32 +1223,93 @@ fn toggle_asset_enabled(entity_slug: String, asset: Asset, db_state: State<DbSta
 
 #[command]
 fn get_asset_image_path(
-    _entity_slug: String, // Mark unused, not needed if we have actual folder name
-    folder_name_on_disk: String, // The current name on disk (e.g., "ModName" or "DISABLED_ModName")
-    image_filename: String,
-    db_state: State<DbState> // Need db_state to get base path
+    asset_id: i64,
+    db_state: State<DbState>
 ) -> CmdResult<String> {
-    // Get the base path from settings
-    let base_mods_path = get_mods_base_path_from_settings(&db_state).map_err(|e| e.to_string())?;
+    // --- Data needed from DB ---
+    let base_mods_path_str: String;
+    let clean_relative_path_str: String;
+    let image_filename: String;
 
-    // Construct the FULL path to the mod folder using the name ON DISK
-    // This assumes folder_name_on_disk is just the final component.
-    let mod_folder_full_path = base_mods_path.join(&folder_name_on_disk);
+    // --- Acquire lock *only* for DB reads ---
+    { // Scope for the MutexGuard
+        println!("[get_asset_image_path ID: {}] Acquiring DB lock...", asset_id);
+        let conn_guard = db_state.0.lock().map_err(|_| format!("[get_asset_image_path ID: {}] DB lock poisoned", asset_id))?;
+        let conn = &*conn_guard;
 
+        // 1. Get base mods path from settings
+        base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
+            .map_err(|e| format!("[get_asset_image_path ID: {}] DB Error getting base path: {}", asset_id, e))?
+            .ok_or_else(|| format!("[get_asset_image_path ID: {}] Mods folder path not set", asset_id))?;
 
-    // Check if the folder itself exists before looking for the image inside
-    if !mod_folder_full_path.is_dir() {
-        return Err(format!("Mod folder '{}' not found at expected location: {}", folder_name_on_disk, mod_folder_full_path.display()));
+        // 2. Fetch asset info (clean path and image filename) using asset_id
+        let (fetched_path, fetched_image_opt): (String, Option<String>) = conn.query_row(
+            "SELECT folder_name, image_filename FROM assets WHERE id = ?1",
+            params![asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("[get_asset_image_path ID: {}] Asset not found.", asset_id),
+            _ => format!("[get_asset_image_path ID: {}] DB Error getting asset info: {}", asset_id, e),
+        })?;
+
+        clean_relative_path_str = fetched_path.replace("\\", "/"); // Normalize path separators immediately
+        image_filename = match fetched_image_opt {
+             Some(name) if !name.is_empty() => name,
+             _ => {
+                 // If no image filename in DB, we can stop early. Release lock implicitly.
+                 return Err(format!("[get_asset_image_path ID: {}] Asset does not have an associated image filename.", asset_id));
+             }
+        };
+
+        println!("[get_asset_image_path ID: {}] Releasing DB lock.", asset_id);
+        // MutexGuard `conn_guard` is dropped here, releasing the lock
     }
+    // --- Lock is released ---
 
-    // Construct the FULL path to the image file
-    let image_full_path = mod_folder_full_path.join(&image_filename);
+    // --- Filesystem operations (No DB lock needed) ---
+    println!("[get_asset_image_path ID: {}] Performing filesystem checks...", asset_id);
+    let base_mods_path = PathBuf::from(base_mods_path_str);
+    let clean_relative_path_buf = PathBuf::from(&clean_relative_path_str); // Already normalized
 
+    // 3. Determine current folder path (enabled or disabled)
+    let mod_folder_filename_osstr = clean_relative_path_buf.file_name()
+        .ok_or_else(|| format!("[get_asset_image_path ID: {}] Cannot get folder filename from '{}'", asset_id, clean_relative_path_str))?;
+    let mod_folder_filename_str = mod_folder_filename_osstr.to_string_lossy();
+    let disabled_mod_folder_filename = format!("{}{}", DISABLED_PREFIX, mod_folder_filename_str);
+    let relative_parent_path = clean_relative_path_buf.parent();
+
+    let full_path_if_enabled = base_mods_path.join(&clean_relative_path_buf);
+    let full_path_if_disabled = match relative_parent_path {
+        Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_mod_folder_filename),
+        _ => base_mods_path.join(&disabled_mod_folder_filename),
+    };
+
+    // Use is_dir which might be slightly faster than exists() if we only care about directories
+    let current_mod_folder_path = if full_path_if_enabled.is_dir() {
+        println!("[get_asset_image_path ID: {}] Found enabled path: {}", asset_id, full_path_if_enabled.display());
+        full_path_if_enabled
+    } else if full_path_if_disabled.is_dir() {
+        println!("[get_asset_image_path ID: {}] Found disabled path: {}", asset_id, full_path_if_disabled.display());
+        full_path_if_disabled
+    } else {
+        // Folder not found. This isn't necessarily an error for *this* function,
+        // but we can't construct the image path. Return an error.
+        println!("[get_asset_image_path ID: {}] Mod folder not found on disk.", asset_id);
+        return Err(format!("Mod folder for asset ID {} not found on disk (Checked '{}' and '{}').", asset_id, full_path_if_enabled.display(), full_path_if_disabled.display()));
+    };
+
+    // 4. Construct the FULL path to the image file within the found folder
+    let image_full_path = current_mod_folder_path.join(&image_filename);
+    println!("[get_asset_image_path ID: {}] Checking image file: {}", asset_id, image_full_path.display());
+
+    // 5. Check if the image file *itself* exists
     if !image_full_path.is_file() {
-        return Err(format!("Image file '{}' not found in mod folder '{}'. Searched: {}", image_filename, folder_name_on_disk, image_full_path.display()));
+        println!("[get_asset_image_path ID: {}] Image file does not exist.", asset_id);
+        return Err(format!("Image file '{}' not found in mod folder '{}'.", image_filename, current_mod_folder_path.display()));
     }
 
     // Return the absolute path string for the frontend
+    println!("[get_asset_image_path ID: {}] Success, returning path: {}", asset_id, image_full_path.display());
     Ok(image_full_path.to_string_lossy().into_owned())
 }
 
@@ -2175,39 +2255,55 @@ fn import_archive(
     image_data: Option<Vec<u8>>,
     // Keep existing file path param as fallback/alternative
     selected_preview_absolute_path: Option<String>,
+    preset_ids: Option<Vec<i64>>,
     db_state: State<DbState>
 ) -> CmdResult<()> {
-    println!("[import_archive] Importing '{}', internal path '{}' for entity '{}'. Image Data Provided: {}",
-        archive_path_str, selected_internal_root, target_entity_slug, image_data.is_some());
+    println!("[import_archive] Importing '{}', internal path '{}' for entity '{}'. Image Data Provided: {}. Add to presets: {:?}",
+        archive_path_str, selected_internal_root, target_entity_slug, image_data.is_some(), preset_ids);
 
-    // --- Basic Validation & Setup (Unchanged) ---
+    // --- Basic Validation & Setup ---
     if mod_name.trim().is_empty() { return Err("Mod Name cannot be empty.".to_string()); }
     if target_entity_slug.trim().is_empty() { return Err("Target Entity must be selected.".to_string()); }
     let archive_path = PathBuf::from(&archive_path_str);
     if !archive_path.is_file() { return Err(format!("Archive file not found: {}", archive_path.display())); }
-    let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
-    let conn = &*conn_guard;
-    let base_mods_path_str = get_setting_value(conn, SETTINGS_KEY_MODS_FOLDER)
+
+    // --- Get mutable access via MutexGuard ---
+    let mut conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+    // --- End Fix 1 ---
+
+    // --- Get base path and entity info (can use immutable borrow from guard here) ---
+    let base_mods_path_str = get_setting_value(&conn_guard, SETTINGS_KEY_MODS_FOLDER)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Mods folder path not set".to_string())?;
     let base_mods_path = PathBuf::from(base_mods_path_str);
-    let (target_category_slug, target_entity_id): (String, i64) = conn.query_row(
+
+    let (target_category_slug, target_entity_id): (String, i64) = conn_guard.query_row( // Use conn_guard directly
         "SELECT c.slug, e.id FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = ?1",
         params![target_entity_slug], |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => format!("Target entity '{}' not found.", target_entity_slug),
         _ => format!("DB Error get target entity: {}", e)
     })?;
+    // --- End Get base path ---
+
     let target_mod_folder_name = mod_name.trim().replace(" ", "_").replace(".", "_");
     if target_mod_folder_name.is_empty() { return Err("Mod Name results in invalid folder name.".to_string()); }
     let final_mod_dest_path = base_mods_path.join(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
-    // Create directory *before* extraction and image saving
+
+    // Create directory *before* transaction starts, as it's a file system operation
     fs::create_dir_all(&final_mod_dest_path)
         .map_err(|e| format!("Failed create dest directory '{}': {}", final_mod_dest_path.display(), e))?;
     println!("[import_archive] Target destination folder created/ensured: {}", final_mod_dest_path.display());
 
 
-    // --- Extraction Logic (Branching - unchanged from previous corrections) ---
+    // --- Start Transaction ---
+    // Use conn_guard directly here. transaction() takes &mut Connection, which MutexGuard provides via DerefMut.
+    let tx = conn_guard.transaction().map_err(|e| format!("Failed start import transaction: {}", e))?;
+    // --- End Transaction Start ---
+
+    // --- Extraction Logic ---
+    // (Needs to happen *before* DB commit, but *after* transaction start if it needs tx?)
+    // (Assuming extraction doesn't need the DB transaction itself)
     println!("[import_archive] Starting extraction...");
     let extension = archive_path.extension().and_then(|os| os.to_str()).map(|s| s.to_lowercase());
     let prefix_to_extract_norm = selected_internal_root.replace("\\", "/");
@@ -2215,7 +2311,9 @@ fn import_archive(
     let prefix_path = Path::new(prefix_to_extract);
     let mut files_extracted_count = 0;
 
-    match extension.as_deref() {
+    // Wrap extraction in a closure to handle potential errors and allow rollback
+    let extraction_result: Result<usize, String> = (|| {
+        match extension.as_deref() {
         Some("zip") => {
             // ... (zip extraction logic remains the same) ...
              let file = fs::File::open(&archive_path).map_err(|e| format!("Zip Extract: Failed open: {}", e))?;
@@ -2324,78 +2422,144 @@ fn import_archive(
             }
         }
         _ => return Err(format!("Unsupported archive type for extraction: {:?}", extension)),
-    }
-    println!("[import_archive] Extracted {} files.", files_extracted_count);
-    // --- End Extraction ---
+        }
+        Ok(files_extracted_count) // Return count on success
+    })();
 
-    // --- Handle Preview Image (Handles Paste > File Path > Extracted) ---
+    // Handle extraction result: if it failed, cleanup folder and return Err (will rollback tx)
+    let files_extracted_count = extraction_result.map_err(|e| {
+         fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup on extraction error
+         e // Return the error string
+    })?;
+    println!("[import_archive] Extracted {} files.", files_extracted_count);
+
+
+    // --- Handle Preview Image (Logic remains the same) ---
     let mut image_filename_for_db: Option<String> = None;
 
     // --- Priority 1: Pasted image data ---
-    if let Some(data) = image_data {
+    if let Some(data) = image_data { // image_data is Option<Vec<u8>> from frontend
         println!("[import_archive] Handling provided image data ({} bytes)", data.len());
+        // The TARGET_IMAGE_FILENAME constant is defined earlier, usually "preview.png"
         let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
-        fs::write(&target_image_path, data)
-            .map_err(|e| format!("Failed to save pasted image data to '{}': {}", target_image_path.display(), e))?;
-        println!("[import_archive] Image data written successfully.");
-        image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+        // Use fs::write which creates/truncates the file
+        match fs::write(&target_image_path, data) { // Check the result of fs::write
+            Ok(_) => {
+                println!("[import_archive] Image data written successfully to '{}'.", target_image_path.display());
+                // --- SET FILENAME HERE ---
+                image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+            }
+            Err(e) => {
+                // If writing the pasted image fails, we should NOT set image_filename_for_db
+                // And ideally, we should probably error out the whole import? Or at least log prominently.
+                eprintln!("[import_archive] ERROR: Failed to save pasted image data to '{}': {}. Preview will be missing.", target_image_path.display(), e);
+                // image_filename_for_db remains None
+                // Consider returning an error here?
+                // return Err(format!("Failed to save pasted image data: {}", e)); // This would roll back the DB transaction
+            }
+        }
     }
     // --- Priority 2: Selected external file path ---
+    // Only runs if image_data was None
     else if let Some(user_preview_path_str) = selected_preview_absolute_path {
         println!("[import_archive] Handling selected image file path: {}", user_preview_path_str);
         let source_path = PathBuf::from(&user_preview_path_str);
         if source_path.is_file() {
             let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
-            fs::copy(&source_path, &target_image_path)
-                .map_err(|e| format!("Failed copy user preview to '{}': {}", target_image_path.display(), e))?;
-            println!("[import_archive] Image file copied successfully.");
-            image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+            match fs::copy(&source_path, &target_image_path) { // Check result of fs::copy
+                Ok(_) => {
+                    println!("[import_archive] Image file copied successfully to '{}'.", target_image_path.display());
+                    // --- SET FILENAME HERE ---
+                    image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
+                }
+                Err(e) => {
+                    eprintln!("[import_archive] ERROR: Failed copy user preview to '{}': {}. Preview will be missing.", target_image_path.display(), e);
+                    // image_filename_for_db remains None
+                    // Consider returning an error?
+                    // return Err(format!("Failed to copy selected preview: {}", e));
+                }
+            }
         } else {
              println!("[import_archive] Warning: Selected preview file '{}' not found, skipping.", user_preview_path_str);
+             // image_filename_for_db remains None
         }
     }
     // --- Priority 3: Check if default name was extracted ---
+    // Only runs if image_data and selected_preview_absolute_path were None
     else {
         let potential_extracted_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
         if potential_extracted_image_path.is_file() {
             println!("[import_archive] Using extracted {} as preview.", TARGET_IMAGE_FILENAME);
+            // --- SET FILENAME HERE ---
             image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
         } else {
              println!("[import_archive] No pasted, selected, or extracted preview found.");
+             // image_filename_for_db remains None
         }
     }
+    // --- This log runs regardless of success/failure above ---
     println!("[import_archive] Image handling complete. Filename to save in DB: {:?}", image_filename_for_db);
 
 
-    // --- Add to Database (Check Existing & Insert - unchanged) ---
+    // --- Add to Database (Check Existing & Insert - Uses TRANSACTION) ---
     let relative_path_for_db = Path::new(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
     let relative_path_for_db_str = relative_path_for_db.to_string_lossy().replace("\\", "/");
 
-    let check_existing: Option<i64> = conn.query_row(
+    // Check if entry already exists within the transaction
+    let check_existing: Option<i64> = tx.query_row(
         "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
         params![target_entity_id, relative_path_for_db_str], |row| row.get(0)
-    ).optional().map_err(|e| format!("DB error check existing import '{}': {}", relative_path_for_db_str, e))?;
+    ).optional().map_err(|e| format!("DB error check existing import '{}': {}", relative_path_for_db_str, e))?; // Use ?
 
     if check_existing.is_some() {
-        fs::remove_dir_all(&final_mod_dest_path).ok(); // Attempt cleanup
+        fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup folder
+        // Return Err to trigger automatic rollback
         return Err(format!("Database entry already exists for '{}'. Aborting.", relative_path_for_db_str));
     }
 
     println!("[import_archive] Adding asset to DB: entity_id={}, name={}, path={}, image={:?}", target_entity_id, mod_name, relative_path_for_db_str, image_filename_for_db);
-    conn.execute(
+    // Execute insert within the transaction
+    tx.execute(
         "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
-            target_entity_id, mod_name.trim(), // Ensure name is trimmed
+            target_entity_id, mod_name.trim(),
             description, relative_path_for_db_str,
             image_filename_for_db, author, category_tag
         ]
     ).map_err(|e| {
-        fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup on DB error
+        // Cleanup folder on DB error, error propagation will handle rollback
+        fs::remove_dir_all(&final_mod_dest_path).ok();
         format!("Failed add imported mod to database: {}", e)
+    })?; // Use ?
+
+    let new_asset_id = tx.last_insert_rowid(); // Get ID from transaction
+    println!("[import_archive] Asset inserted with ID: {}", new_asset_id);
+
+    if let Some(ids) = preset_ids {
+        if !ids.is_empty() {
+            println!("[import_archive] Adding new asset {} to presets: {:?}", new_asset_id, ids);
+            // Prepare statement within the transaction scope
+            let mut insert_preset_stmt = tx.prepare_cached(
+                "INSERT OR IGNORE INTO preset_assets (preset_id, asset_id, is_enabled) VALUES (?1, ?2, ?3)"
+            ).map_err(|e| format!("Failed prepare preset asset insert: {}", e))?; // Use ?
+
+            for preset_id in ids {
+                 insert_preset_stmt.execute(params![preset_id, new_asset_id, 1]) // Enabled = 1
+                    .map_err(|e| format!("Failed insert new asset {} into preset {}: {}", new_asset_id, preset_id, e))?; // Use ?
+            }
+            println!("[import_archive] Finished adding asset {} to presets.", new_asset_id);
+        }
+    }
+
+    // --- Commit Transaction ---
+    tx.commit().map_err(|e| {
+        fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup on commit failure
+        format!("Failed to commit import transaction: {}", e)
     })?;
+    // --- End Commit ---
 
    println!("[import_archive] Import successful for '{}'", mod_name);
-   Ok(()) // Lock released here
+   Ok(())
 }
 
 #[command]
@@ -3233,6 +3397,53 @@ fn open_asset_folder(asset_id: i64, db_state: State<DbState>) -> CmdResult<()> {
     result
 }
 
+#[command]
+fn add_asset_to_presets(asset_id: i64, preset_ids: Vec<i64>, db_state: State<DbState>) -> CmdResult<()> {
+    if preset_ids.is_empty() {
+        return Ok(()); // Nothing to do
+    }
+    println!("[add_asset_to_presets] Adding/Updating asset ID {} in presets: {:?}", asset_id, preset_ids);
+
+    let base_mods_path = get_mods_base_path_from_settings(&db_state)
+        .map_err(|e| format!("Cannot add/update presets (failed to get mods path): {}", e))?;
+
+    let mut conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+
+    // Use a transaction for atomicity
+    let tx = conn_guard.transaction().map_err(|e| format!("Failed to start transaction: {}", e))?;
+
+    // Get current enabled state *once* before the loop
+    let current_is_enabled = match get_current_asset_enabled_state(&tx, asset_id, &base_mods_path) {
+         Ok(enabled) => if enabled { 1 } else { 0 },
+         Err(e) => {
+             eprintln!("[add_asset_to_presets] Error getting current state for asset {}: {}. Aborting.", asset_id, e);
+             return Err(format!("Failed to determine current enabled state for asset {}: {}", asset_id, e));
+         }
+    };
+
+    println!("[add_asset_to_presets] Determined current enabled state for asset {} as: {}", asset_id, current_is_enabled);
+
+    let mut changes_made = 0; // Tracks total rows affected (inserts + updates)
+    { // Scope for the statement
+        // --- *** THE FIX: Use INSERT OR REPLACE *** ---
+        let mut upsert_stmt = tx.prepare_cached(
+            "INSERT OR REPLACE INTO preset_assets (preset_id, asset_id, is_enabled) VALUES (?1, ?2, ?3)"
+        ).map_err(|e| format!("Failed to prepare upsert statement: {}", e))?;
+        // --- *** END FIX *** ---
+
+        for preset_id in preset_ids {
+            let changes = upsert_stmt.execute(params![preset_id, asset_id, current_is_enabled])
+                .map_err(|e| format!("Failed to upsert asset {} into preset {}: {}", asset_id, preset_id, e))?;
+            changes_made += changes;
+        }
+    }
+
+    tx.commit().map_err(|e| format!("Failed to commit transaction: {}", e))?;
+
+    println!("[add_asset_to_presets] Successfully added/updated asset {} in presets. Rows affected: {}", asset_id, changes_made);
+    Ok(())
+}
+
 // --- Main Function ---
 fn main() {
     let context = generate_context!();
@@ -3264,17 +3475,20 @@ fn main() {
             // Core
             get_categories, get_category_entities, get_entities_by_category,
             get_entity_details, get_assets_for_entity, toggle_asset_enabled,
-            get_asset_image_path, open_mods_folder,
+            get_asset_image_path,
+            open_mods_folder,
             // Scan & Count
             scan_mods_directory, get_total_asset_count,
             get_entities_by_category_with_counts,
             // Edit, Import, Delete (Assets)
             update_asset_info, delete_asset, read_binary_file,
-            select_archive_file, analyze_archive, import_archive,
+            select_archive_file, analyze_archive,
+            import_archive,
             read_archive_file_content,
             // Presets
             create_preset, get_presets, get_favorite_presets, apply_preset,
             toggle_preset_favorite, delete_preset, overwrite_preset,
+            add_asset_to_presets,
             // Dashboard & Version
             get_dashboard_stats, get_app_version,
             // Keybinds

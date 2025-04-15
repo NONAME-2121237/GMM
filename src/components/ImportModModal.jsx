@@ -137,7 +137,6 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     const [description, setDescription] = useState('');
     const [author, setAuthor] = useState('');
     const [categoryTag, setCategoryTag] = useState('');
-    // Removed targetEntitySlug state, now derived from selectedEntityOption
     const [selectedInternalRoot, setSelectedInternalRoot] = useState('');
     // Entity Selection State
     const [categories, setCategories] = useState([]);
@@ -146,19 +145,22 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     const [selectedEntityOption, setSelectedEntityOption] = useState(null);
     const [categoryLoading, setCategoryLoading] = useState(true);
     const [entityLoading, setEntityLoading] = useState(false);
+    // --- NEW: Preset Selection State ---
+    const [allPresets, setAllPresets] = useState([]);
+    const [selectedPresets, setSelectedPresets] = useState([]); // Array of { value, label }
+    const [presetsLoading, setPresetsLoading] = useState(true);
+    // ---------------------------------
     // Preview State
     const [previewImageUrl, setPreviewImageUrl] = useState(FALLBACK_MOD_IMAGE_MODAL);
     const [selectedPreviewAbsPath, setSelectedPreviewAbsPath] = useState(null);
     const previewObjectUrlRef = useRef(null);
     const [previewLoading, setPreviewLoading] = useState(false);
-    // --- Add state for pasted image ---
     const [pastedImageFile, setPastedImageFile] = useState(null);
-    // --- End add ---
     // Modal State
     const [isImporting, setIsImporting] = useState(false);
     const [error, setError] = useState('');
 
-    // --- Cleanup Blob URL ---
+    // Cleanup Blob URL
     const cleanupPreviewObjectUrl = useCallback(() => {
         if (previewObjectUrlRef.current) {
             URL.revokeObjectURL(previewObjectUrlRef.current);
@@ -166,38 +168,53 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
         }
     }, []);
 
-    // --- Format data for react-select ---
-    const categoryOptions = useMemo(() => {
-        return categories.map(cat => ({ value: cat.slug, label: cat.name }));
-    }, [categories]);
-    const entityOptions = useMemo(() => {
-        return entities.map(ent => ({ value: ent.slug, label: ent.name }));
-    }, [entities]);
+    // Format data for react-select
+    const categoryOptions = useMemo(() => categories.map(cat => ({ value: cat.slug, label: cat.name })), [categories]);
+    const entityOptions = useMemo(() => entities.map(ent => ({ value: ent.slug, label: ent.name })), [entities]);
+    // --- NEW: Preset Options ---
+    const presetOptions = useMemo(() => allPresets.map(p => ({ value: p.id, label: p.name })), [allPresets]);
+    // -------------------------
 
-    // --- Fetch Categories on Mount ---
+    // Fetch Categories AND Presets on Mount
     useEffect(() => {
         setCategoryLoading(true);
-        invoke('get_categories')
-            .then(setCategories)
-            .catch(err => console.error("Failed fetch categories:", err))
-            .finally(() => setCategoryLoading(false));
+        setPresetsLoading(true); // Start loading presets
+        const fetchInitialData = async () => {
+            try {
+                const [fetchedCategories, fetchedPresets] = await Promise.all([
+                    invoke('get_categories'),
+                    invoke('get_presets') // Fetch presets
+                ]);
+                setCategories(fetchedCategories || []);
+                setAllPresets(fetchedPresets || []); // Store fetched presets
+            } catch (err) {
+                console.error("Failed fetch initial modal data:", err);
+                // Handle error appropriately, maybe set an error state
+            } finally {
+                setCategoryLoading(false);
+                setPresetsLoading(false); // Finish loading presets
+            }
+        };
+        fetchInitialData();
     }, []);
 
-    // --- Set Initial Values & Try Deduction when analysisResult and categories are ready ---
+    // --- Set Initial Values & Try Deduction when analysisResult and categories/presets are ready ---
     useEffect(() => {
         let isMounted = true;
-        if (!analysisResult || categoryLoading) return;
+        // Wait for all initial loading to finish
+        if (!analysisResult || categoryLoading || presetsLoading) return;
 
-        // Reset fields
+        // Reset fields (including presets)
         setDescription('');
         setAuthor('');
         setCategoryTag('');
         setSelectedEntityOption(null);
         setSelectedCategoryOption(null);
+        setSelectedPresets([]); // Reset selected presets
         setError('');
         setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL);
         setSelectedPreviewAbsPath(null);
-        setPastedImageFile(null); // Reset pasted file
+        setPastedImageFile(null);
         cleanupPreviewObjectUrl();
 
         // Set deduced name/author
@@ -211,23 +228,16 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
         const rootToSelect = likelyRoot ? likelyRoot.path : (firstDir ? firstDir.path : '');
         setSelectedInternalRoot(rootToSelect);
 
-        // --- Directly use deduced category slug if available ---
+        // Deduce Category
         if (analysisResult.deduced_category_slug) {
              const deducedCatOption = categoryOptions.find(opt => opt.value === analysisResult.deduced_category_slug);
              if (deducedCatOption) {
-                 console.log("Using deduced category option:", deducedCatOption);
-                 setSelectedCategoryOption(deducedCatOption); // Set react-select option
-                 // Entity deduction will happen in the next effect
-             } else {
-                 console.warn("Deduced category slug not found in category options.");
+                 setSelectedCategoryOption(deducedCatOption);
              }
-        } else {
-             console.log("No category slug deduced by backend.");
         }
 
         // Load detected preview from archive (independent of deduction)
         if (analysisResult.detected_preview_internal_path) {
-            console.log("Detected preview in archive:", analysisResult.detected_preview_internal_path);
             setPreviewLoading(true);
             invoke('read_archive_file_content', {
                 archivePathStr: analysisResult.file_path,
@@ -252,24 +262,23 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
             .catch(err => { console.warn("Failed to load detected preview:", err); if (isMounted) setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL); })
             .finally(() => { if (isMounted) setPreviewLoading(false); });
         } else {
-             setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL); // Ensure fallback if none detected
+            setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL);
         }
 
         return () => { isMounted = false; cleanupPreviewObjectUrl(); }
 
-    }, [analysisResult, categories, categoryOptions, categoryLoading, cleanupPreviewObjectUrl]); 
+    }, [analysisResult, categories, categoryOptions, categoryLoading, presetsLoading, cleanupPreviewObjectUrl]);
 
 
      // Fetch Entities & Set Deduced Entity when selectedCategoryOption changes
      useEffect(() => {
         let isMounted = true;
-        const categorySlug = selectedCategoryOption?.value; // Get slug from selected option
+        const categorySlug = selectedCategoryOption?.value;
 
         if (categorySlug) {
-             setEntities([]); // Clear previous entities
-             setSelectedEntityOption(null); // Reset entity selection
+             setEntities([]);
+             setSelectedEntityOption(null);
              setEntityLoading(true);
-             console.log(`Fetching entities for category: ${categorySlug}`);
              invoke('get_entities_by_category', { categorySlug: categorySlug })
                  .then(loadedEntities => {
                      if (!isMounted) return;
@@ -314,13 +323,11 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                   })
                 .finally(() => { if(isMounted) setEntityLoading(false); });
             } else {
-                // Clear entities if category is deselected
                 setEntities([]);
                 setSelectedEntityOption(null);
                 setEntityLoading(false);
             }
             return () => { isMounted = false; }
-        // Rerun when selectedCategoryOption changes
         }, [selectedCategoryOption, analysisResult?.deduced_category_slug, analysisResult?.deduced_entity_slug, analysisResult?.raw_ini_target]);
 
     const handlePaste = useCallback((event) => {
@@ -424,6 +431,12 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
         }
         // --- End Read ---
 
+        // --- Get selected preset IDs ---
+        const presetIdsToSend = selectedPresets.length > 0
+            ? selectedPresets.map(opt => opt.value)
+            : null;
+        // -----------------------------
+
         try {
             await invoke('import_archive', {
                 archivePathStr: analysisResult.file_path,
@@ -433,10 +446,11 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                 description: description || null,
                 author: author || null,
                 categoryTag: categoryTag || null,
-                // --- Send either data OR path ---
-                imageData: imageDataToSend, // Send data if available
-                selectedPreviewAbsolutePath: imageDataToSend ? null : selectedPreviewAbsPath, // Send path only if no data
-                // --- End Send ---
+                imageData: imageDataToSend,
+                selectedPreviewAbsolutePath: imageDataToSend ? null : selectedPreviewAbsPath,
+                // --- Pass preset IDs ---
+                presetIds: presetIdsToSend,
+                // -----------------------
             });
             onImportSuccess(targetEntitySlugValue, selectedCategoryOption?.value || 'characters');
         } catch (err) {
@@ -582,6 +596,22 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                          <div style={styles.formGroup}>
                              <label style={styles.label} htmlFor="import-description">Description:</label>
                              <textarea id="import-description" value={description} onChange={e => setDescription(e.target.value)} style={styles.textarea} disabled={isImporting}/>
+                         </div>
+                         <div style={styles.formGroup}>
+                             <label style={styles.label} htmlFor="import-presets">Add to Preset(s) (Optional):</label>
+                             <Select
+                                id="import-presets"
+                                isMulti
+                                styles={reactSelectStyles} // Use shared styles
+                                options={presetOptions}
+                                value={selectedPresets}
+                                onChange={setSelectedPresets}
+                                placeholder={presetsLoading ? 'Loading...' : 'Select presets...'}
+                                isLoading={presetsLoading}
+                                isDisabled={isImporting || presetsLoading}
+                                closeMenuOnSelect={false}
+                                menuPosition={'fixed'}
+                             />
                          </div>
                     </div>{/* End Right Panel */}
                 </div> {/* End Content */}
