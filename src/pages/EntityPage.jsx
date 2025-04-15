@@ -24,7 +24,7 @@ const parseDetails = (detailsJson) => {
     }
 };
 
-// Font Awesome icons map
+// Genshin Font Awesome icons map
 const elementIconsFA = {
     Electro: "fas fa-bolt", Pyro: "fas fa-fire", Cryo: "fas fa-snowflake",
     Hydro: "fas fa-tint", Anemo: "fas fa-wind", Geo: "fas fa-mountain",
@@ -35,7 +35,33 @@ const weaponIconsFA = {
     Claymore: "fas fa-gavel", Bow: "fas fa-bow-arrow",
     Catalyst: "fas fa-book-sparkles"
 };
+
+// ZZZ Font Awesome icons map
+const attributeIconsFA = {
+    Physical: "fas fa-fist-raised",
+    Fire: "fas fa-fire-alt",
+    Ice: "fas fa-icicles",
+    Electric: "fas fa-bolt",
+    // Add more ZZZ attributes as needed
+};
+
+const specialtyIconsFA = {
+    Assault: "fas fa-crosshairs",
+    Support: "fas fa-hands-helping",
+    Defense: "fas fa-shield-alt",
+    Healer: "fas fa-first-aid",
+    // Add more ZZZ specialties as needed
+};
+
+const typeIconsFA = {
+    DPS: "fas fa-fire", 
+    Tank: "fas fa-shield-alt",
+    Healer: "fas fa-heart",
+    // Add more common types as needed
+};
+
 const RarityIcon = () => <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i>;
+const TypeIcon = () => <i className="fas fa-tag fa-fw" style={{ color: '#7acbf9' }}></i>;
 const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.jpg';
 
 // Global View Mode Key
@@ -44,7 +70,7 @@ const LIST_ITEM_HEIGHT = 60; // Height including padding/margin
 const GRID_ITEM_WIDTH = 330;
 const GRID_ITEM_HEIGHT = 350; // Includes padding inside the cell
 
-// --- NEW: Sort Options ---
+// --- Sort Options ---
 const SORT_OPTIONS = [
     { value: 'name-asc', label: 'Name (A-Z)' },
     { value: 'name-desc', label: 'Name (Z-A)' },
@@ -71,9 +97,13 @@ function EntityPage() {
     const [deleteError, setDeleteError] = useState('');
     const [viewMode, setViewMode] = useState('grid'); // Default, loaded in useEffect
     const [modSearchTerm, setModSearchTerm] = useState('');
-    // --- NEW: Sort State ---
+    // --- Sort State ---
     const [sortOption, setSortOption] = useState(DEFAULT_SORT_OPTION);
     const sortStorageKey = `entitySort_${entitySlug}`; // Per-entity sort storage
+    // ---------------------
+    // --- Type filtering ---
+    const [activeTypeFilters, setActiveTypeFilters] = useState([]);
+    const [availableTypes, setAvailableTypes] = useState([]);
     // ---------------------
     const [listContainerRef, bounds] = useMeasure();
     const [selectedAssetIds, setSelectedAssetIds] = useState(new Set());
@@ -90,7 +120,7 @@ function EntityPage() {
     const fetchData = useCallback(async () => {
         const savedViewMode = getLocalStorageItem(VIEW_MODE_STORAGE_KEY, 'grid');
         setViewMode(savedViewMode);
-        // --- NEW: Load saved sort option ---
+        // --- Load saved sort option ---
         const savedSort = getLocalStorageItem(sortStorageKey, DEFAULT_SORT_OPTION);
         setSortOption(savedSort);
         // ---------------------------------
@@ -106,6 +136,12 @@ function EntityPage() {
             setEntity(entityDetails);
             const entityAssets = await invoke('get_assets_for_entity', { entitySlug });
             setAssets(entityAssets);
+            
+            // Extract available types for filtering
+            const details = parseDetails(entityDetails.details);
+            if (details?.types && Array.isArray(details.types)) {
+                setAvailableTypes(details.types);
+            }
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error');
             console.error(`[EntityPage ${entitySlug}] Failed to load data:`, errorString);
@@ -120,6 +156,22 @@ function EntityPage() {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    // Toggle type filter
+    const toggleTypeFilter = useCallback((type) => {
+        setActiveTypeFilters(prevFilters => {
+            if (prevFilters.includes(type)) {
+                return prevFilters.filter(t => t !== type);
+            } else {
+                return [...prevFilters, type];
+            }
+        });
+    }, []);
+
+    // Clear all type filters
+    const clearTypeFilters = useCallback(() => {
+        setActiveTypeFilters([]);
+    }, []);
 
     // Callback for ModCard to update state after toggle
     const handleToggleComplete = useCallback((assetId, newIsEnabledState) => {
@@ -247,7 +299,7 @@ function EntityPage() {
         }
     };
 
-    // --- NEW: Sort Change Handler ---
+    // --- Sort Change Handler ---
     const handleSortChange = useCallback((event) => {
         const newSortOption = event.target.value;
         setSortOption(newSortOption);
@@ -260,13 +312,37 @@ function EntityPage() {
         let tempAssets = [...assets]; // Create shallow copy
 
         // Filtering Logic
-        if (modSearchTerm) {
-            const lowerSearchTerm = modSearchTerm.toLowerCase();
-            tempAssets = tempAssets.filter(asset =>
-                asset.name.toLowerCase().includes(lowerSearchTerm) ||
-                (asset.author && asset.author.toLowerCase().includes(lowerSearchTerm)) ||
-                (asset.category_tag && asset.category_tag.toLowerCase().includes(lowerSearchTerm))
-            );
+        if (modSearchTerm || activeTypeFilters.length > 0) {
+            tempAssets = tempAssets.filter(asset => {
+                // Text search filtering
+                let matchesSearch = true;
+                if (modSearchTerm) {
+                    const lowerSearchTerm = modSearchTerm.toLowerCase();
+                    matchesSearch = 
+                        asset.name.toLowerCase().includes(lowerSearchTerm) ||
+                        (asset.author && asset.author.toLowerCase().includes(lowerSearchTerm)) ||
+                        (asset.category_tag && asset.category_tag.toLowerCase().includes(lowerSearchTerm));
+                }
+                
+                // Type filtering (only apply if there are active filters)
+                let matchesTypeFilter = true;
+                if (activeTypeFilters.length > 0) {
+                    // Parse the asset's details to check types
+                    const assetDetails = parseDetails(asset.details);
+                    if (assetDetails.types && Array.isArray(assetDetails.types)) {
+                        // Check if any of the asset's types match any of the active filters
+                        // This is an OR relationship between filters
+                        matchesTypeFilter = assetDetails.types.some(type => 
+                            activeTypeFilters.includes(type)
+                        );
+                    } else {
+                        // If the asset doesn't have types, it won't match any type filter
+                        matchesTypeFilter = false;
+                    }
+                }
+                
+                return matchesSearch && matchesTypeFilter;
+            });
         }
 
         // Sorting Logic
@@ -290,7 +366,7 @@ function EntityPage() {
         });
 
         return tempAssets;
-    }, [assets, modSearchTerm, sortOption]); // Add sortOption dependency
+    }, [assets, modSearchTerm, sortOption, activeTypeFilters]); // Added activeTypeFilters dependency
     // --- END UPDATED useMemo ---
 
     // --- Bulk Action Handlers ---
@@ -515,10 +591,26 @@ function EntityPage() {
 
     // Details parsing and avatar URL
     const details = parseDetails(entity.details);
+    
+    // Determine character type (Genshin or ZZZ)
     const element = details?.element;
     const elementIconClass = element ? (elementIconsFA[element] || 'fas fa-question-circle') : null;
     const weapon = details?.weapon;
     const weaponIconClass = weapon ? (weaponIconsFA[weapon] || 'fas fa-question-circle') : null;
+    
+    // ZZZ-specific properties
+    const attribute = details?.attribute;
+    const attributeIconClass = attribute ? (attributeIconsFA[attribute] || 'fas fa-atom') : null;
+    const specialty = details?.specialty;
+    const specialtyIconClass = specialty ? (specialtyIconsFA[specialty] || 'fas fa-user-tag') : null;
+    const types = details?.types || [];
+    const rank = details?.rank;
+    
+    // Determine if this is a ZZZ character
+    const isZZZ = attribute || specialty || rank;
+
+    console.log(isZZZ ? `ZZZ Character detected: ${entity.name}` : `Genshin Character detected: ${entity.name}`);
+    
     const avatarUrl = entity.base_image ? `/images/entities/${entitySlug}_base.jpg` : DEFAULT_ENTITY_PLACEHOLDER_IMAGE;
     const handleAvatarError = (e) => {
         if (e.target.src !== DEFAULT_ENTITY_PLACEHOLDER_IMAGE) {
@@ -537,7 +629,7 @@ function EntityPage() {
 
 
     return (
-        <div className="character-page fadeIn" onContextMenu={(e) => {
+        <div className={`character-page fadeIn ${isZZZ ? 'zzz-character' : 'genshin-character'}`} onContextMenu={(e) => {
             // If the click isn't on a card (which would stop propagation), close the menu
              if (contextMenuVisible && !e.target.closest('.mod-card-grid, .mod-card-list')) {
                  e.preventDefault(); // Prevent default browser menu on page background
@@ -571,16 +663,66 @@ function EntityPage() {
                 <div className="character-info">
                     <h2 className="character-name">
                         {entity.name}
-                        {elementIconClass &&
+                        {/* Display element icon for Genshin characters */}
+                        {elementIconClass && !isZZZ &&
                             <span className="element-icon" style={{ color: `var(--${element?.toLowerCase()})` || 'var(--primary)' }} title={element}>
                                 <i className={`${elementIconClass} fa-fw`}></i>
                             </span>
                         }
+                        {/* Display attribute icon for ZZZ characters */}
+                        {attributeIconClass && isZZZ &&
+                            <span className="attribute-icon" style={{ color: `var(--zzz-${attribute?.toLowerCase()})` || 'var(--primary)' }} title={`Attribute: ${attribute}`}>
+                                <i className={`${attributeIconClass} fa-fw`}></i>
+                            </span>
+                        }
                     </h2>
                     <div className="character-details">
-                        {details?.rarity && <div className="character-detail"><RarityIcon /> {details.rarity} Star</div>}
-                        {element && <div className="character-detail"><i className={`${elementIconClass} fa-fw`}></i> {element}</div>}
-                        {weapon && <div className="character-detail"><i className={`${weaponIconClass} fa-fw`}></i> {weapon}</div>}
+                        {/* Common details for both character types */}
+                        {details?.rarity && 
+                            <div className="character-detail">
+                                <RarityIcon /> {details.rarity} Star{details.rarity !== 1 ? 's' : ''}
+                            </div>
+                        }
+                        
+                        {/* Genshin-specific details */}
+                        {!isZZZ && element && 
+                            <div className="character-detail">
+                                <i className={`${elementIconClass} fa-fw`}></i> {element}
+                            </div>
+                        }
+                        {!isZZZ && weapon && 
+                            <div className="character-detail">
+                                <i className={`${weaponIconClass} fa-fw`}></i> {weapon}
+                            </div>
+                        }
+                        
+                        {/* ZZZ-specific details */}
+                        {isZZZ && attribute && 
+                            <div className="character-detail">
+                                <i className={`${attributeIconClass} fa-fw`}></i> {attribute}
+                            </div>
+                        }
+                        {isZZZ && specialty && 
+                            <div className="character-detail">
+                                <i className={`${specialtyIconClass} fa-fw`}></i> {specialty}
+                            </div>
+                        }
+                        {isZZZ && rank && 
+                            <div className="character-detail">
+                                <i className="fas fa-medal fa-fw" style={{ color: '#ffaa33' }}></i> Rank {rank}
+                            </div>
+                        }
+                        
+                        {/* Display types for ZZZ characters */}
+                        {isZZZ && types.length > 0 && (
+                            <div className="character-types">
+                                {types.map((type, index) => (
+                                    <span key={index} className="character-type-tag">
+                                        <TypeIcon /> {type}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
                     </div>
                     {entity.description ? (
                         <p className="character-description">{entity.description}</p>
@@ -613,6 +755,7 @@ function EntityPage() {
                               />
                          )}
                     </div>
+                    
                     {/* --- Right Aligned Group (Bulk Actions, Sort, Search, View Mode) --- */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginLeft: 'auto' }}>
                          {viewMode === 'list' && selectedAssetIds.size > 0 && (
@@ -625,7 +768,35 @@ function EntityPage() {
                                  </button>
                              </div>
                          )}
-                        {/* --- NEW: Sort Dropdown --- */}
+                         
+                        {/* --- Type Filters (for ZZZ characters) --- */}
+                        {isZZZ && types.length > 0 && (
+                            <div className="type-filters-container">
+                                <div className="type-filters">
+                                    {types.map((type) => (
+                                        <button
+                                            key={type}
+                                            className={`type-filter-btn ${activeTypeFilters.includes(type) ? 'active' : ''}`}
+                                            onClick={() => toggleTypeFilter(type)}
+                                            title={`Filter by ${type}`}
+                                        >
+                                            <i className={typeIconsFA[type] || "fas fa-tag"}></i> {type}
+                                        </button>
+                                    ))}
+                                    {activeTypeFilters.length > 0 && (
+                                        <button 
+                                            className="type-filter-clear" 
+                                            onClick={clearTypeFilters}
+                                            title="Clear all type filters"
+                                        >
+                                            <i className="fas fa-times"></i> Clear
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* --- Sort Dropdown --- */}
                         <div className="sort-dropdown-container">
                             <label htmlFor="mod-sort-select" style={sortStyles.sortLabel}>Sort by:</label>
                             <select id="mod-sort-select" value={sortOption} onChange={handleSortChange} style={sortStyles.sortSelect} aria-label="Sort mods">
@@ -717,7 +888,7 @@ function EntityPage() {
     );
 }
 
-// --- NEW: Styles for sort dropdown ---
+// --- Styles for sort dropdown and type filters ---
 const sortStyles = {
     sortLabel: {
         fontSize: '13px',
@@ -737,6 +908,6 @@ const sortStyles = {
         height: '34px', // Match height with filter buttons roughly
     },
 };
-// --- End new styles ---
+// --- End styles ---
 
 export default EntityPage;
