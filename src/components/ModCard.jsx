@@ -29,9 +29,8 @@ function ModCard({
 }) {
     // State
     const isEnabled = asset.is_enabled;
-    // --- Store clean path separately ---
     const [cleanRelativePath, setCleanRelativePath] = useState('');
-    // -------------------------------
+    const [imageUrl, setImageUrl] = useState(FALLBACK_MOD_IMAGE); // State holds the URL string
     const folderNameOnDisk = asset.folder_name; // Reflects disk state
     const [isToggling, setIsToggling] = useState(false);
     const [imageBgCss, setImageBgCss] = useState(FALLBACK_MOD_IMAGE_BG); // For grid view background
@@ -145,84 +144,67 @@ function ModCard({
          onSelectChange(asset.id, e.target.checked);
     }, [asset.id, onSelectChange]);
 
-    // --- MODIFIED Image Loading Effect ---
+    // --- Image Loading Effect ---
     useEffect(() => {
         let isMounted = true;
-        setImageBgCss(FALLBACK_MOD_IMAGE_BG); // Reset on asset change
+        // Reset state upfront
+        setImageUrl(FALLBACK_MOD_IMAGE);
         setImageError(false);
         setImageLoading(false);
-        cleanupObjectUrl(); // Clean up previous blob URL
 
-        // Only load if in grid view and image filename exists
+        // console.log(`[ModCard ${asset.id}] Running Image Effect. ViewMode: ${viewMode}, Image Filename: ${asset.image_filename}`);
+
+        // Guard condition: Only run for grid view AND if image filename exists
         if (viewMode !== 'grid' || !asset.image_filename) {
-            return;
+            // console.log(`[ModCard ${asset.id}] Skipping image load. ViewMode: ${viewMode}, Image Filename: ${asset.image_filename}`);
+            return; // Exit early
         }
 
-        setImageLoading(true);
-        console.log(`[ModCard ${asset.id}] Image Effect: Attempting load for ${asset.image_filename}`);
+        setImageLoading(true); // Indicate loading process start
+        // console.log(`[ModCard ${asset.id}] Image Effect: Getting image path for ${asset.image_filename}`);
 
-        // Call the MODIFIED backend command using assetId
+        // Get the absolute path from the optimized backend command
         invoke('get_asset_image_path', { assetId: asset.id })
             .then(filePath => {
-                if (!isMounted) return Promise.reject(new Error("Component unmounted"));
-                if (!filePath) throw new Error("Backend returned empty path.");
-                console.log(`[ModCard ${asset.id}] Got absolute path: ${filePath}`);
-                return invoke('read_binary_file', { path: filePath });
-            })
-            .then(fileData => {
-                 if (!isMounted || !fileData) return Promise.reject(new Error("Component unmounted or no file data"));
-                 console.log(`[ModCard ${asset.id}] Read binary data (length: ${fileData.length})`);
-                 try {
-                    const extension = asset.image_filename.split('.').pop().toLowerCase();
-                    let mimeType = 'image/png';
-                    if (['jpg', 'jpeg'].includes(extension)) mimeType = 'image/jpeg';
-                    else if (extension === 'gif') mimeType = 'image/gif';
-                    else if (extension === 'webp') mimeType = 'image/webp';
-                    const blob = new Blob([new Uint8Array(fileData)], { type: mimeType });
-                    const url = URL.createObjectURL(blob);
-                    objectUrlRef.current = url;
-                    if (isMounted) {
-                        setImageBgCss(`url('${url}')`);
-                        setImageError(false);
-                        console.log(`[ModCard ${asset.id}] Created Object URL: ${url}`);
-                    } else {
-                         URL.revokeObjectURL(url);
-                         objectUrlRef.current = null;
-                         console.log(`[ModCard ${asset.id}] Component unmounted before setting Object URL state, revoked.`);
-                    }
-                 } catch (blobError) {
-                    console.error(`[ModCard ${asset.id}] Error creating blob/URL:`, blobError);
-                     if(isMounted) {
-                        setImageBgCss(FALLBACK_MOD_IMAGE_BG);
-                        setImageError(true);
-                     }
-                 }
+                if (!isMounted) return; // Check if component is still mounted
+                if (!filePath) {
+                    console.log(`[ModCard ${asset.id}] Backend returned no path for image.`);
+                    throw new Error("No image path found."); // Trigger catch block
+                }
+
+                // console.log(`[ModCard ${asset.id}] Got absolute path: ${filePath}`);
+                // Convert the absolute path to a Tauri asset URL
+                const assetUrl = convertFileSrc(filePath);
+                // console.log(`[ModCard ${asset.id}] Generated asset URL: ${assetUrl}`);
+
+                if (isMounted) {
+                    // Set the state to the asset:// URL. The browser/Tauri webview handles loading this.
+                    setImageUrl(assetUrl);
+                    setImageError(false);
+                }
             })
             .catch(err => {
                  if (isMounted) {
-                    // Don't log "Folder not found" or "Image file not found" as errors if it's expected
                     const errorMsg = String(err.message || err);
-                    if (!errorMsg.includes('not found')) {
-                        console.warn(`[ModCard ${asset.id}] Failed to get/read image ${asset.image_filename}:`, errorMsg);
-                    } else {
-                        console.log(`[ModCard ${asset.id}] Image/folder not found for ${asset.image_filename}.`);
+                    if (!errorMsg.includes('not found') && !errorMsg.includes('No image path found')) {
+                        console.warn(`[ModCard ${asset.id}] Failed to get image path or convert:`, errorMsg);
                     }
-                    setImageBgCss(FALLBACK_MOD_IMAGE_BG);
-                    setImageError(true); // Still indicate an error state visually if needed
+                    setImageUrl(FALLBACK_MOD_IMAGE); // Revert to fallback URL on error
+                    setImageError(true);
                  }
             })
             .finally(() => {
                 if (isMounted) {
-                    setImageLoading(false);
+                    setImageLoading(false); // Mark loading as complete
                 }
             });
+
+        // No cleanup needed for convertFileSrc URLs
         return () => {
             isMounted = false;
-            cleanupObjectUrl();
         };
-    // Dependencies: asset.id and asset.image_filename trigger the path/read, viewMode controls execution
-    }, [asset.id, asset.image_filename, viewMode, cleanupObjectUrl]);
-    // --- END MODIFIED Effect ---
+    // Dependencies: Rerun only if ID, filename, or viewMode changes.
+    }, [asset.id, asset.image_filename, viewMode]);
 
     // Style for Image Container (only used in grid mode)
     const imageContainerStyle = useMemo(() => ({
@@ -230,7 +212,7 @@ function ModCard({
         height: '120px',
         width: '100%',
         backgroundColor: 'rgba(0,0,0,0.2)',
-        backgroundImage: imageLoading ? FALLBACK_MOD_IMAGE_BG : imageBgCss,
+        backgroundImage: `url('${imageUrl}')`, // Use the URL directly
         backgroundSize: 'cover',
         backgroundPosition: 'center center',
         backgroundRepeat: 'no-repeat',
@@ -240,7 +222,8 @@ function ModCard({
         alignItems: 'center',
         overflow: 'hidden',
         position: 'relative',
-    }), [imageLoading, imageBgCss]);
+        transition: 'background-image 0.1s ease-in-out', // Faster transition
+    }), [imageUrl]); // Only depends on the final URL
 
 
     // --- RENDER ---
@@ -287,7 +270,7 @@ function ModCard({
             <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Path: ${cleanRelativePath}`} style={{ height: '100%' }} onContextMenu={onContextMenu}>
                 <div style={imageContainerStyle}>
                     {imageLoading && ( <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i> )}
-                    {!imageLoading && imageBgCss === FALLBACK_MOD_IMAGE_BG && (
+                    {!imageLoading && imageUrl === FALLBACK_MOD_IMAGE && (
                         <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', padding: '5px', background: 'rgba(0,0,0,0.3)', borderRadius: '3px' }}>
                             {imageError ? 'Preview failed' : 'No preview'}
                         </span>
@@ -330,4 +313,4 @@ const gridButtonStyles = {
     addPreset: { ...gridButtonBase } // Style for the add to preset button
 };
 
-export default ModCard;
+export default React.memo(ModCard);

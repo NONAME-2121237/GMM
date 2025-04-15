@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Genshin Mod Manager",
-    "version": "1.5.0"
+    "version": "1.6.0"
   },
   "tauri": {
     "allowlist": {
@@ -31,7 +31,11 @@
       },
       "window": { "all": true },
       "dialog": { "all": true },
-      "process": { "exit": true }
+      "process": { "exit": true },
+      "protocol": {
+        "asset": true,
+        "assetScope": ["**"]
+      }
     },
     "bundle": {
       "active": true,
