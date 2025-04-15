@@ -1,0 +1,47 @@
+# ===================
+# ==== Characters ====
+# ===================
+[characters]
+name = "Characters"
+entities = [
+]
+
+# ===================
+# ====   NPCs    ====
+# ===================
+[npcs]
+name = "NPCs"
+entities = [
+]
+
+# ===================
+# ====  Enemies  ====
+# ===================
+[enemies]
+name = "Enemies"
+entities = [
+]
+
+# ===================
+# ====  Weapons  ====
+# ===================
+[weapons]
+name = "Weapons"
+entities = [
+]
+
+# ===================
+# ====  Objects  ====
+# ===================
+[objects]
+name = "Objects"
+entities = [
+]
+
+# ===================
+# ====    UI    ====
+# ===================
+[ui]
+name = "UI"
+entities = [
+]

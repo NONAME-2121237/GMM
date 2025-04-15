@@ -32,6 +32,7 @@ function Sidebar() {
     const [isLaunching, setIsLaunching] = useState(false);
     const [isDraggingOver, setIsDraggingOver] = useState(false);
     const [dropError, setDropError] = useState('');
+    const [activeGameDisplay, setActiveGameDisplay] = useState('');
 
     const handleDragOver = useCallback((event) => {
         event.preventDefault(); // Necessary to allow drop
@@ -80,6 +81,15 @@ function Sidebar() {
         console.log("Browser onDrop event triggered.");
         processDroppedFiles(event.dataTransfer.files);
     }, [processDroppedFiles]); // processDroppedFiles is stable
+
+    useEffect(() => {
+        invoke('get_active_game')
+            .then(gameName => setActiveGameDisplay(gameName || 'GAME')) // Use fallback
+            .catch(err => {
+                console.error("Sidebar: Failed to get active game", err);
+                setActiveGameDisplay('GAME'); // Fallback on error
+            });
+    }, []); // Run only once on mount
 
     // --- Tauri Window Drop Listener ---
     useEffect(() => {
@@ -310,7 +320,8 @@ function Sidebar() {
         >
             <div className="logo">
                  <svg width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="var(--primary)" /><stop offset="100%" stopColor="var(--accent)" /></linearGradient></defs><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="url(#logo-gradient)"></path></svg>
-                 <span>Genshin Modder</span>
+                 {/* Use state for the game name, provide fallback */}
+                 <span>{activeGameDisplay ? activeGameDisplay.toUpperCase() : 'GAME'} Modder</span>
             </div>
 
             {/* Update disabled states */}

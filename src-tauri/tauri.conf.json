@@ -7,8 +7,8 @@
     "withGlobalTauri": true
   },
   "package": {
-    "productName": "Genshin Mod Manager",
-    "version": "1.6.0"
+    "productName": "GMM",
+    "version": "2.0.0"
   },
   "tauri": {
     "allowlist": {
@@ -48,6 +48,9 @@
         "icons/icon.ico"
       ],
       "targets": ["msi", "updater"],
+      "resources": [
+         "definitions/"
+       ],
       "windows": {
          "certificateThumbprint": null,
          "digestAlgorithm": "sha256",
@@ -60,7 +63,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Genshin Mod Manager",
+        "title": "GMM - A Tauri Mod Manager for GIMI",
         "width": 1650,
         "height": 900,
         "minWidth": 900,

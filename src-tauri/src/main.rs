@@ -7,19 +7,19 @@
 
 use walkdir::WalkDir;
 use ini::Ini;
-use std::collections::HashMap;
+use tauri::PathResolver;
 use regex::Regex;
 use lazy_static::lazy_static;
-use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params};
+use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params, OpenFlags};
 use serde::{Serialize, Deserialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufRead, Read, Seek, Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, Arc};
 use tauri::{
     command, generate_context, generate_handler, AppHandle, Manager, State, api::dialog,
-    api::process::Command, Window
+    api::process::Command, Window, api::process::restart
 };
 use thiserror::Error;
 use once_cell::sync::Lazy;
@@ -138,6 +138,19 @@ struct ScanProgress {
   message: String,
 }
 
+const APP_CONFIG_FILENAME: &str = "app_config.json";
+const DEFAULT_GAME_SLUG: &str = "genshin";
+const PREDEFINED_GAMES: [&str; 4] = ["genshin", "hsr", "wuwa", "zzz"];
+const DB_INTERNAL_GAME_SLUG_KEY: &str = "database_game_slug";
+const DB_FILENAME_PREFIX: &str = "app_data_"; // Prefix for archived game dbs
+const ACTIVE_DB_FILENAME: &str = "app_data.sqlite";
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct AppConfig {
+    last_active_game: String,
+    requested_active_game: String,
+}
+
 // --- Event Names ---
 const SCAN_PROGRESS_EVENT: &str = "scan://progress";
 const SCAN_COMPLETE_EVENT: &str = "scan://complete";
@@ -240,6 +253,23 @@ struct ArchiveAnalysisResult {
 }
 
 // --- Helper Functions for Deduction ---
+
+fn get_internal_db_slug(db_path: &PathBuf) -> Result<Option<String>, AppError> {
+    if !db_path.exists() {
+        return Ok(None);
+    }
+    // Open read-only first to minimize locking issues if possible
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = Connection::open_with_flags(db_path, flags)
+        .or_else(|e| {
+             eprintln!("Failed to open DB read-only ({}), trying read-write: {}", db_path.display(), e);
+             // Fallback to read-write if read-only fails (e.g., during schema creation?)
+             Connection::open(db_path)
+        })?;
+
+    // Use the existing helper function
+    get_setting_value(&conn, DB_INTERNAL_GAME_SLUG_KEY)
+}
 
 fn find_asset_ini_paths(conn: &Connection, asset_id: i64, base_mods_path: &PathBuf) -> Result<Vec<PathBuf>, AppError> {
     println!("[find_asset_ini_paths] CALLED for asset ID: {}", asset_id);
@@ -597,6 +627,33 @@ fn find_preview_image(dir_path: &PathBuf) -> Option<String> {
     None
 }
 
+fn get_app_config_path(app_handle: &AppHandle) -> Result<PathBuf, AppError> {
+    get_app_data_dir(app_handle).map(|dir| dir.join(APP_CONFIG_FILENAME))
+}
+
+fn read_app_config(app_handle: &AppHandle) -> Result<AppConfig, AppError> {
+    let config_path = get_app_config_path(app_handle)?;
+    if !config_path.exists() {
+        println!("App config not found, creating default.");
+        // Default has last and requested as the same initially
+        let default_config = AppConfig {
+            last_active_game: DEFAULT_GAME_SLUG.to_string(),
+            requested_active_game: DEFAULT_GAME_SLUG.to_string(),
+        };
+        write_app_config(app_handle, &default_config)?;
+        return Ok(default_config);
+    }
+
+    let config_content = fs::read_to_string(&config_path)?;
+    serde_json::from_str(&config_content).map_err(AppError::Json)
+}
+
+fn write_app_config(app_handle: &AppHandle, config: &AppConfig) -> Result<(), AppError> {
+    let config_path = get_app_config_path(app_handle)?;
+    let config_content = serde_json::to_string_pretty(config)?;
+    fs::write(&config_path, config_content).map_err(AppError::Io)
+}
+
 // --- Helper Function to get current enabled state (reusable) ---
 fn get_current_asset_enabled_state(conn: &Connection, asset_id: i64, base_mods_path: &PathBuf) -> Result<bool, AppError> {
     let asset_info = get_asset_location_info(conn, asset_id)?; // Reuse existing helper
@@ -616,116 +673,103 @@ fn get_current_asset_enabled_state(conn: &Connection, asset_id: i64, base_mods_p
 }
 
 // --- Database Initialization (Result type uses AppError internally) ---
-fn initialize_database(app_handle: &AppHandle) -> Result<(), AppError> {
+fn initialize_database(app_handle: &AppHandle, active_game_slug: &str) -> Result<Connection, AppError> {
     let data_dir = get_app_data_dir(app_handle)?;
-    if !data_dir.exists() {
-        fs::create_dir_all(&data_dir)?;
-    }
-    let db_path = data_dir.join(DB_NAME);
-    println!("Database path: {}", db_path.display());
-    let conn = Connection::open(&db_path)?;
+    let db_path = data_dir.join(ACTIVE_DB_FILENAME);
+    println!("Initializing database for game '{}' at: {}", active_game_slug, db_path.display());
+    let needs_schema_setup = !db_path.exists();
 
-    // Enable Foreign Keys if not already default
+    let conn = Connection::open(&db_path)?;
     conn.execute("PRAGMA foreign_keys = ON;", [])?;
 
-    // --- Create/Verify Tables ---
-    conn.execute_batch(
-        "BEGIN;
-         CREATE TABLE IF NOT EXISTS categories ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, slug TEXT UNIQUE NOT NULL );
-         CREATE TABLE IF NOT EXISTS entities ( id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL, description TEXT, details TEXT, base_image TEXT, FOREIGN KEY (category_id) REFERENCES categories (id) );
-         CREATE TABLE IF NOT EXISTS assets ( id INTEGER PRIMARY KEY AUTOINCREMENT, entity_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, folder_name TEXT NOT NULL, image_filename TEXT, author TEXT, category_tag TEXT, FOREIGN KEY (entity_id) REFERENCES entities (id) );
-         CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL );
+    if needs_schema_setup {
+        println!("Performing initial schema setup for {}", db_path.display());
+        // --- Create Tables (Same as before) ---
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE categories ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, slug TEXT UNIQUE NOT NULL );
+             CREATE TABLE entities ( id INTEGER PRIMARY KEY AUTOINCREMENT, category_id INTEGER NOT NULL, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL, description TEXT, details TEXT, base_image TEXT, FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE );
+             CREATE TABLE assets ( id INTEGER PRIMARY KEY AUTOINCREMENT, entity_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, folder_name TEXT NOT NULL UNIQUE, image_filename TEXT, author TEXT, category_tag TEXT, FOREIGN KEY (entity_id) REFERENCES entities (id) ON DELETE CASCADE );
+             CREATE TABLE settings ( key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL );
+             CREATE TABLE presets ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, is_favorite INTEGER NOT NULL DEFAULT 0 );
+             CREATE TABLE preset_assets ( preset_id INTEGER NOT NULL, asset_id INTEGER NOT NULL, is_enabled INTEGER NOT NULL, PRIMARY KEY (preset_id, asset_id), FOREIGN KEY (preset_id) REFERENCES presets(id) ON DELETE CASCADE, FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE );
+             COMMIT;",
+        )?;
+        println!("Database tables created for {}.", db_path.display());
 
-         -- Preset Tables --
-         CREATE TABLE IF NOT EXISTS presets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            is_favorite INTEGER NOT NULL DEFAULT 0 -- 0=false, 1=true
-         );
-         CREATE TABLE IF NOT EXISTS preset_assets (
-            preset_id INTEGER NOT NULL,
-            asset_id INTEGER NOT NULL,
-            is_enabled INTEGER NOT NULL, -- 0=false, 1=true
-            PRIMARY KEY (preset_id, asset_id),
-            FOREIGN KEY (preset_id) REFERENCES presets(id) ON DELETE CASCADE, -- Delete entries when preset is deleted
-            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE   -- Delete entries if asset is deleted (optional but good practice)
-         );
-         COMMIT;",
-    )?;
-    println!("Database tables verified/created (including presets).");
+        // --- Load Definitions ---
+        let definition_resource_path = format!("definitions/{}.toml", active_game_slug);
+        println!("Attempting to load definitions from resource: {}", definition_resource_path);
 
-    // --- Load and Parse Definitions ---
-    println!("Loading base entity definitions...");
-    // Embed the TOML file content at compile time
-    let definitions_toml_str = include_str!("../definitions/base_entities.toml");
-    let definitions: Definitions = toml::from_str(definitions_toml_str)
-        .map_err(|e| AppError::Config(format!("Failed to parse base_entities.toml: {}", e)))?;
-    println!("Loaded {} categories from definitions.", definitions.len());
+        let definitions: Definitions = match app_handle.path_resolver().resolve_resource(&definition_resource_path) {
+            Some(path) => {
+                println!("Found definition file at: {}", path.display());
+                match fs::read_to_string(&path) {
+                    Ok(toml_content) => {
+                        match toml::from_str(&toml_content) {
+                            Ok(defs) => {
+                                println!("Successfully parsed definitions for '{}'.", active_game_slug);
+                                defs
+                            },
+                            Err(e) => {
+                                eprintln!("ERROR: Failed to parse TOML from {}: {}. Using empty definitions.", path.display(), e);
+                                HashMap::new() // Use empty definitions on parse error
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR: Failed to read definition file {}: {}. Using empty definitions.", path.display(), e);
+                        HashMap::new() // Use empty definitions on read error
+                    }
+                }
+            },
+            None => {
+                eprintln!("ERROR: Definition file resource '{}' not found. Using empty definitions.", definition_resource_path);
+                HashMap::new() // Use empty definitions if file not found
+            }
+        };
 
+        println!("Loaded {} categories from definitions for '{}'.", definitions.len(), active_game_slug);
 
-    // --- Populate Database from Definitions ---
-    println!("Populating database from definitions...");
-    let mut categories_processed = 0;
-    let mut entities_processed = 0;
+        // --- Populate DB from loaded definitions (Same logic as before) ---
+        if !definitions.is_empty() {
+             for (category_slug, category_def) in definitions.iter() {
+                 // Wrap inserts in transaction for potential rollback if needed later
+                 conn.execute( "INSERT OR IGNORE INTO categories (name, slug) VALUES (?1, ?2)", params![category_def.name, category_slug],)?;
+                 let category_id: i64 = conn.query_row( "SELECT id FROM categories WHERE slug = ?1", params![category_slug], |row| row.get(0), )?;
 
-    for (category_slug, category_def) in definitions.iter() {
-        // 1. Insert Category (Ignore if exists)
-        let cat_insert_res = conn.execute(
-            "INSERT OR IGNORE INTO categories (name, slug) VALUES (?1, ?2)",
-            params![category_def.name, category_slug],
-        );
-        if let Err(e) = cat_insert_res {
-             eprintln!("Error inserting category '{}': {}", category_slug, e);
-             continue; // Skip this category if insert fails critically
-        }
-        categories_processed += 1;
+                 let other_slug = format!("{}{}", category_slug, OTHER_ENTITY_SUFFIX);
+                 conn.execute( "INSERT OR IGNORE INTO entities (category_id, name, slug, description, details, base_image) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![ category_id, OTHER_ENTITY_NAME, other_slug, "Uncategorized assets.", "{}", None::<String> ] )?;
 
-        // 2. Get Category ID (must exist now)
-        let category_id: i64 = conn.query_row(
-            "SELECT id FROM categories WHERE slug = ?1",
-            params![category_slug],
-            |row| row.get(0),
-        ).map_err(|e| AppError::Config(format!("Failed to get category ID for '{}': {}", category_slug, e)))?;
-
-        // 3. Ensure "Other" Entity for this Category
-        let other_slug = format!("{}{}", category_slug, OTHER_ENTITY_SUFFIX);
-        conn.execute(
-            "INSERT OR IGNORE INTO entities (category_id, name, slug, description, details, base_image)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![ category_id, OTHER_ENTITY_NAME, other_slug, "Uncategorized assets.", "{}", None::<String> ]
-        ).map_err(|e| AppError::Config(format!("Failed to insert 'Other' entity for category '{}': {}", category_slug, e)))?;
-
-
-        // 4. Insert Entities defined in TOML (Ignore if exists based on slug)
-        for entity_def in category_def.entities.iter() {
-            let ent_insert_res = conn.execute(
-                 "INSERT OR IGNORE INTO entities (category_id, name, slug, description, details, base_image)
-                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                 params![
-                     category_id,
-                     entity_def.name,
-                     entity_def.slug,
-                     entity_def.description,
-                     entity_def.details.as_ref().map(|s| s.to_string()).unwrap_or("{}".to_string()), // Default to empty JSON string if None
-                     entity_def.base_image,
-                 ]
-            );
-             if let Err(e) = ent_insert_res {
-                 eprintln!("Error inserting entity '{}' for category '{}': {}", entity_def.slug, category_slug, e);
-                 // Continue to next entity even if one fails
-             } else {
-                  entities_processed += 1; // Count attempted inserts
+                 for entity_def in category_def.entities.iter() {
+                     conn.execute( "INSERT OR IGNORE INTO entities (category_id, name, slug, description, details, base_image) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![ category_id, entity_def.name, entity_def.slug, entity_def.description, entity_def.details.as_ref().map(|s| s.to_string()).unwrap_or("{}".to_string()), entity_def.base_image, ] )?;
+                 }
              }
+             println!("Populated database with definitions for '{}'.", active_game_slug);
+        } else {
+             println!("Skipping definition population as no definitions were loaded for '{}'.", active_game_slug);
+        }
+        // --- End Definition Population ---
+
+        println!("Storing internal game slug '{}' in the new database.", active_game_slug);
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params![DB_INTERNAL_GAME_SLUG_KEY, active_game_slug],
+        )?;
+
+    } else {
+        println!("Database file {} already exists.", db_path.display());
+        // Optional: Verify internal slug matches expected active_game_slug?
+        match get_internal_db_slug(&db_path) {
+            Ok(Some(internal_slug)) if internal_slug != active_game_slug => {
+                 eprintln!("WARNING: Existing database {} contains slug '{}' but expected '{}'. Check startup logic.", db_path.display(), internal_slug, active_game_slug);
+                 // We proceed, assuming the startup logic handled the rename correctly.
+            },
+            Err(e) => eprintln!("Warning: Could not read internal slug from existing DB {}: {}", db_path.display(), e),
+            _ => {} // Slug matches or doesn't exist (old DB?)
         }
     }
-    println!("Finished populating. Processed {} categories and {} entities from definitions.", categories_processed, entities_processed);
-
-    // --- Finalize DB Connection Setup for State ---
-    let mut db_lock = DB_CONNECTION.lock().expect("Failed to lock DB mutex during init");
-    *db_lock = Ok(conn);
-
-    println!("Database initialization and definition sync complete.");
-    Ok(())
+    Ok(conn)
 }
 
 // --- Utility Functions ---
@@ -3444,31 +3488,238 @@ fn add_asset_to_presets(asset_id: i64, preset_ids: Vec<i64>, db_state: State<DbS
     Ok(())
 }
 
+#[command]
+fn get_available_games(app_handle: AppHandle) -> CmdResult<Vec<String>> {
+    let data_dir = get_app_data_dir(&app_handle).map_err(|e| e.to_string())?;
+
+    let mut games: HashSet<String> = PREDEFINED_GAMES.iter().map(|&s| s.to_string()).collect();
+
+    if data_dir.is_dir() {
+        match fs::read_dir(data_dir) {
+            Ok(entries) => {
+                for entry_result in entries {
+                    if let Ok(entry) = entry_result {
+                        let path = entry.path();
+                        if path.is_file() {
+                             if let Some(filename_str) = path.file_name().and_then(|n| n.to_str()) {
+                                // Check for archived DB files (e.g., app_data_genshin.sqlite)
+                                if filename_str.starts_with(DB_FILENAME_PREFIX) && filename_str.ends_with(".sqlite") {
+                                    let game_slug = filename_str
+                                        .trim_start_matches(DB_FILENAME_PREFIX)
+                                        .trim_end_matches(".sqlite");
+                                    if !game_slug.is_empty() {
+                                        games.insert(game_slug.to_string()); // Add discovered games
+                                    }
+                                }
+                             }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not read app data directory to find existing game DBs: {}", e);
+            }
+        }
+    }
+
+    let mut sorted_games: Vec<String> = games.into_iter().collect();
+    sorted_games.sort(); // Sort alphabetically
+    println!("Available games: {:?}", sorted_games); // Log the final list
+    Ok(sorted_games)
+}
+
+#[command]
+fn get_active_game(app_handle: AppHandle) -> CmdResult<String> {
+    read_app_config(&app_handle)
+        .map(|config| config.requested_active_game) // Return the requested game
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+fn switch_game(app_handle: AppHandle, target_game_slug: String) -> CmdResult<String> {
+    println!("Requesting switch to game config: {}", target_game_slug);
+
+    // Read current config to get the last_active_game
+    let mut config = read_app_config(&app_handle).map_err(|e| e.to_string())?;
+
+    if config.requested_active_game == target_game_slug {
+        println!("Already requested game: {}. No change needed.", target_game_slug);
+        return Ok("Game already selected. Restart if changes aren't visible.".to_string());
+    }
+
+    // Update only the requested game field
+    config.requested_active_game = target_game_slug.clone();
+
+    // Write the updated config back
+    if let Err(e) = write_app_config(&app_handle, &config) {
+        let err_msg = format!("CRITICAL: Failed to update app config with requested game: {}", e);
+        eprintln!("{}", err_msg);
+        return Err(err_msg); // Prevent restart if config fails
+    }
+    println!("App config updated. Requested game: {}. Triggering restart.", target_game_slug);
+
+    // Trigger App Restart
+    app_handle.restart();
+
+    Ok("Config updated. Application is restarting...".to_string())
+}
+
 // --- Main Function ---
 fn main() {
-    let context = generate_context!();
+    let context = generate_context!(); // Generates context based on tauri.conf.json
 
     tauri::Builder::default()
         .setup(|app| {
             let app_handle = app.handle();
-             if let Err(e) = initialize_database(&app_handle) {
-                 eprintln!("FATAL: Database initialization failed: {}", e);
-                 dialog::blocking::message( app_handle.get_window("main").as_ref(), "Fatal Error", format!("Database initialization failed:\n{}", e) );
-                 std::process::exit(1);
-             }
-             println!("Database structure verified/initialized.");
-             let data_dir = get_app_data_dir(&app_handle).expect("Failed to get app data dir post-init");
-             let db_path = data_dir.join(DB_NAME);
-             let conn = Connection::open(&db_path).expect("Failed to open DB for state management");
+            println!("--- Application Setup Starting ---");
+
+            // --- 1. Read Target Config ---
+            // Reads app_config.json to determine the last known state and the user's requested state.
+            let mut config = match read_app_config(&app_handle) {
+                 Ok(cfg) => cfg,
+                 Err(e) => {
+                     // If config can't be read/created, the app cannot function correctly.
+                     eprintln!("FATAL: Failed to read or create app config: {}", e);
+                     // Show a blocking message to the user before exiting.
+                     dialog::blocking::message(
+                         app_handle.get_window("main").as_ref(), // Get main window handle if possible
+                         "Fatal Configuration Error",
+                         &format!("Could not read or create app configuration:\n{}", e)
+                     );
+                     std::process::exit(1); // Exit the application.
+                 }
+            };
+            // Store the slugs from the config for easier access.
+            let last_slug = &config.last_active_game;
+            let requested_slug = &config.requested_active_game;
+            println!("Config Read: Last Active='{}', Requested='{}'", last_slug, requested_slug);
+
+            // --- 2. Perform Pre-Initialization DB Rename Logic ---
+            // This block executes ONLY if the last known active game is different from the requested one.
+            if last_slug != requested_slug {
+                println!("Switch required: '{}' -> '{}'", last_slug, requested_slug);
+                // Get the application's data directory path.
+                let data_dir = match get_app_data_dir(&app_handle) {
+                     Ok(dir) => dir,
+                     Err(e) => {
+                          // Cannot proceed without the data directory.
+                          eprintln!("FATAL: Cannot get app data dir: {}", e);
+                          dialog::blocking::message(
+                              app_handle.get_window("main").as_ref(),
+                              "Fatal Error",
+                              "Cannot determine application data directory."
+                          );
+                          std::process::exit(1);
+                     }
+                };
+                // Define paths for the active DB and the archive files for the last and requested games.
+                let active_db_path = data_dir.join(ACTIVE_DB_FILENAME);
+                let last_game_archive_path = data_dir.join(format!("{}{}.sqlite", DB_FILENAME_PREFIX, last_slug));
+                let requested_game_archive_path = data_dir.join(format!("{}{}.sqlite", DB_FILENAME_PREFIX, requested_slug));
+
+                // Step A: Archive the current active DB (if it exists).
+                // This should correspond to the 'last_slug'.
+                if active_db_path.exists() {
+                    println!("Archiving '{}' (from '{}') to '{}'", ACTIVE_DB_FILENAME, last_slug, last_game_archive_path.display());
+                    // Attempt to rename the active DB file to its archived name.
+                    if let Err(e) = fs::rename(&active_db_path, &last_game_archive_path) {
+                         // If renaming fails, it's a critical error preventing the switch.
+                         let err_msg = format!("Failed to archive DB for '{}': {}", last_slug, e);
+                         eprintln!("FATAL: {}", err_msg);
+                         dialog::blocking::message(
+                             app_handle.get_window("main").as_ref(),
+                             "Fatal Startup Error",
+                             &err_msg
+                         );
+                         std::process::exit(1);
+                    }
+                } else {
+                     // Log a warning if the active file doesn't exist, as it might indicate a previous issue.
+                     println!("Warning: {} not found, cannot archive game '{}'.", ACTIVE_DB_FILENAME, last_slug);
+                }
+
+                // Step B: Activate the requested DB by renaming its archive file (if it exists) to the active name.
+                if requested_game_archive_path.exists() {
+                     println!("Activating '{}' from '{}'", ACTIVE_DB_FILENAME, requested_game_archive_path.display());
+                     // Attempt to rename the requested game's archive to the active DB name.
+                     if let Err(e) = fs::rename(&requested_game_archive_path, &active_db_path) {
+                          // If this rename fails, try to roll back the first rename (Step A) if possible.
+                          if last_game_archive_path.exists() {
+                              println!("Attempting rollback: Renaming {} back to {}", last_game_archive_path.display(), active_db_path.display());
+                              fs::rename(&last_game_archive_path, &active_db_path).ok(); // Ignore rollback error, main error is critical.
+                          }
+                          // Report the critical error that prevented activation.
+                          let err_msg = format!("Failed to activate DB for '{}': {}", requested_slug, e);
+                          eprintln!("FATAL: {}", err_msg);
+                          dialog::blocking::message(
+                              app_handle.get_window("main").as_ref(),
+                              "Fatal Startup Error",
+                              &err_msg
+                          );
+                          std::process::exit(1);
+                     }
+                } else {
+                     // If the requested game's archive doesn't exist, a new DB will be created later by initialize_database.
+                     println!("Archive for requested game '{}' ('{}') not found. New DB will be created.", requested_slug, requested_game_archive_path.display());
+                }
+
+                // Step C: Update the configuration file to reflect the successful switch.
+                // The 'last_active_game' should now match the 'requested_active_game'.
+                println!("Updating config to set last_active_game = requested_active_game ('{}')", requested_slug);
+                config.last_active_game = requested_slug.clone(); // Update the config struct in memory.
+                if let Err(e) = write_app_config(&app_handle, &config) {
+                     // If writing the config fails, the state is inconsistent. Log a critical warning.
+                     // The app will likely function for this session, but the next startup might be incorrect.
+                     eprintln!("CRITICAL WARNING: Failed to update config after DB rename: {}. Config may be out of sync!", e);
+                } else {
+                     println!("Config synced successfully.");
+                }
+                println!("DB swap/activation completed for '{}'.", requested_slug);
+
+            } else {
+                // If last_slug and requested_slug are the same, no switch is needed.
+                println!("No game switch needed (Last Active == Requested Active: '{}').", requested_slug);
+                // As a sanity check, ensure the active DB file actually exists.
+                 let active_db_path = get_app_data_dir(&app_handle).expect("Data dir checked previously").join(ACTIVE_DB_FILENAME);
+                 if !active_db_path.exists() {
+                     println!("Warning: Config indicates no switch needed, but '{}' does not exist. A new DB will be created for '{}'.", ACTIVE_DB_FILENAME, requested_slug);
+                 }
+            }
+            println!("Pre-initialization DB check complete.");
+
+            // --- 3. Initialize DB Connection for State ---
+            // Initialize the database connection using the (now correctly named) active DB file.
+            // Pass the slug of the game that *should* be active now (the requested_slug).
+            let conn = match initialize_database(&app_handle, requested_slug) {
+                 Ok(c) => c,
+                 Err(e) => {
+                     // If database initialization fails (e.g., cannot open/create file, schema error).
+                     eprintln!("FATAL: Database initialization failed: {}", e);
+                     dialog::blocking::message(
+                         app_handle.get_window("main").as_ref(),
+                         "Fatal Database Error",
+                         &format!("DB init failed for {}: {}", ACTIVE_DB_FILENAME, e)
+                     );
+                     std::process::exit(1);
+                 }
+            };
+            println!("Database connection established for {}.", ACTIVE_DB_FILENAME);
+
+            // --- 4. Manage State & Final Checks ---
+            // Make the database connection available to Tauri commands via managed state.
              app.manage(DbState(Arc::new(Mutex::new(conn))));
-             let db_state: State<DbState> = app.state();
-             match get_setting_value(&db_state.0.lock().unwrap(), SETTINGS_KEY_MODS_FOLDER) { // Simple unwrap ok in setup
-                 Ok(Some(path)) => println!("Mods folder configured to: {}", path),
-                 _ => println!("WARN: Mods folder path is not configured yet."),
+
+             // Perform a final check/log for a key setting (like mods folder) from the *active* DB.
+             let db_state: State<DbState> = app.state(); // Get the managed state.
+             match get_setting_value(&db_state.0.lock().expect("DB lock poisoned during setup check"), SETTINGS_KEY_MODS_FOLDER) { // Lock mutex to access connection.
+                 Ok(Some(path)) => println!("Mods folder configured in active DB to: {}", path),
+                 _ => println!("WARN: Mods folder path is not configured yet in active DB."),
              }
-            Ok(())
+             println!("--- Application Setup Complete ---");
+            Ok(()) // Indicate successful setup
         })
         .invoke_handler(generate_handler![
+            // List ALL exposed Tauri commands here:
             // Settings
             get_setting, set_setting, select_directory, select_file, launch_executable,
             launch_executable_elevated,
@@ -3492,8 +3743,10 @@ fn main() {
             // Dashboard & Version
             get_dashboard_stats, get_app_version,
             // Keybinds
-            get_ini_keybinds, open_asset_folder
+            get_ini_keybinds, open_asset_folder,
+            // Multi-Game Commands
+            get_available_games, get_active_game, switch_game
         ])
-        .run(context)
-        .expect("error while running tauri application");
+        .run(context) // Runs the Tauri application loop.
+        .expect("error while running tauri application"); // Panic if the app fails to run.
 }
