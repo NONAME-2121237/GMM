@@ -10,6 +10,8 @@ import ModCardSkeleton from '../components/ModCardSkeleton';
 import { FixedSizeList, FixedSizeGrid } from 'react-window';
 import useMeasure from 'react-use-measure';
 import { toast } from 'react-toastify';
+import ContextMenu from '../components/ContextMenu';
+import AddToPresetModal from '../components/AddToPresetModal';
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -76,6 +78,13 @@ function EntityPage() {
     const [listContainerRef, bounds] = useMeasure();
     const [selectedAssetIds, setSelectedAssetIds] = useState(new Set());
     const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+
+    const [contextMenuVisible, setContextMenuVisible] = useState(false);
+    const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
+    const [contextMenuAsset, setContextMenuAsset] = useState(null); // Store the asset for context
+
+    const [addToPresetAsset, setAddToPresetAsset] = useState(null); // Asset to add
+    const [isAddToPresetModalOpen, setIsAddToPresetModalOpen] = useState(false);
 
     // Fetch data (includes loading view mode and sort option)
     const fetchData = useCallback(async () => {
@@ -384,6 +393,76 @@ function EntityPage() {
 
     // --- End Bulk Action Handlers ---
 
+    const handleShowContextMenu = useCallback((event, asset) => {
+        event.preventDefault();
+        event.stopPropagation(); // Prevent triggering on parent elements
+        setContextMenuPosition({ x: event.clientX, y: event.clientY });
+        setContextMenuAsset(asset); // Store the specific asset right-clicked
+        setContextMenuVisible(true);
+    }, []);
+
+    const handleCloseContextMenu = useCallback(() => {
+        setContextMenuVisible(false);
+    }, []);
+
+    const handleOpenAddToPresetModal = useCallback((asset) => {
+        setAddToPresetAsset(asset);
+        setIsAddToPresetModalOpen(true);
+    }, []);
+
+    const handleCloseAddToPresetModal = useCallback(() => {
+        setIsAddToPresetModalOpen(false);
+        setAddToPresetAsset(null);
+    }, []);
+
+    // --- Define Context Menu Items ---
+    const contextMenuItems = useMemo(() => {
+        if (!contextMenuAsset) return []; // No asset, no menu
+
+        return [
+            {
+                label: 'Open Mod Folder',
+                icon: 'fas fa-folder-open',
+                onClick: async () => {
+                    handleCloseContextMenu(); // Close immediately
+                    try {
+                        await invoke('open_asset_folder', { assetId: contextMenuAsset.id });
+                    } catch (err) {
+                        toast.error(`Failed to open folder: ${err}`);
+                    }
+                }
+            },
+            {
+                label: 'Add to Preset(s)...',
+                icon: 'fas fa-plus-circle',
+                onClick: () => {
+                    handleCloseContextMenu(); // Close context menu
+                    handleOpenAddToPresetModal(contextMenuAsset); // Open the other modal
+                }
+            },
+            { separator: true }, // Add a visual separator
+            {
+                label: 'Edit Mod Info',
+                icon: 'fas fa-pencil-alt',
+                onClick: () => {
+                    handleCloseContextMenu();
+                    handleOpenEditModal(contextMenuAsset);
+                }
+            },
+            {
+                label: 'Delete Mod',
+                icon: 'fas fa-trash-alt',
+                danger: true, // Mark as danger for styling
+                onClick: () => {
+                    handleCloseContextMenu();
+                    handleOpenDeleteModal(contextMenuAsset);
+                }
+            },
+        ];
+    // Dependencies include the asset itself and handlers needed within onClick
+    }, [contextMenuAsset, handleCloseContextMenu, handleOpenAddToPresetModal, handleOpenEditModal, handleOpenDeleteModal]);
+    // --------------------------------
+
     const ListItem = ({ index, style }) => {
         const asset = filteredAndSortedAssets[index]; // Use sorted/filtered list
         const isSelected = selectedAssetIds.has(asset.id);
@@ -399,6 +478,7 @@ function EntityPage() {
                      viewMode="list"
                      isSelected={isSelected}
                      onSelectChange={handleAssetSelectChange}
+                     onContextMenu={(e) => handleShowContextMenu(e, asset)}
                  />
              </div>
         );
@@ -420,6 +500,7 @@ function EntityPage() {
                         onEdit={handleOpenEditModal}
                         onDelete={handleOpenDeleteModal}
                         viewMode="grid"
+                        onContextMenu={(e) => handleShowContextMenu(e, asset)}
                         // Selection not implemented for grid view
                     />
                  </div>
@@ -456,7 +537,13 @@ function EntityPage() {
 
 
     return (
-        <div className="character-page fadeIn">
+        <div className="character-page fadeIn" onContextMenu={(e) => {
+            // If the click isn't on a card (which would stop propagation), close the menu
+             if (contextMenuVisible && !e.target.closest('.mod-card-grid, .mod-card-list')) {
+                 e.preventDefault(); // Prevent default browser menu on page background
+                 handleCloseContextMenu();
+             }
+        }}>
             <div className="page-header">
                 <h1 className="page-title">
                     <i
@@ -599,6 +686,15 @@ function EntityPage() {
                 </div>
             </div>
 
+            {/* --- Render Context Menu --- */}
+            <ContextMenu
+                isVisible={contextMenuVisible}
+                xPos={contextMenuPosition.x}
+                yPos={contextMenuPosition.y}
+                items={contextMenuItems}
+                onClose={handleCloseContextMenu}
+            />
+
             {/* Modals */}
             {isEditModalOpen && editingAsset && ( <ModEditModal asset={editingAsset} currentEntitySlug={entitySlug} onClose={handleCloseEditModal} onSaveSuccess={handleSaveEditSuccess} /> )}
             {isDeleteModalOpen && assetToDelete && (
@@ -616,6 +712,7 @@ function EntityPage() {
                     This action will remove the mod files from your disk and cannot be undone.
                  </ConfirmationModal>
              )}
+             {isAddToPresetModalOpen && addToPresetAsset && ( <AddToPresetModal assetId={addToPresetAsset.id} assetName={addToPresetAsset.name} isOpen={isAddToPresetModalOpen} onClose={handleCloseAddToPresetModal} /> )}
         </div>
     );
 }

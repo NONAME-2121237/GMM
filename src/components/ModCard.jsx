@@ -25,6 +25,7 @@ function ModCard({
     viewMode = 'grid',
     isSelected = false,
     onSelectChange,
+    onContextMenu,
 }) {
     // State
     const isEnabled = asset.is_enabled;
@@ -252,6 +253,7 @@ function ModCard({
                     className={`mod-card-list ${!isEnabled ? 'mod-disabled-visual' : ''}`}
                     title={`Path: ${cleanRelativePath}\n${asset.description || ''}`}
                     style={ isSelected ? { backgroundColor: 'rgba(156, 136, 255, 0.1)' } : {} }
+                    onContextMenu={onContextMenu}
                 >
                      <input
                          type="checkbox" checked={isSelected} onChange={handleCheckboxChange}
@@ -282,7 +284,7 @@ function ModCard({
     // Default Grid View Structure
     return (
         <>
-            <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Path: ${cleanRelativePath}`} style={{ height: '100%' }}>
+            <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Path: ${cleanRelativePath}`} style={{ height: '100%' }} onContextMenu={onContextMenu}>
                 <div style={imageContainerStyle}>
                     {imageLoading && ( <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i> )}
                     {!imageLoading && imageBgCss === FALLBACK_MOD_IMAGE_BG && (
