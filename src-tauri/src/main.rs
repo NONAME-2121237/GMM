@@ -3583,6 +3583,38 @@ fn main() {
             let app_handle = app.handle();
             println!("--- Application Setup Starting ---");
 
+            let data_dir = match get_app_data_dir(&app_handle) {
+                Ok(dir) => dir,
+                Err(e) => {
+                     // If we can't even determine the path, it's fatal.
+                     eprintln!("FATAL: Cannot determine app data dir path: {}", e);
+                     dialog::blocking::message(
+                         app_handle.get_window("main").as_ref(),
+                         "Fatal Error",
+                         "Cannot determine the application data directory path."
+                     );
+                     std::process::exit(1);
+                }
+            };
+
+            // Attempt to create the directory if it doesn't exist.
+            if !data_dir.exists() {
+                println!("App data directory does not exist, attempting to create: {}", data_dir.display());
+                if let Err(e) = fs::create_dir_all(&data_dir) {
+                    // If creation fails (permissions?), it's fatal.
+                    eprintln!("FATAL: Failed to create app data directory at {}: {}", data_dir.display(), e);
+                    dialog::blocking::message(
+                        app_handle.get_window("main").as_ref(),
+                        "Fatal Error",
+                        &format!("Failed to create application data directory:\n{}\n\nPlease check permissions.", data_dir.display())
+                    );
+                    std::process::exit(1);
+                }
+                 println!("App data directory created successfully.");
+            } else {
+                println!("App data directory already exists: {}", data_dir.display());
+            }
+
             // --- 1. Read Target Config ---
             // Reads app_config.json to determine the last known state and the user's requested state.
             let mut config = match read_app_config(&app_handle) {
