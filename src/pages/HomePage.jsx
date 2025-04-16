@@ -51,7 +51,23 @@ function HomePage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedElement, setSelectedElement] = useState('all');
     const [sortOption, setSortOption] = useState(DEFAULT_SORT_OPTION);
+    const [activeGame, setActiveGame] = useState(null);
     const sortStorageKey = `categorySort_${categorySlug}`;
+
+    // Fetch Active Game Info
+    useEffect(() => {
+        invoke('get_active_game')
+            .then(activeGame => {
+                if (activeGame) {
+                    setActiveGame(activeGame);
+                } else {
+                    console.warn("No active game found.");
+                }
+            })
+            .catch(err => {
+                console.error("Failed to fetch active game:", err);
+            });
+    }, []);
 
     // Fetch Category Info and Entities with Counts
     useEffect(() => {
@@ -136,7 +152,7 @@ function HomePage() {
 
 
     const pageTitle = categoryInfo.name; // Use state for title
-    const showElementFilters = categorySlug === 'characters';
+    const showElementFilters = categorySlug === 'characters' && activeGame?.game === 'genshin';
 
     return (
         <div className="home-page fadeIn">

@@ -19,8 +19,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, Arc};
 use tauri::{
     command, generate_context, generate_handler, AppHandle, Manager, State, api::dialog,
-    api::process::Command, Window, api::process::restart
+    api::process::Command, Window
 };
+use std::process::exit;
 use thiserror::Error;
 use once_cell::sync::Lazy;
 use tauri::async_runtime;
@@ -3536,15 +3537,16 @@ fn get_active_game(app_handle: AppHandle) -> CmdResult<String> {
 }
 
 #[command]
-fn switch_game(app_handle: AppHandle, target_game_slug: String) -> CmdResult<String> {
+fn switch_game(app_handle: AppHandle, target_game_slug: String) -> CmdResult<String> { // Keep AppHandle for potential future use, though not needed for exit
     println!("Requesting switch to game config: {}", target_game_slug);
 
-    // Read current config to get the last_active_game
     let mut config = read_app_config(&app_handle).map_err(|e| e.to_string())?;
+    let current_game_slug = config.requested_active_game.clone(); // Clone needed if used after config update
 
-    if config.requested_active_game == target_game_slug {
+    if current_game_slug == target_game_slug {
         println!("Already requested game: {}. No change needed.", target_game_slug);
-        return Ok("Game already selected. Restart if changes aren't visible.".to_string());
+        // Return a different message if no action needed
+        return Ok("Game already selected. No action taken.".to_string());
     }
 
     // Update only the requested game field
@@ -3554,14 +3556,22 @@ fn switch_game(app_handle: AppHandle, target_game_slug: String) -> CmdResult<Str
     if let Err(e) = write_app_config(&app_handle, &config) {
         let err_msg = format!("CRITICAL: Failed to update app config with requested game: {}", e);
         eprintln!("{}", err_msg);
-        return Err(err_msg); // Prevent restart if config fails
+        // Don't exit here, let the user know the config failed
+        return Err(err_msg);
     }
-    println!("App config updated. Requested game: {}. Triggering restart.", target_game_slug);
+    println!("App config updated. Requested game: {}.", target_game_slug);
 
-    // Trigger App Restart
-    app_handle.restart();
+    // --- Removed app_handle.restart() ---
 
-    Ok("Config updated. Application is restarting...".to_string())
+    // Return success message instructing manual restart
+    Ok(format!("Successfully configured to switch to '{}' on next launch. Please close and restart the application.", target_game_slug.to_uppercase()))
+}
+
+#[command]
+fn exit_app(app_handle: AppHandle) {
+    println!("Received request to exit application.");
+    // Exit the entire application process. The '0' is the exit code (0 usually means success).
+    exit(0);
 }
 
 // --- Main Function ---
@@ -3745,7 +3755,8 @@ fn main() {
             // Keybinds
             get_ini_keybinds, open_asset_folder,
             // Multi-Game Commands
-            get_available_games, get_active_game, switch_game
+            get_available_games, get_active_game, switch_game,
+            exit_app
         ])
         .run(context) // Runs the Tauri application loop.
         .expect("error while running tauri application"); // Panic if the app fails to run.

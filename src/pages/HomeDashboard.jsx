@@ -170,6 +170,7 @@ function HomeDashboard() {
             setActiveGame(targetGameSlug);
             setNeedsRestart(true);
             toast.success(resultMessage);
+            await invoke('exit_app'); // Exit app
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown switch error');
             console.error("Failed to switch game:", errorString);

@@ -9,7 +9,7 @@ function GameSwitcher({
   isLoading, 
   error,
   compact = false, // Compact mode for smaller spaces
-  confirmMessage = "Switching the game requires an application restart.", // Customizable message
+  confirmMessage = "Switching the game requires an application restart (the app will close on confirmation).", // Customizable message
   isSetupMode = false // Different behavior for setup mode
 }) {
   
@@ -19,7 +19,7 @@ function GameSwitcher({
     if (gameSlug === activeGame || isLoading) return;
     
     const dialogTitle = isSetupMode ? "Confirm Game Change" : "Confirm Game Switch";
-    const okLabel = isSetupMode ? "Change Game & Restart" : "Switch & Restart";
+    const okLabel = isSetupMode ? "Change Game & Close" : "Switch and Close";
     const fullMessage = `${confirmMessage}\n\nSwitch to "${gameSlug.toUpperCase()}"?`;
     
     const confirmation = await ask(
