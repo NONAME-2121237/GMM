@@ -31,6 +31,7 @@ use sevenz_rust::{Password, decompress_file};
 use zip::{ZipArchive, result::ZipError};
 use unrar::{Archive, Process, List, ListSplit};
 use rusqlite::Transaction;
+use std::ffi::OsStr;
 
 // --- Structs for Deserializing Definitions ---
 #[derive(Deserialize, Debug, Clone)]
@@ -210,6 +211,7 @@ struct DeductionMaps {
     entity_slug_to_id: HashMap<String, i64>,
     lowercase_category_name_to_slug: HashMap<String, String>,
     lowercase_entity_name_to_slug: HashMap<String, String>,
+    entity_slug_to_category_slug: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)] struct Category { id: i64, name: String, slug: String }
@@ -319,40 +321,78 @@ fn find_asset_ini_paths(conn: &Connection, asset_id: i64, base_mods_path: &PathB
 }
 
 fn fetch_deduction_maps(conn: &Connection) -> SqlResult<DeductionMaps> {
+    // --- Category fetching (keep as is) ---
     let mut category_slug_to_id = HashMap::new();
     let mut lowercase_category_name_to_slug = HashMap::new();
+    // *** Store category id to slug for the next step ***
+    let mut category_id_to_slug = HashMap::<i64, String>::new();
+    // ---
     let mut cat_stmt = conn.prepare("SELECT slug, id, name FROM categories")?;
     let cat_rows = cat_stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)))?;
+    println!("[fetch_deduction_maps] Processing categories...");
+    let mut cat_count = 0;
     for row in cat_rows {
         if let Ok((slug, id, name)) = row {
             lowercase_category_name_to_slug.insert(name.to_lowercase(), slug.clone());
-            category_slug_to_id.insert(slug, id);
+            category_slug_to_id.insert(slug.clone(), id);
+            // *** Store ID -> Slug mapping ***
+            category_id_to_slug.insert(id, slug);
+            // ---
+            cat_count += 1;
         }
     }
+    println!("[fetch_deduction_maps] Processed {} categories.", cat_count);
 
+
+    // --- Entity fetching (Modified to get category_id) ---
     let mut entity_slug_to_id = HashMap::new();
     let mut lowercase_entity_name_to_slug = HashMap::new();
-    let mut entity_stmt = conn.prepare("SELECT slug, id, name FROM entities")?;
-    let entity_rows = entity_stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)))?;
+    // *** Initialize the new map ***
+    let mut entity_slug_to_category_slug = HashMap::new();
+    // ---
+    // *** Fetch category_id along with entity info ***
+    let mut entity_stmt = conn.prepare("SELECT slug, id, name, category_id FROM entities")?;
+    // ---
+    // *** Update query_map to include category_id ***
+    let entity_rows = entity_stmt.query_map([], |row| Ok((
+        row.get::<_, String>(0)?, // slug
+        row.get::<_, i64>(1)?,    // id
+        row.get::<_, String>(2)?, // name
+        row.get::<_, i64>(3)?     // category_id
+    )))?;
+    // ---
+    println!("[fetch_deduction_maps] Processing entities...");
+    let mut entity_count = 0;
     for row in entity_rows {
-        if let Ok((slug, id, name)) = row {
-             // Store original slug for ID mapping
+         // *** Destructure to include category_id ***
+        if let Ok((slug, id, name, category_id)) = row {
+         // ---
             entity_slug_to_id.insert(slug.clone(), id);
-             // Also store lowercase name -> original slug mapping
-             // Handle potential name collisions simply by letting the last one win, or log warning
-             if lowercase_entity_name_to_slug.contains_key(&name.to_lowercase()) {
-                 // Optional: Log collision warning if needed
-                 // println!("Warning: Duplicate entity name detected (case-insensitive): {}", name);
-             }
-             lowercase_entity_name_to_slug.insert(name.to_lowercase(), slug);
+            lowercase_entity_name_to_slug.insert(name.to_lowercase(), slug.clone());
+
+            // *** Populate the new map using the category_id_to_slug lookup ***
+            if let Some(cat_slug) = category_id_to_slug.get(&category_id) {
+                 entity_slug_to_category_slug.insert(slug.clone(), cat_slug.clone());
+            } else {
+                 // Log warning if category mapping is missing (shouldn't happen with FKs)
+                 eprintln!("[fetch_deduction_maps] Warning: Could not find category slug for category_id {} (entity slug: {})", category_id, slug);
+            }
+            // ---
+
+            entity_count += 1;
+        } else if let Err(e) = row {
+             eprintln!("[fetch_deduction_maps] Error processing entity row: {}", e);
         }
     }
+    println!("[fetch_deduction_maps] Processed {} entities.", entity_count);
+
 
     Ok(DeductionMaps {
         category_slug_to_id,
         entity_slug_to_id,
         lowercase_category_name_to_slug,
         lowercase_entity_name_to_slug,
+        entity_slug_to_category_slug,
     })
 }
 
@@ -1960,7 +2000,11 @@ async fn select_archive_file() -> CmdResult<Option<PathBuf>> {
 }
 
 #[command]
-fn analyze_archive(file_path_str: String, db_state: State<DbState>) -> CmdResult<ArchiveAnalysisResult> {
+fn analyze_archive(
+    file_path_str: String,
+    // *** ADDED: Inject DB State ***
+    db_state: State<DbState>
+) -> CmdResult<ArchiveAnalysisResult> {
     println!("[analyze_archive] Analyzing: {}", file_path_str);
     let file_path = PathBuf::from(&file_path_str);
     if !file_path.is_file() { return Err(format!("Archive file not found: {}", file_path.display())); }
@@ -1971,6 +2015,17 @@ fn analyze_archive(file_path_str: String, db_state: State<DbState>) -> CmdResult
     let mut entries = Vec::new();
     let mut ini_contents: HashMap<String, String> = HashMap::new();
     let preview_candidates = ["preview.png", "icon.png", "thumbnail.png", "preview.jpg", "icon.jpg", "thumbnail.jpg"];
+
+    // --- Fetch Deduction Maps ---
+    let maps = {
+        // Use a block to limit the scope of the lock guard
+        let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+        let conn = &*conn_guard; // Dereference the guard
+        fetch_deduction_maps(conn)
+             .map_err(|e| format!("Analyze: Failed to fetch deduction maps: {}", e))?
+    };
+    println!("[analyze_archive] Deduction maps loaded.");
+    // --- End Fetch ---
 
     match extension.as_deref() {
         Some("zip") => {
@@ -2132,55 +2187,298 @@ fn analyze_archive(file_path_str: String, db_state: State<DbState>) -> CmdResult
           }
      }
     // ... (Pass 4: Deduction) ...
-        let mut deduced_mod_name: Option<String> = None;
-        let mut deduced_author: Option<String> = None;
-        let mut deduced_category_slug: Option<String> = None;
-        let mut deduced_entity_slug: Option<String> = None;
-        let mut raw_ini_type_found: Option<String> = None;
-        let mut raw_ini_target_found: Option<String> = None;
-        let mut detected_preview_internal_path : Option<String> = None;
-        let mut first_likely_root_processed = false;
+    let mut deduced_mod_name: Option<String> = None;
+    let mut deduced_author: Option<String> = None;
+    // Initialize final deduced slugs
+    let mut final_deduced_category_slug: Option<String> = None;
+    let mut final_deduced_entity_slug: Option<String> = None;
+    // Raw hints extracted from INI
+    let mut raw_ini_type_found: Option<String> = None;
+    let mut raw_ini_target_found: Option<String> = None;
+    // Preview path detected within archive
+    let mut detected_preview_internal_path : Option<String> = None;
+    let mut first_likely_root_processed = false;
 
-        let conn_guard_opt = if !likely_root_indices.is_empty() { Some(db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?) } else { None };
-        let conn_opt = conn_guard_opt.as_deref();
+    // --- 1. Deduce from INI in First Likely Root ---
+    println!("[analyze_archive] Starting Pass 4: Deduction...");
+    for (index, entry) in entries.iter_mut().enumerate() {
+        if likely_root_indices.contains(&index) {
+            entry.is_likely_mod_root = true;
+            println!("[analyze_archive] Found likely root: {}", entry.path);
+            if !first_likely_root_processed {
+                first_likely_root_processed = true;
+                let root_prefix = if entry.path.ends_with('/') { entry.path.clone() } else { format!("{}/", entry.path) };
+                // Find the first INI file *directly* inside this root
+                if let Some((_ini_path, ini_content)) = ini_contents.iter().find(|(p, _)| p.starts_with(&root_prefix) && p.trim_start_matches(&root_prefix).find('/') == None) {
+                    println!("[analyze_archive] Found INI in root {}: {}", root_prefix, _ini_path);
+                    if let Ok(ini) = Ini::load_from_str(ini_content) {
+                        // --- Temporary storage for extracted hints ---
+                        let mut extracted_target: Option<String> = None;
+                        let mut extracted_type: Option<String> = None;
+                        // ---
+                        for section_name in ["Mod", "Settings", "Info", "General"] {
+                            if let Some(section) = ini.section(Some(section_name)) {
+                                // Extract Name, Author
+                                let name_val = section.get("Name").or_else(|| section.get("ModName"));
+                                if name_val.is_some() { deduced_mod_name = name_val.map(|s| MOD_NAME_CLEANUP_REGEX.replace_all(s, "").trim().to_string()); }
+                                let author_val = section.get("Author");
+                                if author_val.is_some() { deduced_author = author_val.map(String::from); }
 
-        for (index, entry) in entries.iter_mut().enumerate() {
-            if likely_root_indices.contains(&index) {
-                entry.is_likely_mod_root = true;
-                 if !first_likely_root_processed {
-                     first_likely_root_processed = true;
-                     let root_prefix = if entry.path.ends_with('/') { entry.path.clone() } else { format!("{}/", entry.path) };
-                     if let Some((_ini_path, ini_content)) = ini_contents.iter().find(|(p, _)| p.starts_with(&root_prefix) && p.trim_start_matches(&root_prefix).find('/') == None) {
-                         if let Ok(ini) = Ini::load_from_str(ini_content) {
-                            for section_name in ["Mod", "Settings", "Info", "General"] {
-                                 if let Some(section) = ini.section(Some(section_name)) {
-                                     let name_val = section.get("Name").or_else(|| section.get("ModName"));
-                                     if name_val.is_some() { deduced_mod_name = name_val.map(|s| MOD_NAME_CLEANUP_REGEX.replace_all(s, "").trim().to_string()); }
-                                     let author_val = section.get("Author");
-                                      if author_val.is_some() { deduced_author = author_val.map(String::from); }
-                                      let target_val = section.get("Target").or_else(|| section.get("Entity")).or_else(|| section.get("Character"));
-                                      if target_val.is_some() { raw_ini_target_found = target_val.map(|s| s.trim().to_string()); }
-                                      let type_val = section.get("Type").or_else(|| section.get("Category"));
-                                      if type_val.is_some() { raw_ini_type_found = type_val.map(|s| s.trim().to_string()); }
-                                     if deduced_mod_name.is_some() || deduced_author.is_some() || raw_ini_target_found.is_some() || raw_ini_type_found.is_some() { break; }
-                                 }
-                             }
-                         }
-                     }
-                     if let Some(conn) = conn_opt { /* DB Deductions */ }
-                     if let Some(preview_path) = root_to_preview_map.get(&index) { detected_preview_internal_path = Some(preview_path.clone()); }
-                 }
+                                // Extract Raw Hints
+                                let target_val = section.get("Target").or_else(|| section.get("Entity")).or_else(|| section.get("Character"));
+                                if target_val.is_some() { extracted_target = target_val.map(|s| s.trim().to_string()); }
+                                let type_val = section.get("Type").or_else(|| section.get("Category"));
+                                if type_val.is_some() { extracted_type = type_val.map(|s| s.trim().to_string()); }
+
+                                // Optional: Break if hints found?
+                                // if deduced_mod_name.is_some() && deduced_author.is_some() && extracted_target.is_some() && extracted_type.is_some() { break; }
+                            }
+                        }
+                        // Log extracted hints and assign to outer scope
+                        println!("[analyze_archive] INI Extracted Hints: Target='{:?}', Type='{:?}'", extracted_target, extracted_type);
+                        raw_ini_target_found = extracted_target;
+                        raw_ini_type_found = extracted_type;
+                    } else {
+                        eprintln!("[analyze_archive] Warning: Failed to parse INI content from {}", _ini_path);
+                    }
+                } else {
+                    println!("[analyze_archive] No INI found directly in root: {}", root_prefix);
+                }
+
+                // --- Try matching INI Target Hint (ENHANCED) ---
+                if final_deduced_entity_slug.is_none() { // Only run if not already found
+                    if let Some(target_hint) = &raw_ini_target_found { // Use the raw hint found
+                        let lower_target_hint = target_hint.to_lowercase();
+                        println!("[analyze_archive] Trying INI target hint: '{}' (lowercase: '{}')", target_hint, lower_target_hint);
+
+                        // Priority 1: Exact slug match (case-sensitive)
+                        if maps.entity_slug_to_id.contains_key(target_hint) {
+                            final_deduced_entity_slug = Some(target_hint.clone());
+                            println!("[analyze_archive]   -> Matched entity via exact slug: {}", target_hint);
+                        }
+                        // Priority 2: Exact lowercase name match -> original slug
+                        else if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&lower_target_hint) {
+                            final_deduced_entity_slug = Some(slug.clone());
+                            println!("[analyze_archive]   -> Matched entity via exact lowercase name: {} -> {}", lower_target_hint, slug);
+                        }
+                        // Priority 3: Check if any known name STARTS WITH the hint (case-insensitive)
+                        else {
+                            for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
+                                if entity_name_lower.starts_with(&lower_target_hint) {
+                                    final_deduced_entity_slug = Some(entity_slug.clone());
+                                    println!("[analyze_archive]   -> Matched entity via name prefix: '{}' starts with '{}' -> {}", entity_name_lower, lower_target_hint, entity_slug);
+                                    break; // Take the first prefix match
+                                }
+                            }
+                        }
+                        // Priority 4: (Optional but helpful) Check if any known name CONTAINS the hint
+                        if final_deduced_entity_slug.is_none() {
+                            for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
+                                // Avoid matching tiny substrings like 'a' in 'Kaedehara Kazuha'
+                                if lower_target_hint.len() > 2 && entity_name_lower.contains(&lower_target_hint) {
+                                    final_deduced_entity_slug = Some(entity_slug.clone());
+                                    println!("[analyze_archive]   -> Matched entity via name contains: '{}' contains '{}' -> {}", entity_name_lower, lower_target_hint, entity_slug);
+                                    break; // Take the first contains match
+                                }
+                            }
+                        }
+                    } else {
+                        println!("[analyze_archive] No INI target hint found to match.");
+                    }
+                }
+
+                // --- Try matching INI Type Hint (ENHANCED) ---
+                if final_deduced_category_slug.is_none() { // Only run if not already found
+                    if let Some(type_hint) = &raw_ini_type_found {
+                        let lower_type_hint = type_hint.to_lowercase();
+                        println!("[analyze_archive] Trying INI type hint: '{}' (lowercase: '{}')", type_hint, lower_type_hint);
+
+                        // Prio 1: Exact slug
+                        if maps.category_slug_to_id.contains_key(type_hint) {
+                            final_deduced_category_slug = Some(type_hint.clone());
+                            println!("[analyze_archive]   -> Matched category via exact slug: {}", type_hint);
+                        }
+                        // Prio 2: Exact lowercase name -> original slug
+                        else if let Some(slug) = maps.lowercase_category_name_to_slug.get(&lower_type_hint) {
+                            final_deduced_category_slug = Some(slug.clone());
+                            println!("[analyze_archive]   -> Matched category via exact lowercase name: {} -> {}", lower_type_hint, slug);
+                        }
+                        // Prio 3: Known name starts with hint
+                        else {
+                            for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
+                                if cat_name_lower.starts_with(&lower_type_hint) {
+                                    final_deduced_category_slug = Some(cat_slug.clone());
+                                    println!("[analyze_archive]   -> Matched category via name prefix: '{}' starts with '{}' -> {}", cat_name_lower, lower_type_hint, cat_slug);
+                                    break;
+                                }
+                            }
+                        }
+                        // Prio 4: Known name contains hint
+                        if final_deduced_category_slug.is_none() {
+                            for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
+                                if lower_type_hint.len() > 2 && cat_name_lower.contains(&lower_type_hint) {
+                                    final_deduced_category_slug = Some(cat_slug.clone());
+                                    println!("[analyze_archive]   -> Matched category via name contains: '{}' contains '{}' -> {}", cat_name_lower, lower_type_hint, cat_slug);
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        println!("[analyze_archive] No INI type hint found to match.");
+                    }
+                }
+
+                // Use detected preview if available for this root
+                if let Some(preview_path) = root_to_preview_map.get(&index) {
+                    detected_preview_internal_path = Some(preview_path.clone());
+                    println!("[analyze_archive] Detected preview for this root: {}", preview_path);
+                }
+
+                // --- Break after processing the first root's INI ---
+                println!("[analyze_archive] Finished processing first likely root INI.");
+                break;
             }
         }
-         // Fallback name deduction
-         if deduced_mod_name.is_none() || deduced_mod_name.as_deref() == Some("") { deduced_mod_name = Some(file_path.file_stem().unwrap_or_default().to_string_lossy().to_string()); }
-         if let Some(name) = &deduced_mod_name { let cleaned = MOD_NAME_CLEANUP_REGEX.replace_all(name, "").trim().to_string(); if !cleaned.is_empty() { deduced_mod_name = Some(cleaned); } }
+    }
+    // --- End INI Deduction ---
 
-    // --- Result ---
+    // --- 2. Deduce from Archive Filename (ENHANCED - Lower Priority) ---
+    if final_deduced_entity_slug.is_none() || final_deduced_category_slug.is_none() {
+        println!("[analyze_archive] Attempting deduction from archive filename...");
+        if let Some(stem) = file_path.file_stem().and_then(OsStr::to_str) {
+            // Clean the stem more aggressively for matching
+            let cleaned_stem = stem
+                .replace("_", " ")
+                .replace("-", " ")
+                .replace("(", "")
+                .replace(")", "")
+                .replace("[", "")
+                .replace("]", "")
+                .trim() // Remove leading/trailing whitespace
+                .to_lowercase(); // Match case-insensitively
+
+            println!("[analyze_archive] Trying archive filename stem: '{}' (cleaned lowercase: '{}')", stem, cleaned_stem);
+
+            // Try matching stem against Entities
+            if final_deduced_entity_slug.is_none() {
+                // Prio 1: Exact slug (original stem)
+                if maps.entity_slug_to_id.contains_key(stem) {
+                    final_deduced_entity_slug = Some(stem.to_string());
+                    println!("[analyze_archive]   -> Matched entity from filename via exact slug: {}", stem);
+                }
+                // Prio 2: Exact lowercase cleaned name match -> original slug
+                else if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&cleaned_stem) {
+                    final_deduced_entity_slug = Some(slug.clone());
+                    println!("[analyze_archive]   -> Matched entity from filename via exact cleaned name: {} -> {}", cleaned_stem, slug);
+                }
+                // Prio 3: Known name contains cleaned stem part (split into words)
+                else {
+                    // Split stem into words, ignore short ones (e.g., 'a', 'of')
+                    let stem_words: Vec<&str> = cleaned_stem.split_whitespace().filter(|w| w.len() > 2).collect();
+                    if !stem_words.is_empty() {
+                        'entity_loop: for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
+                            for word in &stem_words {
+                                if entity_name_lower.contains(word) {
+                                    final_deduced_entity_slug = Some(entity_slug.clone());
+                                    println!("[analyze_archive]   -> Matched entity from filename via word contains: '{}' contains '{}' -> {}", entity_name_lower, word, entity_slug);
+                                    break 'entity_loop; // Take first match
+                                }
+                            }
+                        }
+                    }
+                }
+                if final_deduced_entity_slug.is_none() {
+                    println!("[analyze_archive]   -> No entity match found from filename.");
+                }
+            }
+
+            // Try matching stem against Categories
+            if final_deduced_category_slug.is_none() {
+                // Prio 1: Exact slug (original stem)
+                if maps.category_slug_to_id.contains_key(stem) {
+                    final_deduced_category_slug = Some(stem.to_string());
+                    println!("[analyze_archive]   -> Matched category from filename via exact slug: {}", stem);
+                }
+                // Prio 2: Exact lowercase cleaned name match -> original slug
+                else if let Some(slug) = maps.lowercase_category_name_to_slug.get(&cleaned_stem) {
+                    final_deduced_category_slug = Some(slug.clone());
+                    println!("[analyze_archive]   -> Matched category from filename via exact cleaned name: {} -> {}", cleaned_stem, slug);
+                }
+                // Prio 3: Known name contains cleaned stem part
+                else {
+                    let stem_words: Vec<&str> = cleaned_stem.split_whitespace().filter(|w| w.len() > 2).collect();
+                    if !stem_words.is_empty() {
+                        'cat_loop: for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
+                            for word in &stem_words {
+                                if cat_name_lower.contains(word) {
+                                    final_deduced_category_slug = Some(cat_slug.clone());
+                                    println!("[analyze_archive]   -> Matched category from filename via word contains: '{}' contains '{}' -> {}", cat_name_lower, word, cat_slug);
+                                    break 'cat_loop;
+                                }
+                            }
+                        }
+                    }
+                }
+                if final_deduced_category_slug.is_none() {
+                    println!("[analyze_archive]   -> No category match found from filename.");
+                }
+            }
+        } else {
+            println!("[analyze_archive] Could not get filename stem.");
+        }
+    } else {
+        println!("[analyze_archive] Skipping filename deduction (already found entity and category).");
+    }
+    // --- End Filename Deduction ---
+
+    // --- 3. Final Category Lookup (If needed) ---
+    if final_deduced_entity_slug.is_some() && final_deduced_category_slug.is_none() {
+        let entity_slug = final_deduced_entity_slug.as_ref().unwrap(); // Safe unwrap due to check
+        println!("[analyze_archive] Entity slug '{}' found, but category slug is missing. Looking up category...", entity_slug);
+        if let Some(cat_slug) = maps.entity_slug_to_category_slug.get(entity_slug) {
+            final_deduced_category_slug = Some(cat_slug.clone());
+            println!("[analyze_archive]   -> Found category slug '{}' from entity map.", cat_slug);
+        } else {
+            eprintln!("[analyze_archive]   -> Warning: Could not find category slug for deduced entity slug '{}' in maps!", entity_slug);
+        }
+    }
+    // --- End Final Category Lookup ---
+
+
+    // Fallback name deduction (use cleaned archive name if INI name wasn't found)
+    if deduced_mod_name.is_none() || deduced_mod_name.as_deref() == Some("") {
+        deduced_mod_name = file_path.file_stem()
+            .and_then(OsStr::to_str)
+            .map(|s| MOD_NAME_CLEANUP_REGEX.replace_all(s, "").trim().to_string());
+        println!("[analyze_archive] Used archive filename for deduced name: {:?}", deduced_mod_name);
+    }
+    // Final cleanup on whatever name we ended up with
+    if let Some(name) = &deduced_mod_name {
+        let cleaned = MOD_NAME_CLEANUP_REGEX.replace_all(name, "").trim().to_string();
+        if !cleaned.is_empty() {
+            deduced_mod_name = Some(cleaned);
+        } else {
+            // If cleaning resulted in empty, revert to original file stem as last resort
+            deduced_mod_name = file_path.file_stem().and_then(OsStr::to_str).map(String::from);
+            println!("[analyze_archive] Warning: Name cleanup resulted in empty string, using raw file stem: {:?}", deduced_mod_name);
+        }
+    }
+
+
+    println!("[analyze_archive] Final Deductions: Name={:?}, Author={:?}, Category={:?}, Entity={:?}, Preview={:?}, RawINI Target={:?}, RawINI Type={:?}",
+        deduced_mod_name, deduced_author, final_deduced_category_slug, final_deduced_entity_slug, detected_preview_internal_path, raw_ini_target_found, raw_ini_type_found);
+
+    // --- Return Result ---
     Ok(ArchiveAnalysisResult {
-        file_path: file_path_str, entries, deduced_mod_name, deduced_author,
-        deduced_category_slug, deduced_entity_slug, raw_ini_type: raw_ini_type_found,
-        raw_ini_target: raw_ini_target_found, detected_preview_internal_path,
+        file_path: file_path_str,
+        entries,
+        deduced_mod_name,
+        deduced_author,
+        deduced_category_slug: final_deduced_category_slug,
+        deduced_entity_slug: final_deduced_entity_slug,
+        raw_ini_type: raw_ini_type_found,
+        raw_ini_target: raw_ini_target_found,
+        detected_preview_internal_path,
     })
 }
 

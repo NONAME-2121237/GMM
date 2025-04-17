@@ -228,13 +228,27 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
         const rootToSelect = likelyRoot ? likelyRoot.path : (firstDir ? firstDir.path : '');
         setSelectedInternalRoot(rootToSelect);
 
-        // Deduce Category
+        // --- Use DEDUCED slugs from backend analysis ---
+        // Pre-select Category based on backend deduction
         if (analysisResult.deduced_category_slug) {
-             const deducedCatOption = categoryOptions.find(opt => opt.value === analysisResult.deduced_category_slug);
-             if (deducedCatOption) {
-                 setSelectedCategoryOption(deducedCatOption);
-             }
-        }
+            console.log("[ImportModal] Attempting to pre-select deduced category:", analysisResult.deduced_category_slug);
+            const deducedCatOption = categoryOptions.find(opt => opt.value === analysisResult.deduced_category_slug);
+            if (deducedCatOption) {
+                console.log("[ImportModal] Found matching category option:", deducedCatOption);
+                // Set the category state, which will trigger the entity loading effect
+                setSelectedCategoryOption(deducedCatOption);
+                // No need to manually set entity here, the other useEffect handles it
+            } else {
+                console.warn("[ImportModal] Deduced category slug not found in fetched category options.");
+            }
+    } else {
+            console.log("[ImportModal] No category slug deduced by backend.");
+            // If no category deduced, clear selection (important!)
+            setSelectedCategoryOption(null);
+            setEntities([]); // Clear entities if category is cleared
+            setSelectedEntityOption(null); // Clear entity selection
+    }
+    // --- End Category Pre-selection ---
 
         // Load detected preview from archive (independent of deduction)
         if (analysisResult.detected_preview_internal_path) {
@@ -274,7 +288,7 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
      useEffect(() => {
         let isMounted = true;
         const categorySlug = selectedCategoryOption?.value;
-
+    
         if (categorySlug) {
              setEntities([]);
              setSelectedEntityOption(null);
@@ -282,28 +296,30 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
              invoke('get_entities_by_category', { categorySlug: categorySlug })
                  .then(loadedEntities => {
                      if (!isMounted) return;
-                     // Important: Update raw entities state *before* trying to find match
                      setEntities(loadedEntities);
-                     console.log(`Entities loaded. Count: ${loadedEntities.length}`);
-
-                     // --- Set deduced entity slug IF category matches deduction ---
-                     // Need to compare the *currently selected* category slug with the deduced one
+                     console.log(`[ImportModal] Entities loaded for ${categorySlug}. Count: ${loadedEntities.length}`);
+    
+                     // --- Try pre-selecting entity based on BACKEND deduction first ---
+                     // Check if the current category matches the backend's deduced category
                      if (categorySlug === analysisResult?.deduced_category_slug && analysisResult?.deduced_entity_slug) {
                          const deducedEntityOption = loadedEntities
                               .map(ent => ({ value: ent.slug, label: ent.name })) // Map to options format first
                               .find(opt => opt.value === analysisResult.deduced_entity_slug);
-
+    
                          if (deducedEntityOption) {
                              setSelectedEntityOption(deducedEntityOption);
-                             console.log(`Successfully pre-selected deduced entity: ${analysisResult.deduced_entity_slug}`);
+                             console.log(`[ImportModal] Successfully pre-selected deduced entity: ${analysisResult.deduced_entity_slug}`);
+                             // If we successfully selected based on backend deduction, we can stop here for this effect run
+                             return; // Exit early after successful selection
                          } else {
-                             console.warn("Deduced entity slug not found in loaded entities for the deduced category.");
+                             console.warn("[ImportModal] Backend deduced entity slug not found in loaded entities for the category.");
                          }
                      }
-                     // --- Fallback: Try matching raw target name if no direct slug deduction worked ---
-                     else if (!selectedEntityOption && analysisResult?.raw_ini_target) { // Check if not already set
+    
+                     // --- Fallback: Try matching raw INI target name if NO entity was selected above ---
+                     if (analysisResult?.raw_ini_target) {
                          const rawTarget = analysisResult.raw_ini_target;
-                         console.log(`Attempting to match raw target name: ${rawTarget}`);
+                         console.log(`[ImportModal] Attempting to match raw target name: ${rawTarget}`);
                          const lowerRawTarget = rawTarget.toLowerCase();
                          const matchedEntity = loadedEntities.find(ent =>
                              ent.name.toLowerCase() === lowerRawTarget || ent.slug.toLowerCase() === lowerRawTarget
@@ -311,15 +327,17 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                          if (matchedEntity) {
                              const matchedOption = { value: matchedEntity.slug, label: matchedEntity.name };
                              setSelectedEntityOption(matchedOption);
-                             console.log(`Matched entity '${matchedOption.value}' from raw INI target '${rawTarget}'`);
+                             console.log(`[ImportModal] Matched entity '${matchedOption.value}' from raw INI target '${rawTarget}'`);
                          } else {
-                              console.log(`Raw INI target '${rawTarget}' did not match any entity in category '${categorySlug}'.`);
+                              console.log(`[ImportModal] Raw INI target '${rawTarget}' did not match any entity in category '${categorySlug}'.`);
                          }
                      }
+                     // --- End Fallback ---
                  })
                  .catch(err => {
-                     console.error(`Failed to fetch entities for ${selectedCategory}:`, err);
+                     console.error(`Failed to fetch entities for ${categorySlug}:`, err);
                      if(isMounted) setEntities([]);
+                     // Don't set selectedEntityOption to null on error here, might have been set by deduction
                   })
                 .finally(() => { if(isMounted) setEntityLoading(false); });
             } else {
