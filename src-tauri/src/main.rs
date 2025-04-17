@@ -193,6 +193,8 @@ lazy_static! {
         set.insert("timer.ini".to_string());
         set
     };
+    static ref NAME_CLEANUP_REGEX: Regex = Regex::new(r"(?i)[_\-.\s]+|(_v\d+(\.\d+)*)|(_af)|(_nsfw)|(\(disabled\))|(\(.*\))|(\[.*\])|(^DISABLED_)").unwrap();
+    static ref POTENTIAL_NAME_PART_REGEX: Regex = Regex::new(r"^[a-zA-Z\s]+").unwrap();
 }
 
 #[derive(Debug)]
@@ -205,13 +207,15 @@ struct DeducedInfo {
     image_filename: Option<String>,
 }
 
-#[derive(Clone)] // Allow cloning for the async task
+#[derive(Clone)]
 struct DeductionMaps {
     category_slug_to_id: HashMap<String, i64>,
     entity_slug_to_id: HashMap<String, i64>,
     lowercase_category_name_to_slug: HashMap<String, String>,
     lowercase_entity_name_to_slug: HashMap<String, String>,
     entity_slug_to_category_slug: HashMap<String, String>,
+    lowercase_entity_firstname_to_slug: HashMap<String, String>, // e.g., "ellen" -> "ellen-joe"
+    lowercase_entity_first_two_words_to_slug: HashMap<String, String>, // e.g., "ellen joe" -> "ellen-joe"
 }
 
 #[derive(Serialize, Deserialize, Debug)] struct Category { id: i64, name: String, slug: String }
@@ -256,6 +260,131 @@ struct ArchiveAnalysisResult {
 }
 
 // --- Helper Functions for Deduction ---
+
+// Function to clean and extract potential base name
+fn clean_and_extract_name(input: &str) -> String {
+    // First pass: remove specific tags, versions, prefixes, and replace separators with space
+    let separators_removed = NAME_CLEANUP_REGEX.replace_all(input, " ");
+    // Second pass: Trim whitespace aggressively
+    let trimmed = separators_removed.trim();
+    // Third pass: Try to isolate the starting name part before numbers or leftover symbols
+    if let Some(mat) = POTENTIAL_NAME_PART_REGEX.find(trimmed) {
+        mat.as_str().trim().to_lowercase() // Return the matched alphabetic part, trimmed and lowercased
+    } else {
+        trimmed.to_lowercase() // Fallback to the trimmed version if no clear name part found
+    }
+}
+
+// Helper function to find entity slug based on a hint string
+fn find_entity_slug_from_hint(hint: &str, maps: &DeductionMaps) -> Option<String> {
+    if hint.is_empty() { return None; }
+
+    let cleaned_hint = clean_and_extract_name(hint);
+    let lower_hint = hint.to_lowercase(); // Original lowercase for exact matches
+    println!("[find_entity_slug] Hint: '{}', Cleaned Lower: '{}'", hint, cleaned_hint);
+
+    // --- Matching Strategies ---
+
+    // Priority 1: Exact slug match (original hint, case-sensitive)
+    if maps.entity_slug_to_id.contains_key(hint) {
+        println!("[find_entity_slug]   -> Match via P1: exact slug.");
+        return Some(hint.to_string());
+    }
+    // Priority 2: Exact lowercase name match (original hint) -> original slug
+    if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&lower_hint) {
+         println!("[find_entity_slug]   -> Match via P2: exact lowercase name.");
+        return Some(slug.clone());
+    }
+    // Priority 3: Exact *cleaned* hint matches full lowercase name
+     if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&cleaned_hint) {
+          println!("[find_entity_slug]   -> Match via P3: exact cleaned hint vs full name.");
+         return Some(slug.clone());
+     }
+    // Priority 4: Exact *cleaned* hint matches first two words
+     if let Some(slug) = maps.lowercase_entity_first_two_words_to_slug.get(&cleaned_hint) {
+         println!("[find_entity_slug]   -> Match via P4: exact cleaned hint vs first two words.");
+        return Some(slug.clone());
+     }
+    // Priority 5: Exact *cleaned* hint matches first name
+     if let Some(slug) = maps.lowercase_entity_firstname_to_slug.get(&cleaned_hint) {
+          println!("[find_entity_slug]   -> Match via P5: exact cleaned hint vs first name.");
+         return Some(slug.clone());
+     }
+
+    // *** NEW Priority 6: First word of cleaned hint matches known first name ***
+    if let Some(first_word_cleaned) = cleaned_hint.split_whitespace().next() {
+        if first_word_cleaned.len() > 1 { // Avoid matching single letters
+             if let Some(slug) = maps.lowercase_entity_firstname_to_slug.get(first_word_cleaned) {
+                 println!("[find_entity_slug]   -> Match via P6: first word of cleaned hint ('{}') vs first name map.", first_word_cleaned);
+                 return Some(slug.clone());
+            }
+        }
+    }
+
+    // Priority 7: Cleaned hint STARTS WITH known full name
+    for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
+         // Ensure the known name isn't tiny compared to hint if starts_with is used
+         if cleaned_hint.starts_with(entity_name_lower) && entity_name_lower.len() > 2 {
+              println!("[find_entity_slug]   -> Match via P7: cleaned hint starts with known full name ('{}').", entity_name_lower);
+             return Some(entity_slug.clone());
+         }
+     }
+    // *** NEW Priority 8: Cleaned hint STARTS WITH known first two words ***
+    for (entity_name_first_two, entity_slug) in &maps.lowercase_entity_first_two_words_to_slug {
+        if cleaned_hint.starts_with(entity_name_first_two) {
+            println!("[find_entity_slug]   -> Match via P8: cleaned hint starts with known first two words ('{}').", entity_name_first_two);
+            return Some(entity_slug.clone());
+        }
+    }
+    // *** NEW Priority 9: Cleaned hint STARTS WITH known first name ***
+    for (entity_name_first, entity_slug) in &maps.lowercase_entity_firstname_to_slug {
+        if cleaned_hint.starts_with(entity_name_first) && entity_name_first.len() > 1 { // Avoid matching 'a' etc.
+             println!("[find_entity_slug]   -> Match via P9: cleaned hint starts with known first name ('{}').", entity_name_first);
+            return Some(entity_slug.clone());
+        }
+    }
+
+
+    // Priority 10: Known full name STARTS WITH cleaned hint (less likely useful)
+    // for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
+    //     if entity_name_lower.starts_with(&cleaned_hint) && cleaned_hint.len() > 2 {
+    //          println!("[find_entity_slug]   -> Match via P10: known name starts with cleaned hint.");
+    //         return Some(entity_slug.clone());
+    //     }
+    // }
+
+
+    // Priority 11: Known full name CONTAINS cleaned hint (if hint is reasonably long)
+     if cleaned_hint.len() > 3 {
+         for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
+             if entity_name_lower.contains(&cleaned_hint) {
+                  println!("[find_entity_slug]   -> Match via P11: known name contains cleaned hint.");
+                 return Some(entity_slug.clone());
+             }
+         }
+     }
+     // Priority 12: Known first two words CONTAINS cleaned hint
+      if cleaned_hint.len() > 3 {
+         for (entity_name_first_two, entity_slug) in &maps.lowercase_entity_first_two_words_to_slug {
+             if entity_name_first_two.contains(&cleaned_hint) {
+                  println!("[find_entity_slug]   -> Match via P12: known first two words contains cleaned hint.");
+                 return Some(entity_slug.clone());
+             }
+         }
+      }
+      // Priority 13: Known first name CONTAINS cleaned hint
+      if cleaned_hint.len() > 2 { // Can be shorter here maybe
+         for (entity_name_first, entity_slug) in &maps.lowercase_entity_firstname_to_slug {
+             if entity_name_first.contains(&cleaned_hint) {
+                 println!("[find_entity_slug]   -> Match via P13: known first name contains cleaned hint.");
+                 return Some(entity_slug.clone());
+             }
+         }
+      }
+
+    println!("[find_entity_slug]   -> No match found.");
+    None // No match found
+}
 
 fn get_internal_db_slug(db_path: &PathBuf) -> Result<Option<String>, AppError> {
     if !db_path.exists() {
@@ -321,7 +450,6 @@ fn find_asset_ini_paths(conn: &Connection, asset_id: i64, base_mods_path: &PathB
 }
 
 fn fetch_deduction_maps(conn: &Connection) -> SqlResult<DeductionMaps> {
-    // --- Category fetching (keep as is) ---
     let mut category_slug_to_id = HashMap::new();
     let mut lowercase_category_name_to_slug = HashMap::new();
     // *** Store category id to slug for the next step ***
@@ -347,42 +475,46 @@ fn fetch_deduction_maps(conn: &Connection) -> SqlResult<DeductionMaps> {
     // --- Entity fetching (Modified to get category_id) ---
     let mut entity_slug_to_id = HashMap::new();
     let mut lowercase_entity_name_to_slug = HashMap::new();
-    // *** Initialize the new map ***
     let mut entity_slug_to_category_slug = HashMap::new();
+    let mut lowercase_entity_firstname_to_slug = HashMap::new();
+    let mut lowercase_entity_first_two_words_to_slug = HashMap::new();
     // ---
-    // *** Fetch category_id along with entity info ***
     let mut entity_stmt = conn.prepare("SELECT slug, id, name, category_id FROM entities")?;
-    // ---
-    // *** Update query_map to include category_id ***
     let entity_rows = entity_stmt.query_map([], |row| Ok((
-        row.get::<_, String>(0)?, // slug
-        row.get::<_, i64>(1)?,    // id
-        row.get::<_, String>(2)?, // name
-        row.get::<_, i64>(3)?     // category_id
+        row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?, row.get::<_, i64>(3)?
     )))?;
-    // ---
-    println!("[fetch_deduction_maps] Processing entities...");
+
+    println!("[fetch_deduction_maps] Processing entities for advanced lookup...");
     let mut entity_count = 0;
     for row in entity_rows {
-         // *** Destructure to include category_id ***
         if let Ok((slug, id, name, category_id)) = row {
-         // ---
             entity_slug_to_id.insert(slug.clone(), id);
-            lowercase_entity_name_to_slug.insert(name.to_lowercase(), slug.clone());
+            let lower_name = name.to_lowercase();
+            lowercase_entity_name_to_slug.insert(lower_name.clone(), slug.clone());
 
-            // *** Populate the new map using the category_id_to_slug lookup ***
             if let Some(cat_slug) = category_id_to_slug.get(&category_id) {
                  entity_slug_to_category_slug.insert(slug.clone(), cat_slug.clone());
-            } else {
-                 // Log warning if category mapping is missing (shouldn't happen with FKs)
-                 eprintln!("[fetch_deduction_maps] Warning: Could not find category slug for category_id {} (entity slug: {})", category_id, slug);
+            } else { /* log warning */ }
+
+            // *** Populate advanced name maps ***
+            let words: Vec<&str> = lower_name.split_whitespace().collect();
+            if let Some(first_word) = words.get(0) {
+                 // Only add if different from full name to avoid redundancy/collisions
+                 if *first_word != lower_name {
+                     lowercase_entity_firstname_to_slug.insert(first_word.to_string(), slug.clone());
+                 }
             }
-            // ---
+            if words.len() >= 2 {
+                 let first_two = format!("{} {}", words[0], words[1]);
+                 // Only add if different from full name
+                 if first_two != lower_name {
+                    lowercase_entity_first_two_words_to_slug.insert(first_two, slug.clone());
+                 }
+            }
+            // *** End populating ***
 
             entity_count += 1;
-        } else if let Err(e) = row {
-             eprintln!("[fetch_deduction_maps] Error processing entity row: {}", e);
-        }
+        } else if let Err(e) = row { /* log error */ }
     }
     println!("[fetch_deduction_maps] Processed {} entities.", entity_count);
 
@@ -393,6 +525,8 @@ fn fetch_deduction_maps(conn: &Connection) -> SqlResult<DeductionMaps> {
         lowercase_category_name_to_slug,
         lowercase_entity_name_to_slug,
         entity_slug_to_category_slug,
+        lowercase_entity_firstname_to_slug,
+        lowercase_entity_first_two_words_to_slug,
     })
 }
 
@@ -401,66 +535,48 @@ fn deduce_mod_info_v2(
     base_mods_path: &PathBuf,
     maps: &DeductionMaps,
 ) -> Option<DeducedInfo> {
-    // Ensure file_name() is valid before proceeding
+    println!("[Deduce V2 - Entity First] Input Path: {}", mod_folder_path.display());
+
     let mod_folder_name = match mod_folder_path.file_name() {
          Some(name) => name.to_string_lossy().to_string(),
          None => {
-             return None; // Cannot deduce without a folder name
+             eprintln!("[Deduce V2] Error: Cannot get folder name from path: {}", mod_folder_path.display());
+             return None;
          }
      };
 
+    // --- Initial Info ---
     let mut info = DeducedInfo {
-        entity_slug: format!("{}{}", "unknown", OTHER_ENTITY_SUFFIX), // Default placeholder
+        entity_slug: format!("{}{}", "unknown", OTHER_ENTITY_SUFFIX),
         mod_name: mod_folder_name.clone(),
-        mod_type_tag: None,
-        author: None,
-        description: None,
+        mod_type_tag: None, author: None, description: None,
         image_filename: find_preview_image(mod_folder_path),
     };
 
     let mut found_entity_slug: Option<String> = None;
-    let mut found_category_slug: Option<String> = None;
-
-    // --- 1. Deduce from Parent Folders (Walking UP) ---
-    let mut current_path = mod_folder_path.parent();
-    while let Some(path) = current_path {
-        if path == *base_mods_path || path.parent() == Some(base_mods_path) {
-            break;
-        }
-        if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
-            let lower_folder_name = folder_name.to_lowercase();
-
-            // Check Entity Slug/Name
-            if found_entity_slug.is_none() {
-                if maps.entity_slug_to_id.contains_key(folder_name) {
-                    found_entity_slug = Some(folder_name.to_string());
-                } else if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&lower_folder_name) {
-                    found_entity_slug = Some(slug.clone());
-                }
-            }
-
-            // Check Category Slug/Name
-             let cat_slug_match = maps.category_slug_to_id.contains_key(folder_name);
-             let cat_name_match_slug = maps.lowercase_category_name_to_slug.get(&lower_folder_name);
-
-            if cat_slug_match {
-                found_category_slug = Some(folder_name.to_string());
-            } else if let Some(slug) = cat_name_match_slug {
-                 // Only update if we haven't found a slug match higher up during this walk
-                if found_category_slug.is_none() || !maps.category_slug_to_id.contains_key(found_category_slug.as_ref().unwrap()) {
-                     found_category_slug = Some(slug.clone());
-                 }
-            }
-        } else {
-        }
-        current_path = path.parent();
-    }
-
-
-    // --- 2. Deduce from .ini File ---
     let mut ini_target_hint: Option<String> = None;
     let mut ini_type_hint: Option<String> = None;
 
+    // --- 1. Check Parent Folders for ENTITY Match ---
+    println!("[Deduce V2] Checking parent folders for ENTITY match...");
+    // ... (existing parent folder checking logic using find_entity_slug_from_hint) ...
+    let mut current_path = mod_folder_path.parent();
+    while let Some(path) = current_path {
+        if path == *base_mods_path || path.parent() == Some(base_mods_path) { break; }
+        if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
+             if let Some(slug) = find_entity_slug_from_hint(folder_name, maps) {
+                 found_entity_slug = Some(slug);
+                 println!("[Deduce V2]   -> Found entity via parent folder: '{}' -> {}", folder_name, found_entity_slug.as_ref().unwrap());
+                 break;
+             }
+        }
+        current_path = path.parent();
+    }
+    println!("[Deduce V2] Parent folder check done. Found Entity Slug: {:?}", found_entity_slug);
+
+
+    // --- 2. Parse INI File (if entity not found yet or for metadata) ---
+    println!("[Deduce V2] Checking INI file...");
     let ini_path_option = WalkDir::new(mod_folder_path)
         .max_depth(1).min_depth(1).into_iter()
         .filter_map(|e| e.ok())
@@ -468,112 +584,247 @@ fn deduce_mod_info_v2(
         .map(|e| e.into_path());
 
     if let Some(ini_path) = ini_path_option {
+        println!("[Deduce V2] Found INI: {}", ini_path.display());
         if let Ok(ini_content) = fs::read_to_string(&ini_path) {
             if let Ok(ini) = Ini::load_from_str(&ini_content) {
-                // ... (ini parsing logic remains the same) ...
                  for section_name in ["Mod", "Settings", "Info", "General"] {
                     if let Some(section) = ini.section(Some(section_name)) {
+                        // Update metadata if found
                         if let Some(name) = section.get("Name").or_else(|| section.get("ModName")) { info.mod_name = name.trim().to_string(); }
                         if let Some(author) = section.get("Author") { info.author = Some(author.trim().to_string()); }
                         if let Some(desc) = section.get("Description") { info.description = Some(desc.trim().to_string()); }
+                        // Get hints (even if entity found, these might be useful someday)
                         if let Some(target) = section.get("Target").or_else(|| section.get("Entity")).or_else(|| section.get("Character")) { ini_target_hint = Some(target.trim().to_string()); }
-                        if let Some(typ) = section.get("Type").or_else(|| section.get("Category")) { ini_type_hint = Some(typ.trim().to_string()); info.mod_type_tag = Some(typ.trim().to_string()); }
+                        if let Some(typ) = section.get("Type").or_else(|| section.get("Category")) { info.mod_type_tag = Some(typ.trim().to_string()); ini_type_hint = info.mod_type_tag.clone(); } // Store type hint
                     }
                 }
-            }
-        }
-    }
-
-    // Try matching INI Target Hint (if entity not already found via folders)
-    if found_entity_slug.is_none() {
-        if let Some(target) = &ini_target_hint { // Borrow hint
-            let lower_target = target.to_lowercase();
-            if maps.entity_slug_to_id.contains_key(target) {
-                found_entity_slug = Some(target.clone()); // Clone here
-            } else if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&lower_target) {
-                found_entity_slug = Some(slug.clone());
-            }
-        }
-    }
-
-    // Try matching INI Type Hint (if category not already found via folders)
-    if found_category_slug.is_none() {
-        if let Some(typ) = &ini_type_hint { // Borrow hint
-            let lower_typ = typ.to_lowercase();
-             if maps.category_slug_to_id.contains_key(typ) {
-                found_category_slug = Some(typ.clone()); // Clone here
-            } else if let Some(slug) = maps.lowercase_category_name_to_slug.get(&lower_typ) {
-                found_category_slug = Some(slug.clone());
-            }
-        }
-    }
-
-
-    // --- 3. Final Assignment Logic ---
-    if let Some(ref entity_slug) = found_entity_slug {
-        info.entity_slug = entity_slug.clone();
-    } else if let Some(ref category_slug) = found_category_slug {
-        info.entity_slug = format!("{}{}", category_slug, OTHER_ENTITY_SUFFIX);
-    } else {
-        // Priority 3: Try top-level folder name as category fallback
-        let relative_path_result = mod_folder_path.strip_prefix(base_mods_path);
-        if let Ok(relative_path) = relative_path_result {
-            if let Some(top_level_component) = relative_path.components().next() {
-                if let Some(top_folder_name) = top_level_component.as_os_str().to_str() {
-                    let lower_top_folder = top_folder_name.to_lowercase();
-                    let mut top_level_category_found: Option<String> = None; // Store the matched slug
-
-                    // --- Modified Fallback Check ---
-                    // Iterate through known category slugs and names for a partial match
-                    for (cat_slug, _) in &maps.category_slug_to_id {
-                        // Simple check: does slug start with folder name, or folder name start with slug?
-                        // Adjust this heuristic if needed (e.g., Levenshtein distance for typos)
-                        if cat_slug.starts_with(&lower_top_folder) || lower_top_folder.starts_with(cat_slug) {
-                            top_level_category_found = Some(cat_slug.clone());
-                            break; // Found a plausible match, stop checking slugs
-                        }
-                    }
-
-                    // If no slug matched, check names
-                    if top_level_category_found.is_none() {
-                        for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
-                             if cat_name_lower.starts_with(&lower_top_folder) || lower_top_folder.starts_with(cat_name_lower) {
-                                 top_level_category_found = Some(cat_slug.clone());
-                                 break; // Found a plausible match, stop checking names
-                             }
-                        }
-                    }
-                    // --- End Modified Fallback Check ---
-
-                    if let Some(found_cat_slug) = top_level_category_found {
-                        info.entity_slug = format!("{}{}", found_cat_slug, OTHER_ENTITY_SUFFIX);
-                    } else {
-                        // Priority 4: Hardcoded fallback if top-level folder doesn't match category even fuzzily
-                        let fallback_category = "characters";
-                        info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
-                    }
-                } else {
-                     let fallback_category = "characters";
-                     info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
-                }
+                println!("[Deduce V2] INI parsed. Name='{}', Author='{:?}', TargetHint='{:?}', TypeHint='{:?}'", info.mod_name, info.author, ini_target_hint, ini_type_hint);
             } else {
-                 let fallback_category = "characters";
-                 info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
+                eprintln!("[Deduce V2] Warning: Failed to parse INI content from {}", ini_path.display());
             }
         } else {
-             let fallback_category = "characters";
-             info.entity_slug = format!("{}{}", fallback_category, OTHER_ENTITY_SUFFIX);
+             eprintln!("[Deduce V2] Warning: Failed to read INI file content from {}", ini_path.display());
+        }
+    } else {
+        println!("[Deduce V2] No INI file found in mod folder.");
+    }
+
+    // --- 3. Try Matching INI Target Hint (if entity still not found) ---
+    if found_entity_slug.is_none() {
+        if let Some(target_hint) = &ini_target_hint {
+            println!("[Deduce V2] Trying INI target hint matching...");
+            if let Some(slug) = find_entity_slug_from_hint(target_hint, maps) {
+                 found_entity_slug = Some(slug);
+                 println!("[Deduce V2]   -> Found entity via INI target hint: '{}' -> {}", target_hint, found_entity_slug.as_ref().unwrap());
+            }
         }
     }
 
-    // Clean up Mod Name (remains the same)
-    // ... (name cleanup logic) ...
-     let original_mod_name = info.mod_name.clone();
-     info.mod_name = MOD_NAME_CLEANUP_REGEX.replace_all(&info.mod_name, "").trim().to_string();
-     if info.mod_name.is_empty() {
-         info.mod_name = mod_folder_name; // Use original folder name if cleanup resulted in empty
+    // --- 4. Try Matching Internal Filenames (NEW STEP) ---
+    if found_entity_slug.is_none() {
+        println!("[Deduce V2] Trying internal filename matching...");
+        let mut file_match_found = false;
+        // Iterate through files directly inside the mod folder (depth 1)
+        for entry_result in WalkDir::new(mod_folder_path).min_depth(1).max_depth(1).into_iter() {
+             match entry_result {
+                 Ok(entry) => {
+                     if entry.file_type().is_file() {
+                         // Get filename stem (without extension)
+                         if let Some(stem) = entry.path().file_stem().and_then(OsStr::to_str) {
+                             if !stem.is_empty() {
+                                 // Use the helper to check if the stem matches an entity
+                                 if let Some(slug) = find_entity_slug_from_hint(stem, maps) {
+                                     found_entity_slug = Some(slug);
+                                     println!("[Deduce V2]   -> Found entity via internal filename stem: '{}' -> {}", stem, found_entity_slug.as_ref().unwrap());
+                                     file_match_found = true;
+                                     break; // Found a match from a file, stop searching files
+                                 }
+                             }
+                         }
+                     }
+                 },
+                 Err(e) => {
+                     eprintln!("[Deduce V2] Warning: Error accessing entry during internal file scan: {}", e);
+                     // Continue scanning other files if possible
+                 }
+             }
+        }
+        if !file_match_found {
+            println!("[Deduce V2]   -> No entity match found from internal filenames.");
+        }
+    }
+
+
+    // --- 5. Try Matching Mod Folder Name (Lower Priority) ---
+     if found_entity_slug.is_none() {
+         println!("[Deduce V2] Trying mod folder name matching: '{}'", mod_folder_name);
+         if let Some(slug) = find_entity_slug_from_hint(&mod_folder_name, maps) {
+              found_entity_slug = Some(slug);
+              println!("[Deduce V2]   -> Found entity via mod folder name: '{}' -> {}", mod_folder_name, found_entity_slug.as_ref().unwrap());
+         }
      }
 
+    // --- 6. Final Assignment Logic ---
+    println!("[Deduce V2] Final Assignment Logic. Found Entity Slug So Far: {:?}", found_entity_slug);
+    if let Some(ref entity_slug) = found_entity_slug {
+        // ---- ENTITY FOUND ----
+        // Assign the specific entity slug directly.
+        // The category is implicitly determined by this entity's relationship in the DB.
+        info.entity_slug = entity_slug.clone();
+        println!("[Deduce V2] SUCCESS: Assigning specific entity slug: {}", info.entity_slug);
+
+    } else {
+        // ---- ENTITY NOT FOUND ----
+        // Fallback: Try to find the most likely CATEGORY to place this mod under,
+        //           using the "<category-slug>-other" pattern.
+        println!("[Deduce V2] Entity not found. Trying CATEGORY fallback deduction...");
+        let mut fallback_category_slug: Option<String> = None;
+
+        // Fallback Priority 1: Parent folder names matching a CATEGORY name/slug
+        println!("[Deduce V2]   Fallback Prio 1: Checking parent folders for CATEGORY match...");
+        let mut current_path_cat = mod_folder_path.parent();
+        while let Some(path) = current_path_cat {
+             // Stop if we reach the base mods path or its immediate parent
+             if path == *base_mods_path || path.parent() == Some(base_mods_path) { break; }
+             if let Some(folder_name) = path.file_name().and_then(|n| n.to_str()) {
+                 let lower_folder_name = folder_name.to_lowercase();
+                 println!("[Deduce V2]     Checking parent folder for category: {}", folder_name);
+                  // Check Category Slug (exact match)
+                  if maps.category_slug_to_id.contains_key(folder_name) {
+                      fallback_category_slug = Some(folder_name.to_string());
+                      println!("[Deduce V2]       -> Found category via parent exact slug: {}", folder_name);
+                      break; // Found best match, stop walking up
+                  }
+                  // Check Lowercase Category Name
+                  if let Some(slug) = maps.lowercase_category_name_to_slug.get(&lower_folder_name) {
+                      fallback_category_slug = Some(slug.clone());
+                      println!("[Deduce V2]       -> Found category via parent lowercase name: {} -> {}", lower_folder_name, slug);
+                      break; // Found best match, stop walking up
+                  }
+             }
+             current_path_cat = path.parent();
+        }
+
+        // Fallback Priority 2: INI Type Hint matching a CATEGORY name/slug
+        if fallback_category_slug.is_none() {
+            println!("[Deduce V2]   Fallback Prio 2: Checking INI type hint for CATEGORY match...");
+            if let Some(type_hint) = &ini_type_hint {
+                let lower_type_hint = type_hint.to_lowercase();
+                println!("[Deduce V2]     Trying INI type hint: '{}'", type_hint);
+                // Prio 1: Exact slug
+                if maps.category_slug_to_id.contains_key(type_hint) {
+                    fallback_category_slug = Some(type_hint.clone());
+                    println!("[Deduce V2]       -> Matched category via INI exact slug: {}", type_hint);
+                }
+                // Prio 2: Exact lowercase name -> original slug
+                else if let Some(slug) = maps.lowercase_category_name_to_slug.get(&lower_type_hint) {
+                    fallback_category_slug = Some(slug.clone());
+                    println!("[Deduce V2]       -> Matched category via INI exact lowercase name: {} -> {}", lower_type_hint, slug);
+                }
+                 // Prio 3: Known name starts with hint (optional)
+                 else {
+                     for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
+                         if cat_name_lower.starts_with(&lower_type_hint) {
+                             fallback_category_slug = Some(cat_slug.clone());
+                             println!("[Deduce V2]       -> Matched category via INI name prefix: {} -> {}", cat_name_lower, cat_slug);
+                             break;
+                         }
+                     }
+                 }
+                 // Prio 4: Known name contains hint (optional)
+                 if fallback_category_slug.is_none() {
+                     for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
+                         if lower_type_hint.len() > 2 && cat_name_lower.contains(&lower_type_hint) {
+                             fallback_category_slug = Some(cat_slug.clone());
+                             println!("[Deduce V2]       -> Matched category via INI name contains: {} -> {}", cat_name_lower, cat_slug);
+                             break;
+                         }
+                     }
+                 }
+            } else {
+                 println!("[Deduce V2]     No INI type hint available.");
+            }
+        }
+
+        // Fallback Priority 3: Top-level folder name (relative to base) matching a CATEGORY name/slug
+        if fallback_category_slug.is_none() {
+             println!("[Deduce V2]   Fallback Prio 3: Trying top-level folder name for CATEGORY match...");
+             let relative_path_result = mod_folder_path.strip_prefix(base_mods_path);
+             if let Ok(relative_path) = relative_path_result {
+                 if let Some(top_level_component) = relative_path.components().next() {
+                     if let Some(top_folder_name) = top_level_component.as_os_str().to_str() {
+                         let lower_top_folder = top_folder_name.to_lowercase();
+                         println!("[Deduce V2]     Top-level folder: {}", top_folder_name);
+                          // Fuzzy match logic (simplified: check starts_with or contains)
+                         // Prioritize exact slug/name match if possible within top-level check
+                         if maps.category_slug_to_id.contains_key(top_folder_name) {
+                              fallback_category_slug = Some(top_folder_name.to_string());
+                              println!("[Deduce V2]       -> Matched category via top-level exact slug: {}", top_folder_name);
+                         } else if let Some(slug) = maps.lowercase_category_name_to_slug.get(&lower_top_folder) {
+                              fallback_category_slug = Some(slug.clone());
+                              println!("[Deduce V2]       -> Matched category via top-level exact name: {} -> {}", lower_top_folder, slug);
+                         } else {
+                             // Then try fuzzy matching
+                             let mut fuzzy_match_found = false;
+                             for (cat_slug, _) in &maps.category_slug_to_id {
+                                 if cat_slug.starts_with(&lower_top_folder) || lower_top_folder.starts_with(cat_slug) {
+                                     fallback_category_slug = Some(cat_slug.clone());
+                                     println!("[Deduce V2]       -> Matched category via top-level fuzzy slug prefix: {}", cat_slug);
+                                     fuzzy_match_found = true;
+                                     break;
+                                 }
+                             }
+                             if !fuzzy_match_found {
+                                 for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
+                                     if cat_name_lower.starts_with(&lower_top_folder) || lower_top_folder.starts_with(cat_name_lower) {
+                                         fallback_category_slug = Some(cat_slug.clone());
+                                         println!("[Deduce V2]       -> Matched category via top-level fuzzy name prefix: {} -> {}", cat_name_lower, cat_slug);
+                                         fuzzy_match_found = true;
+                                         break;
+                                     }
+                                 }
+                             }
+                             // Add 'contains' as last resort for fuzzy match
+                             if !fuzzy_match_found {
+                                 for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
+                                     if lower_top_folder.len() > 2 && cat_name_lower.contains(&lower_top_folder) {
+                                          fallback_category_slug = Some(cat_slug.clone());
+                                          println!("[Deduce V2]       -> Matched category via top-level fuzzy name contains: {} -> {}", cat_name_lower, cat_slug);
+                                          break;
+                                     }
+                                 }
+                             }
+                         }
+                     } else { println!("[Deduce V2]     Could not convert top-level OsStr to str."); }
+                 } else { println!("[Deduce V2]     Could not get top-level component."); }
+             } else { println!("[Deduce V2]     Could not strip base path prefix."); }
+        }
+
+        // --- Assign final fallback slug ---
+        if let Some(cat_slug) = fallback_category_slug {
+             // Found a category hint, assign to its -other group
+             info.entity_slug = format!("{}{}", cat_slug, OTHER_ENTITY_SUFFIX);
+             println!("[Deduce V2] Assigning fallback category slug: {}", info.entity_slug);
+        } else {
+             // Absolute last resort: Use a default category's -other group
+             let hardcoded_fallback_category = "characters"; // Or use "unknown" if you have an unknown-other slug
+             info.entity_slug = format!("{}{}", hardcoded_fallback_category, OTHER_ENTITY_SUFFIX);
+             println!("[Deduce V2] No category hint found, assigning hardcoded fallback: {}", info.entity_slug);
+        }
+    } // --- End of else block (Entity Not Found) ---
+
+    // --- 7. Clean up Mod Name ---
+    let original_mod_name = info.mod_name.clone();
+    info.mod_name = MOD_NAME_CLEANUP_REGEX.replace_all(&info.mod_name, "").trim().to_string();
+    // If cleaning results in empty, use original folder name as fallback
+    if info.mod_name.is_empty() {
+         info.mod_name = mod_folder_name;
+         println!("[Deduce V2] Warning: Name cleanup resulted in empty string, using folder name '{}'", info.mod_name);
+    } else if info.mod_name != original_mod_name {
+        println!("[Deduce V2] Cleaned mod name: '{}' -> '{}'", original_mod_name, info.mod_name);
+    }
+
+    println!("[Deduce V2 - Entity First] Final Deduced Info: {:?}", info);
     Some(info)
 }
 
@@ -1549,74 +1800,119 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
                              message: format!("Processing: {}", folder_name_only)
                          }).unwrap_or_else(|e| eprintln!("Failed to emit scan progress: {}", e));
 
-                        match deduce_mod_info_v2(&path, &base_mods_path_clone, &maps_clone) {
+                         match deduce_mod_info_v2(&path, &base_mods_path_clone, &maps_clone) {
                             Some(deduced) => {
-                                 if let Some(target_entity_id) = maps_clone.entity_slug_to_id.get(&deduced.entity_slug) {
-                                    let relative_path_buf = match path.strip_prefix(&base_mods_path_clone) {
-                                        Ok(p) => p.to_path_buf(),
-                                        Err(_) => {
-                                            eprintln!("[Scan Task] Error: Could not strip base path prefix from '{}'. Skipping.", path.display());
-                                            errors_count += 1;
-                                            continue;
-                                        }
-                                    };
-                                    let filename_osstr = relative_path_buf.file_name().unwrap_or_default();
-                                    let filename_str = filename_osstr.to_string_lossy();
-                                    let clean_filename = filename_str.trim_start_matches(DISABLED_PREFIX);
-                                    let relative_parent_path = relative_path_buf.parent();
-                                    let relative_path_to_store = match relative_parent_path {
-                                        Some(parent) => parent.join(clean_filename).to_string_lossy().to_string(),
-                                        None => clean_filename.to_string(),
-                                    };
-                                    let relative_path_to_store = relative_path_to_store.replace("\\", "/");
-
-                                    let existing_id: Option<i64> = conn.query_row(
+                                println!("[Scan Task] Deduced slug for '{}': {}", path_display, deduced.entity_slug); // Log the deduced slug
+                        
+                                // Directly look up the deduced slug (could be specific like 'klee' or fallback like 'characters-other')
+                                let target_entity_id_result: Option<i64> = maps_clone.entity_slug_to_id.get(&deduced.entity_slug).copied(); // Use .copied() to get Option<i64>
+                        
+                                if let Some(target_entity_id) = target_entity_id_result {
+                                     // Successfully found ID for the deduced slug (whether specific or fallback)
+                                     println!("[Scan Task] Found entity ID {} for slug '{}'", target_entity_id, deduced.entity_slug);
+                        
+                                     // --- Proceed with relative path calculation and DB insert/update ---
+                                     let relative_path_buf = match path.strip_prefix(&base_mods_path_clone) {
+                                         Ok(p) => p.to_path_buf(),
+                                         Err(_) => {
+                                             eprintln!("[Scan Task] Error: Could not strip base path prefix from '{}'. Skipping.", path.display());
+                                             errors_count += 1;
+                                             continue; // Skip this mod folder if path stripping fails
+                                         }
+                                     };
+                        
+                                     // Calculate the clean relative path to store in the DB
+                                     let filename_osstr = relative_path_buf.file_name().unwrap_or_default();
+                                     let filename_str = filename_osstr.to_string_lossy();
+                                     let clean_filename = filename_str.trim_start_matches(DISABLED_PREFIX); // Use the base name without prefix
+                                     let relative_parent_path = relative_path_buf.parent();
+                                     // Construct the path: parent/clean_filename
+                                     let relative_path_to_store = match relative_parent_path {
+                                         Some(parent) if parent.as_os_str().len() > 0 => parent.join(clean_filename).to_string_lossy().to_string(),
+                                         _ => clean_filename.to_string(), // No parent or parent is root
+                                     };
+                                     // Ensure forward slashes for consistency
+                                     let relative_path_to_store = relative_path_to_store.replace("\\", "/");
+                                     println!("[Scan Task] Calculated DB path: '{}'", relative_path_to_store);
+                        
+                        
+                                     // Check if asset already exists in DB using the TARGET entity ID and the CLEAN relative path
+                                     let existing_db_asset_id: Option<i64> = conn.query_row(
                                         "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
                                         params![target_entity_id, relative_path_to_store],
                                         |row| row.get(0),
-                                    ).optional() // optional() turns QueryReturnedNoRows into Ok(None)
-                                     .map_err(|e| format!("DB error checking for existing asset '{}': {}", relative_path_to_store, e))?; // Now map other errors
-
-                                    if let Some(asset_id) = existing_id {
-                                         found_asset_ids.insert(asset_id);
-                                    } else {
-                                         // *** FIX: Add .map_err here ***
-                                         let insert_result = conn.execute(
-                                            "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                                            params![
-                                                target_entity_id,
-                                                deduced.mod_name,
-                                                deduced.description,
-                                                relative_path_to_store,
-                                                deduced.image_filename,
-                                                deduced.author,
-                                                deduced.mod_type_tag
-                                            ]
-                                         ).map_err(|e| format!("DB error inserting new asset '{}': {}", relative_path_to_store, e)); // Don't use ? here, handle below
-
-                                         match insert_result {
-                                             Ok(changes) => {
-                                                 if changes > 0 {
-                                                    mods_added_count += 1;
-                                                    let new_id = conn.last_insert_rowid();
-                                                    found_asset_ids.insert(new_id);
-                                                }
-                                             }
-                                             // Handle specific insert error if needed
-                                             Err(e) => { eprintln!("[Scan Task] {}", e); errors_count += 1; }
-                                         }
-                                    }
-                                 } else {
-                                      eprintln!("[Scan Task] Error: Could not find entity ID for deduced slug '{}' from path '{}'", deduced.entity_slug, path_display);
-                                      errors_count += 1;
-                                 }
+                                     ).optional() // Use optional to handle QueryReturnedNoRows gracefully
+                                      .map_err(|e| format!("DB error checking for existing asset '{}': {}", relative_path_to_store, e))?; // Propagate other DB errors
+                        
+                                     if let Some(asset_id) = existing_db_asset_id {
+                                          // Asset exists, mark it as found on disk
+                                          println!("[Scan Task] Asset already in DB (ID: {}), path '{}'. Marking as found.", asset_id, relative_path_to_store);
+                                          found_asset_ids.insert(asset_id);
+                                          // Optional: Implement metadata update logic here if needed
+                                          // mods_updated_count += 1;
+                                     } else {
+                                          // Asset doesn't exist, insert it
+                                          println!("[Scan Task] Inserting new asset: EntityID={}, Name='{}', Path='{}'", target_entity_id, deduced.mod_name, relative_path_to_store);
+                                          let insert_result = conn.execute(
+                                             "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                             params![
+                                                 target_entity_id,
+                                                 deduced.mod_name,
+                                                 deduced.description,
+                                                 relative_path_to_store, // Store the clean relative path
+                                                 deduced.image_filename,
+                                                 deduced.author,
+                                                 deduced.mod_type_tag
+                                             ]
+                                          );
+                        
+                                           match insert_result {
+                                               Ok(changes) => {
+                                                   if changes > 0 {
+                                                       mods_added_count += 1;
+                                                       let new_id = conn.last_insert_rowid();
+                                                       found_asset_ids.insert(new_id);
+                                                       println!("[Scan Task]   -> Insert successful (New ID: {})", new_id);
+                                                   } else {
+                                                        // This case might indicate an issue, though execute should return > 0 on success.
+                                                        eprintln!("[Scan Task]   -> Insert reported 0 changes for '{}'.", relative_path_to_store);
+                                                        errors_count += 1;
+                                                   }
+                                               }
+                                               Err(e) => {
+                                                    // Check for UNIQUE constraint violation on folder_name specifically
+                                                    if e.to_string().contains("UNIQUE constraint failed: assets.folder_name") {
+                                                         // This means the same 'clean_relative_path' exists, possibly under a *different* entity_id.
+                                                         // This can happen if a mod was manually moved without updating the DB.
+                                                         // Pruning should eventually remove the old entry if the original folder is gone.
+                                                         // For now, log it and skip inserting the duplicate path.
+                                                         eprintln!("[Scan Task]   -> Insert failed due to UNIQUE constraint on folder_name '{}'. Asset might exist under a different entity or needs pruning. Skipping insert.", relative_path_to_store);
+                                                         // errors_count += 1; // Decide if this counts as an error
+                                                    } else {
+                                                         // Handle other DB errors during insert
+                                                         eprintln!("[Scan Task]   -> DB error inserting new asset '{}': {}", relative_path_to_store, e);
+                                                         errors_count += 1;
+                                                    }
+                                               }
+                                           }
+                                     }
+                                     // --- End DB insert/update ---
+                        
+                                } else {
+                                     // Deduction returned a slug, but it's NOT in the entity_slug_to_id map.
+                                     // This indicates a problem - either deduction maps are incomplete/wrong,
+                                     // or deduce_mod_info_v2 returned an invalid slug (e.g., "unknown-other" if unknown wasn't handled).
+                                     // This *shouldn't* happen if initialize_database correctly creates all fallback entities.
+                                     eprintln!("[Scan Task] CRITICAL ERROR: Deduced slug '{}' for path '{}' does NOT exist in the entity map! Skipping mod. Check DB initialization and deduction logic.", deduced.entity_slug, path_display);
+                                     errors_count += 1;
+                                }
                             }
-                            None => {
+                            None => { // deduce_mod_info_v2 itself returned None
                                  eprintln!("[Scan Task] Error: Failed to deduce mod info for path '{}'", path_display);
                                  errors_count += 1;
                             }
                         }
-                        walker.skip_current_dir();
+                        walker.skip_current_dir(); // Skip children after processing a mod folder
                     }
                 }
                 Err(e) => {
@@ -2203,7 +2499,7 @@ fn analyze_archive(
     println!("[analyze_archive] Starting Pass 4: Deduction...");
     for (index, entry) in entries.iter_mut().enumerate() {
         if likely_root_indices.contains(&index) {
-            entry.is_likely_mod_root = true;
+            entry.is_likely_mod_root = true; // Mark the entry
             println!("[analyze_archive] Found likely root: {}", entry.path);
             if !first_likely_root_processed {
                 first_likely_root_processed = true;
@@ -2229,9 +2525,6 @@ fn analyze_archive(
                                 if target_val.is_some() { extracted_target = target_val.map(|s| s.trim().to_string()); }
                                 let type_val = section.get("Type").or_else(|| section.get("Category"));
                                 if type_val.is_some() { extracted_type = type_val.map(|s| s.trim().to_string()); }
-
-                                // Optional: Break if hints found?
-                                // if deduced_mod_name.is_some() && deduced_author.is_some() && extracted_target.is_some() && extracted_type.is_some() { break; }
                             }
                         }
                         // Log extracted hints and assign to outer scope
@@ -2245,49 +2538,21 @@ fn analyze_archive(
                     println!("[analyze_archive] No INI found directly in root: {}", root_prefix);
                 }
 
-                // --- Try matching INI Target Hint (ENHANCED) ---
+                // --- Try matching INI Target Hint (USE HELPER) ---
                 if final_deduced_entity_slug.is_none() { // Only run if not already found
-                    if let Some(target_hint) = &raw_ini_target_found { // Use the raw hint found
-                        let lower_target_hint = target_hint.to_lowercase();
-                        println!("[analyze_archive] Trying INI target hint: '{}' (lowercase: '{}')", target_hint, lower_target_hint);
-
-                        // Priority 1: Exact slug match (case-sensitive)
-                        if maps.entity_slug_to_id.contains_key(target_hint) {
-                            final_deduced_entity_slug = Some(target_hint.clone());
-                            println!("[analyze_archive]   -> Matched entity via exact slug: {}", target_hint);
-                        }
-                        // Priority 2: Exact lowercase name match -> original slug
-                        else if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&lower_target_hint) {
-                            final_deduced_entity_slug = Some(slug.clone());
-                            println!("[analyze_archive]   -> Matched entity via exact lowercase name: {} -> {}", lower_target_hint, slug);
-                        }
-                        // Priority 3: Check if any known name STARTS WITH the hint (case-insensitive)
-                        else {
-                            for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
-                                if entity_name_lower.starts_with(&lower_target_hint) {
-                                    final_deduced_entity_slug = Some(entity_slug.clone());
-                                    println!("[analyze_archive]   -> Matched entity via name prefix: '{}' starts with '{}' -> {}", entity_name_lower, lower_target_hint, entity_slug);
-                                    break; // Take the first prefix match
-                                }
-                            }
-                        }
-                        // Priority 4: (Optional but helpful) Check if any known name CONTAINS the hint
-                        if final_deduced_entity_slug.is_none() {
-                            for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
-                                // Avoid matching tiny substrings like 'a' in 'Kaedehara Kazuha'
-                                if lower_target_hint.len() > 2 && entity_name_lower.contains(&lower_target_hint) {
-                                    final_deduced_entity_slug = Some(entity_slug.clone());
-                                    println!("[analyze_archive]   -> Matched entity via name contains: '{}' contains '{}' -> {}", entity_name_lower, lower_target_hint, entity_slug);
-                                    break; // Take the first contains match
-                                }
-                            }
+                    if let Some(target_hint) = &raw_ini_target_found {
+                        println!("[analyze_archive] Trying INI target hint matching...");
+                        // Use the reusable helper function
+                        if let Some(slug) = find_entity_slug_from_hint(target_hint, &maps) {
+                            final_deduced_entity_slug = Some(slug);
+                            println!("[analyze_archive]   -> Found entity via INI target hint: '{}' -> {}", target_hint, final_deduced_entity_slug.as_ref().unwrap());
                         }
                     } else {
                         println!("[analyze_archive] No INI target hint found to match.");
                     }
                 }
 
-                // --- Try matching INI Type Hint (ENHANCED) ---
+                // --- Try matching INI Type Hint (Category - Keep enhanced logic here) ---
                 if final_deduced_category_slug.is_none() { // Only run if not already found
                     if let Some(type_hint) = &raw_ini_type_found {
                         let lower_type_hint = type_hint.to_lowercase();
@@ -2296,19 +2561,19 @@ fn analyze_archive(
                         // Prio 1: Exact slug
                         if maps.category_slug_to_id.contains_key(type_hint) {
                             final_deduced_category_slug = Some(type_hint.clone());
-                            println!("[analyze_archive]   -> Matched category via exact slug: {}", type_hint);
+                            println!("[analyze_archive]   -> Matched category via INI exact slug: {}", type_hint);
                         }
                         // Prio 2: Exact lowercase name -> original slug
                         else if let Some(slug) = maps.lowercase_category_name_to_slug.get(&lower_type_hint) {
                             final_deduced_category_slug = Some(slug.clone());
-                            println!("[analyze_archive]   -> Matched category via exact lowercase name: {} -> {}", lower_type_hint, slug);
+                            println!("[analyze_archive]   -> Matched category via INI exact lowercase name: {} -> {}", lower_type_hint, slug);
                         }
                         // Prio 3: Known name starts with hint
                         else {
                             for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
                                 if cat_name_lower.starts_with(&lower_type_hint) {
                                     final_deduced_category_slug = Some(cat_slug.clone());
-                                    println!("[analyze_archive]   -> Matched category via name prefix: '{}' starts with '{}' -> {}", cat_name_lower, lower_type_hint, cat_slug);
+                                    println!("[analyze_archive]   -> Matched category via INI name prefix: '{}' starts with '{}' -> {}", cat_name_lower, lower_type_hint, cat_slug);
                                     break;
                                 }
                             }
@@ -2318,7 +2583,7 @@ fn analyze_archive(
                             for (cat_name_lower, cat_slug) in &maps.lowercase_category_name_to_slug {
                                 if lower_type_hint.len() > 2 && cat_name_lower.contains(&lower_type_hint) {
                                     final_deduced_category_slug = Some(cat_slug.clone());
-                                    println!("[analyze_archive]   -> Matched category via name contains: '{}' contains '{}' -> {}", cat_name_lower, lower_type_hint, cat_slug);
+                                    println!("[analyze_archive]   -> Matched category via INI name contains: '{}' contains '{}' -> {}", cat_name_lower, lower_type_hint, cat_slug);
                                     break;
                                 }
                             }
@@ -2342,58 +2607,35 @@ fn analyze_archive(
     }
     // --- End INI Deduction ---
 
-    // --- 2. Deduce from Archive Filename (ENHANCED - Lower Priority) ---
+    // --- 2. Deduce from Archive Filename (USE HELPER - Lower Priority) ---
     if final_deduced_entity_slug.is_none() || final_deduced_category_slug.is_none() {
         println!("[analyze_archive] Attempting deduction from archive filename...");
         if let Some(stem) = file_path.file_stem().and_then(OsStr::to_str) {
-            // Clean the stem more aggressively for matching
-            let cleaned_stem = stem
-                .replace("_", " ")
-                .replace("-", " ")
-                .replace("(", "")
-                .replace(")", "")
-                .replace("[", "")
-                .replace("]", "")
-                .trim() // Remove leading/trailing whitespace
-                .to_lowercase(); // Match case-insensitively
 
-            println!("[analyze_archive] Trying archive filename stem: '{}' (cleaned lowercase: '{}')", stem, cleaned_stem);
-
-            // Try matching stem against Entities
+            // Try matching stem against Entities (USE HELPER)
             if final_deduced_entity_slug.is_none() {
-                // Prio 1: Exact slug (original stem)
-                if maps.entity_slug_to_id.contains_key(stem) {
-                    final_deduced_entity_slug = Some(stem.to_string());
-                    println!("[analyze_archive]   -> Matched entity from filename via exact slug: {}", stem);
-                }
-                // Prio 2: Exact lowercase cleaned name match -> original slug
-                else if let Some(slug) = maps.lowercase_entity_name_to_slug.get(&cleaned_stem) {
-                    final_deduced_entity_slug = Some(slug.clone());
-                    println!("[analyze_archive]   -> Matched entity from filename via exact cleaned name: {} -> {}", cleaned_stem, slug);
-                }
-                // Prio 3: Known name contains cleaned stem part (split into words)
-                else {
-                    // Split stem into words, ignore short ones (e.g., 'a', 'of')
-                    let stem_words: Vec<&str> = cleaned_stem.split_whitespace().filter(|w| w.len() > 2).collect();
-                    if !stem_words.is_empty() {
-                        'entity_loop: for (entity_name_lower, entity_slug) in &maps.lowercase_entity_name_to_slug {
-                            for word in &stem_words {
-                                if entity_name_lower.contains(word) {
-                                    final_deduced_entity_slug = Some(entity_slug.clone());
-                                    println!("[analyze_archive]   -> Matched entity from filename via word contains: '{}' contains '{}' -> {}", entity_name_lower, word, entity_slug);
-                                    break 'entity_loop; // Take first match
-                                }
-                            }
-                        }
-                    }
-                }
-                if final_deduced_entity_slug.is_none() {
+                println!("[analyze_archive] Trying archive filename stem for Entity: '{}'", stem);
+                if let Some(slug) = find_entity_slug_from_hint(stem, &maps) { // Use helper
+                    final_deduced_entity_slug = Some(slug);
+                    println!("[analyze_archive]   -> Found entity via filename.");
+                } else {
                     println!("[analyze_archive]   -> No entity match found from filename.");
                 }
             }
 
-            // Try matching stem against Categories
+            // Try matching stem against Categories (Keep enhanced logic here or create specific helper)
             if final_deduced_category_slug.is_none() {
+                let cleaned_stem = stem
+                    .replace("_", " ")
+                    .replace("-", " ")
+                    .replace("(", "")
+                    .replace(")", "")
+                    .replace("[", "")
+                    .replace("]", "")
+                    .trim()
+                    .to_lowercase();
+                println!("[analyze_archive] Trying archive filename stem for Category: '{}' (cleaned lowercase: '{}')", stem, cleaned_stem);
+
                 // Prio 1: Exact slug (original stem)
                 if maps.category_slug_to_id.contains_key(stem) {
                     final_deduced_category_slug = Some(stem.to_string());
@@ -2440,21 +2682,22 @@ fn analyze_archive(
             println!("[analyze_archive]   -> Found category slug '{}' from entity map.", cat_slug);
         } else {
             eprintln!("[analyze_archive]   -> Warning: Could not find category slug for deduced entity slug '{}' in maps!", entity_slug);
+            // If category lookup fails here, it remains None, which might be handled by the import modal gracefully.
         }
     }
     // --- End Final Category Lookup ---
 
 
-    // Fallback name deduction (use cleaned archive name if INI name wasn't found)
+    // --- Fallback name deduction (use cleaned archive name if INI name wasn't found) ---
     if deduced_mod_name.is_none() || deduced_mod_name.as_deref() == Some("") {
         deduced_mod_name = file_path.file_stem()
             .and_then(OsStr::to_str)
-            .map(|s| MOD_NAME_CLEANUP_REGEX.replace_all(s, "").trim().to_string());
+            .map(|s| clean_and_extract_name(s)); // Use cleaner here too
         println!("[analyze_archive] Used archive filename for deduced name: {:?}", deduced_mod_name);
     }
-    // Final cleanup on whatever name we ended up with
+    // --- Final cleanup on whatever name we ended up with ---
     if let Some(name) = &deduced_mod_name {
-        let cleaned = MOD_NAME_CLEANUP_REGEX.replace_all(name, "").trim().to_string();
+        let cleaned = clean_and_extract_name(name); // Use cleaner
         if !cleaned.is_empty() {
             deduced_mod_name = Some(cleaned);
         } else {
@@ -2465,6 +2708,7 @@ fn analyze_archive(
     }
 
 
+    // --- Final Log ---
     println!("[analyze_archive] Final Deductions: Name={:?}, Author={:?}, Category={:?}, Entity={:?}, Preview={:?}, RawINI Target={:?}, RawINI Type={:?}",
         deduced_mod_name, deduced_author, final_deduced_category_slug, final_deduced_entity_slug, detected_preview_internal_path, raw_ini_target_found, raw_ini_type_found);
 
