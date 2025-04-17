@@ -2516,7 +2516,13 @@ fn analyze_archive(
                             if let Some(section) = ini.section(Some(section_name)) {
                                 // Extract Name, Author
                                 let name_val = section.get("Name").or_else(|| section.get("ModName"));
-                                if name_val.is_some() { deduced_mod_name = name_val.map(|s| MOD_NAME_CLEANUP_REGEX.replace_all(s, "").trim().to_string()); }
+                                // Use the INI name if found, otherwise keep the initial filename guess
+                                if let Some(name) = name_val {
+                                    let cleaned_ini_name = MOD_NAME_CLEANUP_REGEX.replace_all(name, "").trim().to_string();
+                                    if !cleaned_ini_name.is_empty() {
+                                        deduced_mod_name = Some(cleaned_ini_name);
+                                    }
+                                }
                                 let author_val = section.get("Author");
                                 if author_val.is_some() { deduced_author = author_val.map(String::from); }
 
@@ -2548,11 +2554,11 @@ fn analyze_archive(
                             println!("[analyze_archive]   -> Found entity via INI target hint: '{}' -> {}", target_hint, final_deduced_entity_slug.as_ref().unwrap());
                         }
                     } else {
-                        println!("[analyze_archive] No INI target hint found to match.");
+                        println!("[analyze_archive] No INI target hint found.");
                     }
                 }
 
-                // --- Try matching INI Type Hint (Category - Keep enhanced logic here) ---
+                // --- Try matching INI Type Hint (Category) ---
                 if final_deduced_category_slug.is_none() { // Only run if not already found
                     if let Some(type_hint) = &raw_ini_type_found {
                         let lower_type_hint = type_hint.to_lowercase();
@@ -2588,8 +2594,11 @@ fn analyze_archive(
                                 }
                             }
                         }
+                        if final_deduced_category_slug.is_none() {
+                            println!("[analyze_archive]   -> No category match found from INI type hint.");
+                        }
                     } else {
-                        println!("[analyze_archive] No INI type hint found to match.");
+                        println!("[analyze_archive] No INI type hint found.");
                     }
                 }
 
@@ -2607,15 +2616,46 @@ fn analyze_archive(
     }
     // --- End INI Deduction ---
 
-    // --- 2. Deduce from Archive Filename (USE HELPER - Lower Priority) ---
+
+    // --- 2. Deduce from Internal Filenames ---
+    if final_deduced_entity_slug.is_none() {
+        println!("[analyze_archive] Trying internal filename matching...");
+        let mut file_match_found = false;
+        // Iterate through ALL file entries in the archive
+        for entry in &entries {
+            if !entry.is_dir {
+                // Get filename stem (without extension)
+                let filename = entry.path.split('/').last().unwrap_or(&entry.path); // Get last component
+                if let Some(stem) = Path::new(filename).file_stem().and_then(OsStr::to_str) {
+                    if !stem.is_empty() {
+                        // Use the helper to check if the stem matches an entity
+                        if let Some(slug) = find_entity_slug_from_hint(stem, &maps) {
+                            final_deduced_entity_slug = Some(slug);
+                            println!("[analyze_archive]   -> Found entity via internal filename stem: '{}' -> {}", stem, final_deduced_entity_slug.as_ref().unwrap());
+                            file_match_found = true;
+                            break; // Found a match from a file, stop searching files
+                        }
+                    }
+                }
+            }
+        }
+        if !file_match_found {
+            println!("[analyze_archive]   -> No entity match found from internal filenames.");
+        }
+    } else {
+        println!("[analyze_archive] Skipping internal filename check (entity already found).")
+    }
+    // --- End Internal Filename Deduction ---
+
+
+    // --- 3. Deduce from Archive Filename (USE HELPER - Lower Priority) ---
     if final_deduced_entity_slug.is_none() || final_deduced_category_slug.is_none() {
         println!("[analyze_archive] Attempting deduction from archive filename...");
         if let Some(stem) = file_path.file_stem().and_then(OsStr::to_str) {
-
             // Try matching stem against Entities (USE HELPER)
             if final_deduced_entity_slug.is_none() {
                 println!("[analyze_archive] Trying archive filename stem for Entity: '{}'", stem);
-                if let Some(slug) = find_entity_slug_from_hint(stem, &maps) { // Use helper
+                if let Some(slug) = find_entity_slug_from_hint(stem, &maps) {
                     final_deduced_entity_slug = Some(slug);
                     println!("[analyze_archive]   -> Found entity via filename.");
                 } else {
@@ -2623,17 +2663,9 @@ fn analyze_archive(
                 }
             }
 
-            // Try matching stem against Categories (Keep enhanced logic here or create specific helper)
+            // Try matching stem against Categories
             if final_deduced_category_slug.is_none() {
-                let cleaned_stem = stem
-                    .replace("_", " ")
-                    .replace("-", " ")
-                    .replace("(", "")
-                    .replace(")", "")
-                    .replace("[", "")
-                    .replace("]", "")
-                    .trim()
-                    .to_lowercase();
+                let cleaned_stem = clean_and_extract_name(stem);
                 println!("[analyze_archive] Trying archive filename stem for Category: '{}' (cleaned lowercase: '{}')", stem, cleaned_stem);
 
                 // Prio 1: Exact slug (original stem)
@@ -2673,32 +2705,34 @@ fn analyze_archive(
     }
     // --- End Filename Deduction ---
 
-    // --- 3. Final Category Lookup (If needed) ---
+
+    // --- 4. Final Category Lookup (If needed) ---
     if final_deduced_entity_slug.is_some() && final_deduced_category_slug.is_none() {
-        let entity_slug = final_deduced_entity_slug.as_ref().unwrap(); // Safe unwrap due to check
+        let entity_slug = final_deduced_entity_slug.as_ref().unwrap();
         println!("[analyze_archive] Entity slug '{}' found, but category slug is missing. Looking up category...", entity_slug);
         if let Some(cat_slug) = maps.entity_slug_to_category_slug.get(entity_slug) {
             final_deduced_category_slug = Some(cat_slug.clone());
             println!("[analyze_archive]   -> Found category slug '{}' from entity map.", cat_slug);
         } else {
             eprintln!("[analyze_archive]   -> Warning: Could not find category slug for deduced entity slug '{}' in maps!", entity_slug);
-            // If category lookup fails here, it remains None, which might be handled by the import modal gracefully.
         }
     }
     // --- End Final Category Lookup ---
 
 
-    // --- Fallback name deduction (use cleaned archive name if INI name wasn't found) ---
+    // --- Fallback name deduction & final cleanup ---
+    // Use cleaned archive name if INI name wasn't found or was empty after cleaning
     if deduced_mod_name.is_none() || deduced_mod_name.as_deref() == Some("") {
         deduced_mod_name = file_path.file_stem()
             .and_then(OsStr::to_str)
             .map(|s| clean_and_extract_name(s)); // Use cleaner here too
         println!("[analyze_archive] Used archive filename for deduced name: {:?}", deduced_mod_name);
     }
-    // --- Final cleanup on whatever name we ended up with ---
+    // Final cleanup on whatever name we ended up with
     if let Some(name) = &deduced_mod_name {
         let cleaned = clean_and_extract_name(name); // Use cleaner
         if !cleaned.is_empty() {
+            // If cleaning didn't result in empty, use the cleaned version
             deduced_mod_name = Some(cleaned);
         } else {
             // If cleaning resulted in empty, revert to original file stem as last resort
