@@ -170,6 +170,8 @@ const PRUNING_COMPLETE_EVENT: &str = "prune://complete";
 const PRUNING_ERROR_EVENT: &str = "prune://error";
 // -------------------------
 
+const SETTINGS_KEY_TRAVELER_MIGRATION_COMPLETE: &str = "traveler_migration_complete_v1"; // Added v1 for potential future migrations
+
 type CmdResult<T> = Result<T, String>;
 
 struct DbState(Arc<Mutex<Connection>>);
@@ -257,6 +259,293 @@ struct ArchiveAnalysisResult {
     raw_ini_target: Option<String>,        // e.g., "Nahida", "Raiden Shogun", "Aqua Simulacra"
     // --------------------------
     detected_preview_internal_path: Option<String>,
+}
+
+// --- Migration Logic ---
+fn run_traveler_migration_logic(
+    db_state: &DbState,
+    app_handle: &AppHandle, // Keep for path resolution if needed later
+) -> Result<String, String> { // Returns success message or error string
+    println!("[Migration] Starting Traveler -> Aether/Lumine migration logic...");
+
+    let base_mods_path = get_mods_base_path_from_settings(db_state)
+        .map_err(|e| format!("[Migration] Failed to get mods base path: {}", e))?;
+
+    // --- Use a single lock scope for all DB operations ---
+    let mut conn_guard = db_state.0.lock().map_err(|_| "[Migration] DB lock poisoned".to_string())?;
+    let conn = &mut *conn_guard; // Get mutable access for the transaction
+
+    // --- Check if migration already done ---
+    let migration_status = get_setting_value(conn, SETTINGS_KEY_TRAVELER_MIGRATION_COMPLETE)
+        .map_err(|e| format!("[Migration] DB Error checking migration status: {}", e))?;
+    if migration_status == Some("true".to_string()) {
+        let msg = "[Migration] Traveler migration already marked as complete. Skipping.";
+        println!("{}", msg);
+        return Ok(msg.to_string());
+    }
+
+    // --- Get Entity IDs and Category Slugs ---
+    let traveler_info: Option<(i64, String)> = conn.query_row(
+        "SELECT id, slug FROM entities WHERE slug = 'traveler'", [], |row| Ok((row.get(0)?, row.get(1)?))
+    ).optional().map_err(|e| format!("[Migration] DB Error fetching Traveler info: {}", e))?;
+
+    if traveler_info.is_none() {
+        let msg = "[Migration] Traveler entity not found. Migration not needed or already partially done.";
+        println!("{}", msg);
+        // Mark as complete anyway if Traveler doesn't exist
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                     params![SETTINGS_KEY_TRAVELER_MIGRATION_COMPLETE, "true"])
+            .map_err(|e| format!("[Migration] Failed to mark as complete after Traveler not found: {}", e))?;
+        return Ok(msg.to_string());
+    }
+    let (traveler_id, _traveler_slug) = traveler_info.unwrap(); // Safe due to check above
+
+    // Fetch Aether info (ID, Category Slug)
+    let aether_info: Option<(i64, String, String)> = conn.query_row(
+        "SELECT e.id, e.slug, c.slug FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = 'aether'",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ).optional().map_err(|e| format!("[Migration] DB Error fetching Aether info: {}", e))?;
+
+    // Fetch Lumine info (ID, Category Slug)
+    let lumine_info: Option<(i64, String, String)> = conn.query_row(
+        "SELECT e.id, e.slug, c.slug FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = 'lumine'",
+        [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ).optional().map_err(|e| format!("[Migration] DB Error fetching Lumine info: {}", e))?;
+
+    if aether_info.is_none() || lumine_info.is_none() {
+        let msg = "[Migration] Aether or Lumine entity not found. Cannot perform migration. Ensure definitions are loaded.";
+        println!("{}", msg);
+        // Don't mark as complete, definitions might load later
+        return Err(msg.to_string());
+    }
+    let (aether_id, aether_slug, aether_cat_slug) = aether_info.unwrap();
+    let (lumine_id, lumine_slug, lumine_cat_slug) = lumine_info.unwrap();
+
+    // Basic sanity check: Ensure they are in the same category (expected)
+    if aether_cat_slug != lumine_cat_slug {
+         println!("[Migration] Warning: Aether ({}) and Lumine ({}) appear to be in different categories. Using Aether's category for path construction.", aether_cat_slug, lumine_cat_slug);
+         // Proceed using aether_cat_slug as the base category for paths
+    }
+    let target_category_slug = aether_cat_slug; // Use Aether's (or Lumine's) category slug
+
+    // --- Get Assets associated with Traveler ---
+    let mut assets_to_migrate = Vec::<(i64, String, String)>::new(); // (id, name, folder_name)
+    { // Scope for statement
+        let mut stmt = conn.prepare("SELECT id, name, folder_name FROM assets WHERE entity_id = ?1")
+            .map_err(|e| format!("[Migration] Failed to prepare asset fetch statement: {}", e))?;
+        let rows = stmt.query_map(
+            params![traveler_id],
+            |row| Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get::<_, String>(2)?
+            ))
+        )
+        .map_err(|e| format!("[Migration] Failed to query Traveler assets: {}", e))?;
+
+        for row_result in rows {
+             match row_result {
+                 // Note: No change needed here, as `folder` will now correctly be a String
+                 Ok((id, name, folder)) => assets_to_migrate.push((id, name, folder.replace("\\", "/"))),
+                 Err(e) => return Err(format!("[Migration] Error reading asset row: {}", e)),
+             }
+        }
+    }
+
+    if assets_to_migrate.is_empty() {
+        println!("[Migration] No assets found linked to Traveler (ID: {}).", traveler_id);
+        // Still need to delete the Traveler entity if it exists
+    } else {
+        println!("[Migration] Found {} assets to migrate from Traveler.", assets_to_migrate.len());
+    }
+
+    // --- Fetch Deduction Maps for Hinting ---
+    // Note: We are already inside a lock, so fetch_deduction_maps needs &Connection
+    let maps = fetch_deduction_maps(conn)
+        .map_err(|e| format!("[Migration] Failed to fetch deduction maps: {}", e))?;
+
+
+    // --- Start Transaction ---
+    let tx = conn.transaction().map_err(|e| format!("[Migration] Failed to start transaction: {}", e))?;
+
+    let mut migrated_count = 0;
+    let mut errors: Vec<String> = Vec::new();
+
+    // --- Process each asset ---
+    for (asset_id, asset_name, current_clean_relative_path) in assets_to_migrate {
+        println!("[Migration] Processing Asset ID: {}, Name: '{}', Current DB Path: '{}'", asset_id, asset_name, current_clean_relative_path);
+
+        // --- Determine Target (Aether/Lumine) ---
+        let mut target_id = aether_id; // Default to Aether
+        let mut target_slug = aether_slug.clone();
+        let mut target_reason = "Default";
+
+        let current_relative_path_buf = PathBuf::from(&current_clean_relative_path);
+        let current_folder_name = current_relative_path_buf.file_name().unwrap_or_default().to_string_lossy();
+
+        // Try hinting based on folder name
+        if !current_folder_name.is_empty() {
+            if let Some(hinted_slug) = find_entity_slug_from_hint(&current_folder_name, &maps) {
+                 if hinted_slug == lumine_slug {
+                     target_id = lumine_id;
+                     target_slug = lumine_slug.clone();
+                     target_reason = "Folder name hint";
+                 } else if hinted_slug == aether_slug {
+                     target_id = aether_id;
+                     target_slug = aether_slug.clone();
+                     target_reason = "Folder name hint";
+                 }
+                 // If hint matches something else, ignore it and stick to default Aether
+            }
+            // Add simple keyword check as fallback?
+            else if current_folder_name.to_lowercase().contains("lumine") || current_folder_name.to_lowercase().contains("female") {
+                 target_id = lumine_id;
+                 target_slug = lumine_slug.clone();
+                 target_reason = "Folder name keyword";
+            } else if current_folder_name.to_lowercase().contains("aether") || current_folder_name.to_lowercase().contains("male") {
+                target_id = aether_id;
+                target_slug = aether_slug.clone();
+                target_reason = "Folder name keyword";
+            }
+        }
+        println!("[Migration]   -> Assigning to {} (ID: {}) based on: {}", target_slug, target_id, target_reason);
+
+        // --- Calculate Paths ---
+        let mod_folder_base_name_from_db = current_relative_path_buf.file_name().unwrap_or_default().to_string_lossy();
+        if mod_folder_base_name_from_db.is_empty() {
+            let err = format!("[Migration]   -> ERROR: Cannot extract base name from DB path '{}'. Skipping asset {}.", current_clean_relative_path, asset_id);
+            println!("{}", err);
+            errors.push(err);
+            continue;
+        }
+
+        // Construct the new *clean* relative path for the DB
+        let new_clean_relative_path_buf = PathBuf::new().join(&target_category_slug).join(&target_slug).join(mod_folder_base_name_from_db.as_ref());
+        let new_clean_relative_path_str = new_clean_relative_path_buf.to_string_lossy().replace("\\", "/");
+
+        // Determine the current *actual* path on disk (check enabled/disabled)
+        let disabled_filename_current = format!("{}{}", DISABLED_PREFIX, mod_folder_base_name_from_db);
+        let relative_parent_path_current = current_relative_path_buf.parent();
+
+        let full_path_if_enabled_current = base_mods_path.join(&current_relative_path_buf);
+        let full_path_if_disabled_current = match relative_parent_path_current {
+            Some(parent) if parent.as_os_str().len() > 0 => base_mods_path.join(parent).join(&disabled_filename_current),
+            _ => base_mods_path.join(&disabled_filename_current),
+        };
+
+        let (current_actual_path_on_disk, is_currently_disabled) =
+            if full_path_if_enabled_current.is_dir() {
+                (full_path_if_enabled_current, false)
+            } else if full_path_if_disabled_current.is_dir() {
+                (full_path_if_disabled_current, true)
+            } else {
+                let err = format!("[Migration]   -> ERROR: Source folder not found on disk for asset {} at '{}' or '{}'. Skipping.", asset_id, full_path_if_enabled_current.display(), full_path_if_disabled_current.display());
+                println!("{}", err);
+                errors.push(err);
+                continue; // Skip this asset
+            };
+        println!("[Migration]   -> Current path on disk: '{}' (Disabled: {})", current_actual_path_on_disk.display(), is_currently_disabled);
+
+        // Construct the new *actual* destination path on disk, preserving disabled state
+        let new_folder_name_on_disk = if is_currently_disabled {
+            format!("{}{}", DISABLED_PREFIX, mod_folder_base_name_from_db)
+        } else {
+            mod_folder_base_name_from_db.to_string()
+        };
+        let new_actual_dest_path_on_disk = base_mods_path.join(&target_category_slug).join(&target_slug).join(&new_folder_name_on_disk);
+        println!("[Migration]   -> New destination path on disk: '{}'", new_actual_dest_path_on_disk.display());
+
+        // --- Perform Filesystem Move (before DB commit, but after tx start) ---
+        if current_actual_path_on_disk == new_actual_dest_path_on_disk {
+             println!("[Migration]   -> Skipping filesystem move (paths are the same). Might indicate only DB update needed.");
+        } else {
+            // Ensure parent directory exists
+            if let Some(parent) = new_actual_dest_path_on_disk.parent() {
+                 if !parent.exists() {
+                     println!("[Migration]   -> Creating parent directory: {}", parent.display());
+                     if let Err(e) = fs::create_dir_all(parent) {
+                         let err = format!("[Migration]   -> ERROR: Failed to create parent directory '{}': {}. Skipping asset {}.", parent.display(), e, asset_id);
+                         println!("{}", err);
+                         errors.push(err);
+                         continue; // Skip this asset
+                     }
+                 }
+            } else {
+                 let err = format!("[Migration]   -> ERROR: Cannot determine parent directory for new path '{}'. Skipping asset {}.", new_actual_dest_path_on_disk.display(), asset_id);
+                 println!("{}", err);
+                 errors.push(err);
+                 continue; // Skip this asset
+            }
+
+            // Check if target exists unexpectedly
+            if new_actual_dest_path_on_disk.exists() {
+                let err = format!("[Migration]   -> ERROR: Target path '{}' already exists. Skipping asset {}.", new_actual_dest_path_on_disk.display(), asset_id);
+                println!("{}", err);
+                errors.push(err);
+                continue; // Skip this asset
+            }
+
+            // Perform the rename
+            println!("[Migration]   -> Moving '{}' -> '{}'", current_actual_path_on_disk.display(), new_actual_dest_path_on_disk.display());
+            if let Err(e) = fs::rename(&current_actual_path_on_disk, &new_actual_dest_path_on_disk) {
+                 let err = format!("[Migration]   -> ERROR: Failed to move folder for asset {}: {}. Skipping.", asset_id, e);
+                 println!("{}", err);
+                 errors.push(err);
+                 continue; // Skip this asset
+            }
+        }
+
+        // --- Update Database Record (within transaction) ---
+        println!("[Migration]   -> Updating DB: asset_id={}, new_entity_id={}, new_folder_name='{}'", asset_id, target_id, new_clean_relative_path_str);
+        let changes = tx.execute(
+            "UPDATE assets SET entity_id = ?1, folder_name = ?2 WHERE id = ?3",
+            params![target_id, new_clean_relative_path_str, asset_id],
+        ).map_err(|e| {
+            // Don't automatically rollback here, let the main error handling do it
+            format!("[Migration]   -> DB Update failed for asset {}: {}", asset_id, e)
+        })?; // Propagate error to outer scope
+
+        if changes == 0 {
+            println!("[Migration]   -> Warning: DB update affected 0 rows for asset {}.", asset_id);
+        }
+        migrated_count += 1;
+
+    } // --- End Asset Loop ---
+
+    // --- Delete the Traveler Entity (if migration was successful so far) ---
+    if errors.is_empty() {
+        println!("[Migration] Deleting Traveler entity (ID: {}) from database.", traveler_id);
+        let deleted_entity_count = tx.execute("DELETE FROM entities WHERE id = ?1", params![traveler_id])
+           .map_err(|e| format!("[Migration] Failed to delete Traveler entity: {}", e))?;
+        if deleted_entity_count > 0 {
+            println!("[Migration] Traveler entity successfully deleted.");
+        } else {
+            println!("[Migration] Traveler entity already deleted or delete failed (0 rows affected).");
+        }
+
+        // Mark migration as complete in settings
+        println!("[Migration] Marking migration as complete in settings.");
+        tx.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                    params![SETTINGS_KEY_TRAVELER_MIGRATION_COMPLETE, "true"])
+           .map_err(|e| format!("[Migration] Failed to mark migration as complete: {}", e))?;
+
+        // --- Commit Transaction ---
+        tx.commit().map_err(|e| format!("[Migration] Failed to commit transaction: {}", e))?;
+
+        let final_msg = format!("Traveler migration completed successfully. Migrated {} assets.", migrated_count);
+        println!("[Migration] {}", final_msg);
+        Ok(final_msg)
+
+    } else {
+        // --- Rollback Transaction due to errors ---
+        let err_summary = format!("[Migration] Migration failed with {} error(s). Rolling back changes.", errors.len());
+        println!("{}", err_summary);
+        for e in &errors {
+            eprintln!("  - {}", e);
+        }
+        // Rollback happens automatically when `tx` is dropped due to error return
+        Err(format!("{}\n{}", err_summary, errors.join("\n")))
+    }
 }
 
 // --- Helper Functions for Deduction ---
@@ -4150,6 +4439,12 @@ fn exit_app(app_handle: AppHandle) {
     exit(0);
 }
 
+#[command]
+fn run_traveler_migration(db_state: State<DbState>, app_handle: AppHandle) -> CmdResult<String> {
+    // This command just calls the main logic function
+    run_traveler_migration_logic(&db_state, &app_handle)
+}
+
 // --- Main Function ---
 fn main() {
     let context = generate_context!(); // Generates context based on tauri.conf.json
@@ -4327,6 +4622,26 @@ fn main() {
             // Make the database connection available to Tauri commands via managed state.
              app.manage(DbState(Arc::new(Mutex::new(conn))));
 
+             // --- *** ADD MIGRATION CHECK *** ---
+            println!("--- Running Post-Init Checks/Migrations ---");
+            let db_state_for_migration: State<DbState> = app.state(); // Get the managed state again
+            let app_handle_for_migration = app.handle(); // Clone handle for migration logic
+            match run_traveler_migration_logic(&db_state_for_migration, &app_handle_for_migration) {
+                 Ok(msg) => println!("[Setup Migration Check] {}", msg), // Log success/skip message
+                 Err(e) => {
+                     // Log the error, but don't necessarily crash the app unless it's critical
+                     eprintln!("[Setup Migration Check] WARNING: Traveler migration check/run failed: {}", e);
+                     // Optionally show a non-fatal dialog to the user?
+                     // dialog::blocking::message(
+                     //    app_handle.get_window("main").as_ref(),
+                     //    "Migration Warning",
+                     //    &format!("An automatic data migration (Traveler -> Aether/Lumine) could not be completed:\n\n{}\n\nYou may need to run it manually via settings later.", e)
+                     // );
+                 }
+            }
+            println!("--- Finished Post-Init Checks/Migrations ---");
+            // --- *** END MIGRATION CHECK *** ---
+
              // Perform a final check/log for a key setting (like mods folder) from the *active* DB.
              let db_state: State<DbState> = app.state(); // Get the managed state.
              match get_setting_value(&db_state.0.lock().expect("DB lock poisoned during setup check"), SETTINGS_KEY_MODS_FOLDER) { // Lock mutex to access connection.
@@ -4344,7 +4659,7 @@ fn main() {
             // Core
             get_categories, get_category_entities, get_entities_by_category,
             get_entity_details, get_assets_for_entity, toggle_asset_enabled,
-            get_asset_image_path,
+            get_asset_image_path, run_traveler_migration,
             open_mods_folder,
             // Scan & Count
             scan_mods_directory, get_total_asset_count,

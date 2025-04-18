@@ -104,8 +104,8 @@ entities = [
     { name = "Xianyun", slug = "xianyun", description = "Curious about what draws her disciples to Liyue Harbor, she has taken up residence in the city to see for herself.", details = '{"rarity": "5 Star", "element": "Anemo", "weapon": "Catalyst"}', base_image = "xianyun_base.jpg" },
 
     # === Traveler ===
-    # Define a base 'Traveler' and potentially element-specific versions if mods target them differently
-    { name = "Traveler", slug = "traveler", description = "A traveler from another world who had their only kin taken away, forcing them to embark on a journey to find The Seven.", details = '{"rarity": "5 Star", "element": "Adaptive", "weapon": "Sword"}', base_image = "traveler_base.jpg" },
+    { name = "Aether", slug = "aether", description = "A traveler from another world who had their only kin taken away, forcing them to embark on a journey to find The Seven.", details = '{"rarity": "5 Star", "element": "Adaptive", "weapon": "Sword"}', base_image = "aether_base.jpg" },
+    { name = "Lumine", slug = "lumine", description = "A traveler from another world who had their only kin taken away, forcing them to embark on a journey to find The Seven.", details = '{"rarity": "5 Star", "element": "Adaptive", "weapon": "Sword"}', base_image = "lumine_base.jpg" },
 ]
 
 

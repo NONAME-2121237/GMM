@@ -45,6 +45,7 @@ entities = [
 [npcs]
 name = "NPCs"
 entities = [
+
 ]
 
 # ===================
@@ -74,6 +75,8 @@ entities = [
 [objects]
 name = "Objects"
 entities = [
+    { name = "Buildings", slug = "zzz-buildings", description = "Game buildings.", details = '{"type": "Building"}', base_image = "buildings.jpg" },
+
 ]
 
 # ===================
@@ -82,4 +85,8 @@ entities = [
 [ui]
 name = "UI"
 entities = [
+    { name = "Icons", slug = "zzz-icons", description = "Game icons.", details = '{"type": "Icons"}', base_image = "zzz_icons.jpg" },
+    { name = "Effects", slug = "zzz-effects", description = "Game effects.", details = '{"type": "FX"}', base_image = "zzz_effects.jpg" },
+    { name = "Map", slug = "zzz-map", description = "Map modifications.", details = '{"type": "Map"}', base_image = "zzzmap.jpg" },
+    { name = "Loading screens", slug = "zzz-loading-screens", description = "Loading screens.", details = '{"type": "Screens"}', base_image = "zzzloadingscreen.jpg" },
 ]
