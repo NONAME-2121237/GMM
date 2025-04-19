@@ -7,11 +7,12 @@ import sharp from 'sharp';
 const imagesDir = path.resolve('public/images/entities'); // Adjust if your path is different
 const maxHeight = 400;
 const jpgQuality = 85; // Quality setting for JPG (0-100, higher is better quality/larger size)
+const whiteBackground = { r: 255, g: 255, b: 255 }; // Define white background color
 // ---------------------
 
 async function optimizeImages() {
     console.log(`Starting optimization in: ${imagesDir}`);
-    console.log(`Max Height: ${maxHeight}px, JPG Quality: ${jpgQuality}`);
+    console.log(`Max Height: ${maxHeight}px, JPG Quality: ${jpgQuality}, Background: White`); // Updated log
     console.log("IMPORTANT: This will REPLACE original PNG files with optimized JPGs.");
 
     let processedCount = 0;
@@ -33,7 +34,6 @@ async function optimizeImages() {
 
             // Process only PNG files
             if (path.extname(file).toLowerCase() !== '.png') {
-                // console.log(`Skipping non-PNG file: ${file}`);
                 skippedCount++;
                 continue;
             }
@@ -55,10 +55,15 @@ async function optimizeImages() {
                 if (needsResize) {
                     console.log(`  Resizing from ${metadata.width}x${metadata.height} to height ${maxHeight}...`);
                     processingPipeline = processingPipeline.resize({ height: maxHeight });
-                    // Width will be calculated automatically to maintain aspect ratio
                 } else {
                     console.log(`  Height (${metadata.height || 'unknown'}) is within limit, no resize needed.`);
                 }
+
+                // --- ADD FLATTEN HERE ---
+                // Flatten transparency onto a white background *before* converting to JPEG
+                processingPipeline = processingPipeline.flatten({ background: whiteBackground });
+                console.log('  Applied white background for transparency.');
+                // ------------------------
 
                 // Convert to JPG and save
                 await processingPipeline
@@ -74,7 +79,6 @@ async function optimizeImages() {
                     console.log(`  Deleted original: ${file}`);
                 } catch (deleteError) {
                     console.error(`  ERROR deleting original file ${file}:`, deleteError);
-                    // Log error but continue - the JPG was created. Manual cleanup might be needed.
                 }
 
             } catch (processError) {
@@ -85,7 +89,7 @@ async function optimizeImages() {
 
     } catch (readDirError) {
         console.error(`FATAL ERROR reading directory ${imagesDir}:`, readDirError);
-        errorCount++; // Count this as an error
+        errorCount++;
     } finally {
         console.log("\n--- Optimization Complete ---");
         console.log(`Processed (PNG -> JPG): ${processedCount}`);
