@@ -1,5 +1,5 @@
-// src/pages/EntityPage.jsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// src/pages/EnhancedEntityPage.jsx
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/tauri';
 import ModCard from '../components/ModCard';
@@ -13,6 +13,7 @@ import { toast } from 'react-toastify';
 import ContextMenu from '../components/ContextMenu';
 import AddToPresetModal from '../components/AddToPresetModal';
 import LightboxModal from '../components/LightboxModal';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -60,6 +61,84 @@ const typeIconsFA = {
     Healer: "fas fa-heart",
     // Add more common types as needed
 };
+
+const EnhancedScrollIndicator = ({ onViewMods }) => {
+    const [hovered, setHovered] = useState(false);
+    
+    return (
+      <div className="scroll-indicator" style={{
+        textAlign: 'center',
+        marginTop: '50px',
+        padding: '20px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        color: 'rgba(255, 255, 255, 0.8)',
+        fontSize: '16px'
+      }}>
+        {/* Animated scroll text */}
+        <motion.p
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ 
+            duration: 0.8,
+            repeat: Infinity,
+            repeatType: "reverse",
+            ease: "easeInOut"
+          }}
+          style={{ marginBottom: '15px' }}
+        >
+          Scroll down to view mods
+        </motion.p>
+        
+        {/* Enhanced button with animation */}
+        <motion.button 
+          className="btn view-mods-button"
+          initial={{ scale: 1 }}
+          whileHover={{ 
+            scale: 1.05,
+            transition: { duration: 0.2 }
+          }}
+          whileTap={{ scale: 0.98 }}
+          onClick={onViewMods}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            marginTop: '10px',
+            background: `linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)`,
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            padding: '9px 20px',
+            fontSize: '15px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            boxShadow: hovered 
+              ? '0 5px 15px rgba(156, 136, 255, 0.5)' 
+              : '0 4px 10px rgba(156, 136, 255, 0.3)',
+            transition: 'box-shadow 0.3s ease',
+          }}
+        >
+          <motion.i 
+            className="fas fa-chevron-down fa-fw"
+            animate={{ 
+              y: [0, 3, 0],
+            }}
+            transition={{ 
+              duration: 1.5,
+              repeat: Infinity,
+              repeatType: "loop",
+              ease: "easeInOut"
+            }}
+          />
+          View Mods
+        </motion.button>
+      </div>
+    );
+  };
 
 const RarityIcon = () => <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i>;
 const TypeIcon = () => <i className="fas fa-tag fa-fw" style={{ color: '#7acbf9' }}></i>;
@@ -120,6 +199,14 @@ function EntityPage() {
 
     const [isLightboxOpen, setIsLightboxOpen] = useState(false);
     const [lightboxImageUrl, setLightboxImageUrl] = useState(null);
+
+    // New state for section view
+    const [activeSection, setActiveSection] = useState('entity'); // 'entity' or 'mods'
+    const mainContainerRef = useRef(null);
+    
+    // For detecting scroll direction
+    const [hasScrolled, setHasScrolled] = useState(false);
+    const pageRef = useRef(null);
 
     // Fetch data (includes loading view mode and sort option)
     const fetchData = useCallback(async () => {
@@ -508,6 +595,44 @@ function EntityPage() {
         setLightboxImageUrl(null);
     }, []);
 
+    // --- New section transition handlers ---
+    
+    const handleScrollToMods = useCallback(() => {
+        setActiveSection('mods');
+        setHasScrolled(true);
+    }, []);
+
+    const handleScrollToEntity = useCallback(() => {
+        setActiveSection('entity');
+    }, []);
+
+    // Add scroll detection with improved implementation
+    useEffect(() => {
+        const handleWheel = (e) => {
+            if (activeSection === 'entity' && e.deltaY > 0) {
+                // User is scrolling down while in entity view
+                e.preventDefault(); // Prevent normal scrolling
+                handleScrollToMods();
+            }
+        };
+
+        const handleScroll = () => {
+            // Backup detection using scroll position
+            if (activeSection === 'entity' && window.scrollY > 10) {
+                handleScrollToMods();
+            }
+        };
+
+        // Attach both wheel and scroll event listeners
+        window.addEventListener('wheel', handleWheel, { passive: false });
+        window.addEventListener('scroll', handleScroll);
+
+        return () => {
+            window.removeEventListener('wheel', handleWheel);
+            window.removeEventListener('scroll', handleScroll);
+        };
+    }, [activeSection, handleScrollToMods]);
+
     // --- Define Context Menu Items ---
     const contextMenuItems = useMemo(() => {
         if (!contextMenuAsset) return []; // No asset, no menu
@@ -626,8 +751,6 @@ function EntityPage() {
     
     // Determine if this is a ZZZ character
     const isZZZ = attribute || specialty || rank;
-
-    console.log(isZZZ ? `ZZZ Character detected: ${entity.name}` : `Genshin Character detected: ${entity.name}`);
     
     const avatarUrl = entity.base_image ? `/images/entities/${entitySlug}_base.jpg` : DEFAULT_ENTITY_PLACEHOLDER_IMAGE;
     const handleAvatarError = (e) => {
@@ -645,22 +768,27 @@ function EntityPage() {
     const isIndeterminate = selectedAssetIds.size > 0 && selectedAssetIds.size < filteredAndSortedAssets.length;
     // -------------------------------------------
 
-
     return (
-        <div className={`character-page fadeIn ${isZZZ ? 'zzz-character' : 'genshin-character'}`} onContextMenu={(e) => {
-            // If the click isn't on a card (which would stop propagation), close the menu
-             if (contextMenuVisible && !e.target.closest('.mod-card-grid, .mod-card-list')) {
-                 e.preventDefault(); // Prevent default browser menu on page background
-                 handleCloseContextMenu();
-             }
-        }}>
-            <div className="page-header">
+        <div 
+            className={`character-page ${isZZZ ? 'zzz-character' : 'genshin-character'}`} 
+            style={{ height: '100vh', overflow: 'hidden', position: 'relative' }}
+            ref={pageRef}
+            onContextMenu={(e) => {
+                // If the click isn't on a card (which would stop propagation), close the menu
+                if (contextMenuVisible && !e.target.closest('.mod-card-grid, .mod-card-list')) {
+                    e.preventDefault(); // Prevent default browser menu on page background
+                    handleCloseContextMenu();
+                }
+            }}
+        >
+            {/* Fixed page header */}
+            <div className="page-header" style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--darker)', padding: '15px 25px' }}>
                 <h1 className="page-title">
                     <i
                         className="fas fa-arrow-left fa-fw"
                         onClick={goBack}
                         title="Back to list"
-                        style={{ cursor: 'pointer', marginRight: '15px', opacity: 0.7, ':hover': { opacity: 1 } }}
+                        style={{ cursor: 'pointer', marginRight: '15px', opacity: 0.7 }}
                         role="button"
                         aria-label="Go back"
                         tabIndex={0}
@@ -668,211 +796,250 @@ function EntityPage() {
                     ></i>
                     {entity.name} Mods
                 </h1>
+
+                {/* Navigation between profile and mods only appears when in mods view */}
+                {activeSection === 'mods' && (
+                    <button 
+                        className="btn-icon" 
+                        onClick={handleScrollToEntity}
+                        style={{ fontSize: '20px', color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer' }}
+                        title="Back to character profile"
+                    >
+                        <i className="fas fa-chevron-up"></i>
+                    </button>
+                )}
             </div>
 
-            <div className="character-profile">
-                <div
-                    className="character-avatar"
-                    style={{ backgroundImage: `url('${avatarUrl}')` }}
-                    onError={handleAvatarError} // Handle potential errors loading the image
-                >
-                </div>
+            {/* Container for both sections with animations */}
+            <div className="sections-container" style={{ height: 'calc(100vh - 70px)', position: 'relative' }}>
+                <AnimatePresence initial={false} mode="wait">
+                    {activeSection === 'entity' ? (
+                        <motion.div 
+                            key="entity-section"
+                            initial={{ opacity: 0, y: -20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -50 }}
+                            transition={{ duration: 0.3 }}
+                            style={{ height: '100%', padding: '0 25px', position: 'absolute', width: '100%', top: 0, left: 0 }}
+                        >
+                            <div className="character-profile" style={{ marginBottom: '30px' }}>
+                                <div
+                                    className="character-avatar"
+                                    style={{ backgroundImage: `url('${avatarUrl}')` }}
+                                    onError={handleAvatarError}
+                                >
+                                </div>
 
-                <div className="character-info">
-                    <h2 className="character-name">
-                        {entity.name}
-                        {/* Display element icon for Genshin characters */}
-                        {elementIconClass && !isZZZ &&
-                            <span className="element-icon" style={{ color: `var(--${element?.toLowerCase()})` || 'var(--primary)' }} title={element}>
-                                <i className={`${elementIconClass} fa-fw`}></i>
-                            </span>
-                        }
-                        {/* Display attribute icon for ZZZ characters */}
-                        {attributeIconClass && isZZZ &&
-                            <span className="attribute-icon" style={{ color: `var(--zzz-${attribute?.toLowerCase()})` || 'var(--primary)' }} title={`Attribute: ${attribute}`}>
-                                <i className={`${attributeIconClass} fa-fw`}></i>
-                            </span>
-                        }
-                    </h2>
-                    <div className="character-details">
-                        {/* Common details for both character types */}
-                        {details?.rarity && 
-                            <div className="character-detail">
-                                <RarityIcon /> {details.rarity} Star{details.rarity !== 1 ? 's' : ''}
+                                <div className="character-info">
+                                    <h2 className="character-name">
+                                        {entity.name}
+                                        {/* Display element icon for Genshin characters */}
+                                        {elementIconClass && !isZZZ &&
+                                            <span className="element-icon" style={{ color: `var(--${element?.toLowerCase()})` || 'var(--primary)' }} title={element}>
+                                                <i className={`${elementIconClass} fa-fw`}></i>
+                                            </span>
+                                        }
+                                        {/* Display attribute icon for ZZZ characters */}
+                                        {attributeIconClass && isZZZ &&
+                                            <span className="attribute-icon" style={{ color: `var(--zzz-${attribute?.toLowerCase()})` || 'var(--primary)' }} title={`Attribute: ${attribute}`}>
+                                                <i className={`${attributeIconClass} fa-fw`}></i>
+                                            </span>
+                                        }
+                                    </h2>
+                                    <div className="character-details">
+                                        {/* Common details for both character types */}
+                                        {details?.rarity && 
+                                            <div className="character-detail">
+                                                <RarityIcon /> {details.rarity} Star{details.rarity !== 1 ? 's' : ''}
+                                            </div>
+                                        }
+                                        
+                                        {/* Genshin-specific details */}
+                                        {!isZZZ && element && 
+                                            <div className="character-detail">
+                                                <i className={`${elementIconClass} fa-fw`}></i> {element}
+                                            </div>
+                                        }
+                                        {!isZZZ && weapon && 
+                                            <div className="character-detail">
+                                                <i className={`${weaponIconClass} fa-fw`}></i> {weapon}
+                                            </div>
+                                        }
+                                        
+                                        {/* ZZZ-specific details */}
+                                        {isZZZ && attribute && 
+                                            <div className="character-detail">
+                                                <i className={`${attributeIconClass} fa-fw`}></i> {attribute}
+                                            </div>
+                                        }
+                                        {isZZZ && specialty && 
+                                            <div className="character-detail">
+                                                <i className={`${specialtyIconClass} fa-fw`}></i> {specialty}
+                                            </div>
+                                        }
+                                        {isZZZ && rank && 
+                                            <div className="character-detail">
+                                                <i className="fas fa-medal fa-fw" style={{ color: '#ffaa33' }}></i> Rank {rank}
+                                            </div>
+                                        }
+                                        
+                                        {/* Display types for ZZZ characters */}
+                                        {isZZZ && types.length > 0 && (
+                                            <div className="character-types">
+                                                {types.map((type, index) => (
+                                                    <span key={index} className="character-type-tag">
+                                                        <TypeIcon /> {type}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {entity.description ? (
+                                        <p className="character-description">{entity.description}</p>
+                                    ) : (
+                                        <p className="character-description placeholder-text" style={{padding: 0, textAlign:'left'}}>No description available.</p>
+                                    )}
+                                    <p style={{fontSize: '13px', color: 'rgba(255, 255, 255, 0.6)', marginTop:'15px'}}>
+                                        Mods in library: {entity.mod_count ?? '...'}
+                                    </p>
+                                </div>
                             </div>
-                        }
-                        
-                        {/* Genshin-specific details */}
-                        {!isZZZ && element && 
-                            <div className="character-detail">
-                                <i className={`${elementIconClass} fa-fw`}></i> {element}
-                            </div>
-                        }
-                        {!isZZZ && weapon && 
-                            <div className="character-detail">
-                                <i className={`${weaponIconClass} fa-fw`}></i> {weapon}
-                            </div>
-                        }
-                        
-                        {/* ZZZ-specific details */}
-                        {isZZZ && attribute && 
-                            <div className="character-detail">
-                                <i className={`${attributeIconClass} fa-fw`}></i> {attribute}
-                            </div>
-                        }
-                        {isZZZ && specialty && 
-                            <div className="character-detail">
-                                <i className={`${specialtyIconClass} fa-fw`}></i> {specialty}
-                            </div>
-                        }
-                        {isZZZ && rank && 
-                            <div className="character-detail">
-                                <i className="fas fa-medal fa-fw" style={{ color: '#ffaa33' }}></i> Rank {rank}
-                            </div>
-                        }
-                        
-                        {/* Display types for ZZZ characters */}
-                        {isZZZ && types.length > 0 && (
-                            <div className="character-types">
-                                {types.map((type, index) => (
-                                    <span key={index} className="character-type-tag">
-                                        <TypeIcon /> {type}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                    {entity.description ? (
-                        <p className="character-description">{entity.description}</p>
+
+                            {/* Scroll indicator */}
+                            <EnhancedScrollIndicator onViewMods={handleScrollToMods} />
+                        </motion.div>
                     ) : (
-                         <p className="character-description placeholder-text" style={{padding: 0, textAlign:'left'}}>No description available.</p>
-                    )}
-                    <p style={{fontSize: '13px', color: 'rgba(255, 255, 255, 0.6)', marginTop:'15px'}}>
-                        Mods in library: {entity.mod_count ?? '...'}
-                    </p>
-                </div>
-            </div>
+                        <motion.div 
+                            key="mods-section"
+                            initial={{ opacity: 0, y: 50 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 100 }}
+                            transition={{ duration: 0.3 }}
+                            style={{ height: '100%', padding: '0 25px', position: 'absolute', width: '100%', top: 0, left: 0 }}
+                        >
+                            <div className="mods-section" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                                {/* --- Updated Section Header --- */}
+                                <div className="section-header" style={{ alignItems: 'center' }}>
+                                    {/* --- Left Aligned Group (Title & Select All) --- */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                        <h2 className="section-title" style={{ marginBottom: 0 }}>Available Mods ({filteredAndSortedAssets.length})</h2>
+                                        {viewMode === 'list' && filteredAndSortedAssets.length > 0 && (
+                                            <input
+                                                type="checkbox"
+                                                title={isAllFilteredSelected ? "Deselect All" : "Select All Visible"}
+                                                checked={isAllFilteredSelected}
+                                                ref={el => el && (el.indeterminate = isIndeterminate)}
+                                                onChange={handleSelectAllChange}
+                                                disabled={isBulkProcessing}
+                                                style={{ cursor: 'pointer', width:'16px', height:'16px' }}
+                                                aria-label="Select all mods"
+                                            />
+                                        )}
+                                    </div>
+                                    
+                                    {/* --- Right Aligned Group (Bulk Actions, Sort, Search, View Mode) --- */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginLeft: 'auto' }}>
+                                        {viewMode === 'list' && selectedAssetIds.size > 0 && (
+                                            <div style={{ display: 'flex', gap: '10px' }}>
+                                                <button className="btn btn-primary" onClick={() => handleBulkToggle(true)} disabled={isBulkProcessing} title="Enable selected mods">
+                                                    {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-check fa-fw"></i>} Enable ({selectedAssetIds.size})
+                                                </button>
+                                                <button className="btn btn-outline" onClick={() => handleBulkToggle(false)} disabled={isBulkProcessing} title="Disable selected mods">
+                                                    {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-times fa-fw"></i>} Disable ({selectedAssetIds.size})
+                                                </button>
+                                            </div>
+                                        )}
+                                        
+                                        {/* --- Type Filters (for ZZZ characters) --- */}
+                                        {isZZZ && types.length > 0 && (
+                                            <div className="type-filters-container">
+                                                <div className="type-filters">
+                                                    {types.map((type) => (
+                                                        <button
+                                                            key={type}
+                                                            className={`type-filter-btn ${activeTypeFilters.includes(type) ? 'active' : ''}`}
+                                                            onClick={() => toggleTypeFilter(type)}
+                                                            title={`Filter by ${type}`}
+                                                        >
+                                                            <i className={typeIconsFA[type] || "fas fa-tag"}></i> {type}
+                                                        </button>
+                                                    ))}
+                                                    {activeTypeFilters.length > 0 && (
+                                                        <button 
+                                                            className="type-filter-clear" 
+                                                            onClick={clearTypeFilters}
+                                                            title="Clear all type filters"
+                                                        >
+                                                            <i className="fas fa-times"></i> Clear
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                        
+                                        {/* --- Sort Dropdown --- */}
+                                        <div className="sort-dropdown-container">
+                                            <label htmlFor="mod-sort-select" style={sortStyles.sortLabel}>Sort by:</label>
+                                            <select id="mod-sort-select" value={sortOption} onChange={handleSortChange} style={sortStyles.sortSelect} aria-label="Sort mods">
+                                                {SORT_OPTIONS.map(option => ( <option key={option.value} value={option.value}>{option.label}</option> ))}
+                                            </select>
+                                        </div>
+                                        {/* --- End Sort Dropdown --- */}
+                                        <div className="search-bar-container">
+                                            <div className="search-bar">
+                                                <i className="fas fa-search"></i>
+                                                <input type="text" placeholder={`Search mods...`} value={modSearchTerm} onChange={(e) => setModSearchTerm(e.target.value)} aria-label={`Search mods`} data-global-search="true" />
+                                            </div>
+                                        </div>
+                                        <div className="view-mode-toggle">
+                                            <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => toggleViewMode('grid')} title="Grid View"><i className="fas fa-th fa-fw"></i></button>
+                                            <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => toggleViewMode('list')} title="List View"><i className="fas fa-list fa-fw"></i></button>
+                                        </div>
+                                    </div>
+                                </div>
+                                {/* --- End Updated Section Header --- */}
 
-            {/* Mods Section */}
-            <div className="mods-section">
-                 {/* --- Updated Section Header --- */}
-                 <div className="section-header" style={{ alignItems: 'center' }}>
-                     {/* --- Left Aligned Group (Title & Select All) --- */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                         <h2 className="section-title" style={{ marginBottom: 0 }}>Available Mods ({filteredAndSortedAssets.length})</h2>
-                         {viewMode === 'list' && filteredAndSortedAssets.length > 0 && (
-                              <input
-                                  type="checkbox"
-                                  title={isAllFilteredSelected ? "Deselect All" : "Select All Visible"}
-                                  checked={isAllFilteredSelected}
-                                  ref={el => el && (el.indeterminate = isIndeterminate)}
-                                  onChange={handleSelectAllChange}
-                                  disabled={isBulkProcessing}
-                                  style={{ cursor: 'pointer', width:'16px', height:'16px' }}
-                                  aria-label="Select all mods"
-                              />
-                         )}
-                    </div>
-                    
-                    {/* --- Right Aligned Group (Bulk Actions, Sort, Search, View Mode) --- */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginLeft: 'auto' }}>
-                         {viewMode === 'list' && selectedAssetIds.size > 0 && (
-                             <div style={{ display: 'flex', gap: '10px' }}>
-                                 <button className="btn btn-primary" onClick={() => handleBulkToggle(true)} disabled={isBulkProcessing} title="Enable selected mods">
-                                     {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-check fa-fw"></i>} Enable ({selectedAssetIds.size})
-                                 </button>
-                                 <button className="btn btn-outline" onClick={() => handleBulkToggle(false)} disabled={isBulkProcessing} title="Disable selected mods">
-                                     {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-times fa-fw"></i>} Disable ({selectedAssetIds.size})
-                                 </button>
-                             </div>
-                         )}
-                         
-                        {/* --- Type Filters (for ZZZ characters) --- */}
-                        {isZZZ && types.length > 0 && (
-                            <div className="type-filters-container">
-                                <div className="type-filters">
-                                    {types.map((type) => (
-                                        <button
-                                            key={type}
-                                            className={`type-filter-btn ${activeTypeFilters.includes(type) ? 'active' : ''}`}
-                                            onClick={() => toggleTypeFilter(type)}
-                                            title={`Filter by ${type}`}
-                                        >
-                                            <i className={typeIconsFA[type] || "fas fa-tag"}></i> {type}
-                                        </button>
-                                    ))}
-                                    {activeTypeFilters.length > 0 && (
-                                        <button 
-                                            className="type-filter-clear" 
-                                            onClick={clearTypeFilters}
-                                            title="Clear all type filters"
-                                        >
-                                            <i className="fas fa-times"></i> Clear
-                                        </button>
+                                <div ref={listContainerRef} style={{ flex: 1, overflow: 'hidden', marginTop: '10px' }}>
+                                    {loading ? (
+                                        <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'} style={{height: '100%'}}>
+                                            {Array.from({ length: 6 }).map((_, i) => <ModCardSkeleton key={i} viewMode={viewMode} />)}
+                                        </div>
+                                    ) : !filteredAndSortedAssets.length ? (
+                                        <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%', paddingTop: '30px' }}>
+                                            {assets.length === 0 ? `No mods found for ${entity.name}.` : 'No mods found matching search/filters.'}
+                                        </p>
+                                    ) : bounds.width > 0 && bounds.height > 0 ? (
+                                        viewMode === 'list' ? (
+                                            <FixedSizeList
+                                                height={bounds.height}
+                                                itemCount={filteredAndSortedAssets.length}
+                                                itemSize={LIST_ITEM_HEIGHT}
+                                                width={bounds.width}
+                                                style={{overflowX:'hidden'}}
+                                            >
+                                                {ListItem}
+                                            </FixedSizeList>
+                                        ) : (
+                                            <FixedSizeGrid
+                                                columnCount={gridColumnCount}
+                                                columnWidth={GRID_ITEM_WIDTH}
+                                                height={bounds.height}
+                                                rowCount={gridRowCount}
+                                                rowHeight={GRID_ITEM_HEIGHT}
+                                                width={bounds.width}
+                                                itemData={filteredAndSortedAssets} // Pass sorted list here
+                                            >
+                                                {GridItem}
+                                            </FixedSizeGrid>
+                                        )
+                                    ) : (
+                                        <p className="placeholder-text">Calculating layout...</p>
                                     )}
                                 </div>
                             </div>
-                        )}
-                        
-                        {/* --- Sort Dropdown --- */}
-                        <div className="sort-dropdown-container">
-                            <label htmlFor="mod-sort-select" style={sortStyles.sortLabel}>Sort by:</label>
-                            <select id="mod-sort-select" value={sortOption} onChange={handleSortChange} style={sortStyles.sortSelect} aria-label="Sort mods">
-                                {SORT_OPTIONS.map(option => ( <option key={option.value} value={option.value}>{option.label}</option> ))}
-                            </select>
-                        </div>
-                        {/* --- End Sort Dropdown --- */}
-                         <div className="search-bar-container">
-                             <div className="search-bar">
-                                 <i className="fas fa-search"></i>
-                                 <input type="text" placeholder={`Search mods...`} value={modSearchTerm} onChange={(e) => setModSearchTerm(e.target.value)} aria-label={`Search mods`} data-global-search="true" />
-                             </div>
-                         </div>
-                         <div className="view-mode-toggle">
-                              <button className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => toggleViewMode('grid')} title="Grid View"><i className="fas fa-th fa-fw"></i></button>
-                              <button className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`} onClick={() => toggleViewMode('list')} title="List View"><i className="fas fa-list fa-fw"></i></button>
-                         </div>
-                     </div>
-                 </div>
-                 {/* --- End Updated Section Header --- */}
-
-                 <div ref={listContainerRef} style={{ height: 'calc(100vh - 200px)', /* Adjust based on profile height etc */ minHeight: '300px', overflow: 'hidden', marginTop: '10px' }}>
-                    {loading ? (
-                         <div className={viewMode === 'grid' ? 'mods-grid' : 'mods-list'} style={{height: '100%'}}>
-                             {Array.from({ length: 6 }).map((_, i) => <ModCardSkeleton key={i} viewMode={viewMode} />)}
-                         </div>
-                     ) : !filteredAndSortedAssets.length ? (
-                         <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%', paddingTop: '30px' }}>
-                             {assets.length === 0 ? `No mods found for ${entity.name}.` : 'No mods found matching search/filters.'}
-                         </p>
-                     ) : bounds.width > 0 && bounds.height > 0 ? (
-                        viewMode === 'list' ? (
-                            <FixedSizeList
-                                height={bounds.height}
-                                itemCount={filteredAndSortedAssets.length}
-                                itemSize={LIST_ITEM_HEIGHT}
-                                width={bounds.width}
-                                style={{overflowX:'hidden'}}
-                            >
-                                {ListItem}
-                            </FixedSizeList>
-                        ) : (
-                            <FixedSizeGrid
-                                columnCount={gridColumnCount}
-                                columnWidth={GRID_ITEM_WIDTH}
-                                height={bounds.height}
-                                rowCount={gridRowCount}
-                                rowHeight={GRID_ITEM_HEIGHT}
-                                width={bounds.width}
-                                itemData={filteredAndSortedAssets} // Pass sorted list here
-                            >
-                                {GridItem}
-                            </FixedSizeGrid>
-                        )
-                    ) : (
-                         <p className="placeholder-text">Calculating layout...</p>
+                        </motion.div>
                     )}
-                </div>
+                </AnimatePresence>
             </div>
 
             {/* --- Render Context Menu --- */}
@@ -894,7 +1061,7 @@ function EntityPage() {
             {/* Modals */}
             {isEditModalOpen && editingAsset && ( <ModEditModal asset={editingAsset} currentEntitySlug={entitySlug} onClose={handleCloseEditModal} onSaveSuccess={handleSaveEditSuccess} /> )}
             {isDeleteModalOpen && assetToDelete && (
-                 <ConfirmationModal
+                <ConfirmationModal
                     isOpen={isDeleteModalOpen}
                     onClose={handleCloseDeleteModal}
                     onConfirm={handleConfirmDelete}
@@ -903,15 +1070,28 @@ function EntityPage() {
                     confirmButtonVariant="danger"
                     isLoading={isDeleting}
                     errorMessage={deleteError}
-                 >
+                >
                     Are you sure you want to permanently delete the mod "{assetToDelete.name}"?
                     This action will remove the mod files from your disk and cannot be undone.
-                 </ConfirmationModal>
-             )}
-             {isAddToPresetModalOpen && addToPresetAsset && ( <AddToPresetModal assetId={addToPresetAsset.id} assetName={addToPresetAsset.name} isOpen={isAddToPresetModalOpen} onClose={handleCloseAddToPresetModal} /> )}
+                </ConfirmationModal>
+            )}
+            {isAddToPresetModalOpen && addToPresetAsset && ( <AddToPresetModal assetId={addToPresetAsset.id} assetName={addToPresetAsset.name} isOpen={isAddToPresetModalOpen} onClose={handleCloseAddToPresetModal} /> )}
         </div>
     );
 }
+
+// --- Styles for scroll indicator ---
+const scrollIndicatorStyle = {
+    textAlign: 'center',
+    marginTop: '50px',
+    padding: '20px',
+    animation: 'fadeIn 0.5s ease-in-out',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: '16px'
+};
 
 // --- Styles for sort dropdown and type filters ---
 const sortStyles = {

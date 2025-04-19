@@ -64,8 +64,8 @@
       {
         "label": "main",
         "title": "GMM - A Tauri Mod Manager for GIMI",
-        "width": 1650,
-        "height": 900,
+        "width": 1400,
+        "height": 800,
         "minWidth": 900,
         "minHeight": 650,
         "resizable": true,
