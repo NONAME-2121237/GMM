@@ -146,6 +146,19 @@ function ModCard({
     }, []);
     // ---------------------------------
 
+    // --- NEW: Open Folder Handler ---
+    const handleOpenFolder = useCallback(async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        try {
+            await invoke('open_asset_folder', { assetId: asset.id });
+        } catch (err) {
+            console.error(`Failed to open folder for asset ${asset.id}:`, err);
+            toast.error(`Failed to open folder: ${err}`); // User feedback
+        }
+    }, [asset.id]);
+    // -----------------------------
+
     // Checkbox change handler
     const handleCheckboxChange = useCallback((e) => {
          onSelectChange(asset.id, e.target.checked);
@@ -281,6 +294,9 @@ function ModCard({
                      </label>
                      {/* Actions */}
                      <div className="mod-list-actions" style={listStyles.actions}>
+                         {/* --- ADDED: Open Folder Button --- */}
+                         <button onClick={handleOpenFolder} className="btn-icon compact-btn" title="Open Mod Folder" disabled={isToggling}> <i className="fas fa-folder-open fa-fw"></i> </button>
+                         {/* --- End Added Button --- */}
                          <button onClick={handleOpenKeybindsPopup} className="btn-icon compact-btn" title="View Keybinds" disabled={isToggling}> <i className="fas fa-keyboard fa-fw"></i> </button>
                          <button onClick={handleEditClick} className="btn-icon compact-btn" title="Edit Mod Info" disabled={isToggling}> <i className="fas fa-pencil-alt fa-fw"></i> </button>
                          <button onClick={handleDeleteClick} className="btn-icon compact-btn danger" title="Delete Mod" disabled={isToggling}> <i className="fas fa-trash-alt fa-fw"></i> </button>
@@ -314,6 +330,9 @@ function ModCard({
                      <div style={{ display: 'flex', gap: '5px' }}> {/* Button group */}
                          {/* Add to Preset Button */}
                          <button className="btn-icon add-preset-button" onClick={handleOpenAddToPreset} title="Add to Preset(s)" style={gridButtonStyles.addPreset} disabled={isToggling} > <i className="fas fa-plus-circle fa-fw"></i> </button>
+                         {/* --- ADDED: Open Folder Button --- */}
+                         <button className="btn-icon open-folder-button" onClick={handleOpenFolder} title="Open Mod Folder" style={gridButtonStyles.openFolder} disabled={isToggling} > <i className="fas fa-folder-open fa-fw"></i> </button>
+                         {/* --- End Added Button --- */}
                          {/* Keybind Button */}
                          <button className="btn-icon keybind-button" onClick={handleOpenKeybindsPopup} title="View Keybinds" style={gridButtonStyles.keybind} disabled={isToggling} aria-label={`View keybinds for ${asset.name}`} > <i className="fas fa-keyboard fa-fw"></i> </button>
                      </div>
@@ -327,13 +346,14 @@ function ModCard({
     );
 }
 
-// Updated grid styles including AddPreset button
+// Updated grid styles including AddPreset and OpenFolder buttons
 const gridButtonBase = { background:'none', border:'none', cursor:'pointer', fontSize:'15px', padding:'5px', opacity: 0.7, transition: 'opacity 0.2s ease, color 0.2s ease', color: 'var(--light)' };
 const gridButtonStyles = {
     edit: { ...gridButtonBase },
     delete: { ...gridButtonBase, color:'var(--danger)' },
     keybind: { ...gridButtonBase },
-    addPreset: { ...gridButtonBase } // Style for the add to preset button
+    addPreset: { ...gridButtonBase }, // Style for the add to preset button
+    openFolder: { ...gridButtonBase } // Style for the open folder button
 };
 
 // Base styles for the image container div
@@ -383,7 +403,7 @@ const listStyles = {
     name: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: '2px' },
     author: { fontSize: '11px', color: 'rgba(255, 255, 255, 0.6)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
     toggle: { marginLeft: 'auto', marginRight: '10px', flexShrink: 0 },
-    actions: { display: 'flex', gap: '2px', flexShrink: 0 },
+    actions: { display: 'flex', gap: '2px', flexShrink: 0 }, // Adjusted gap for new button
 };
 
 export default React.memo(ModCard);
