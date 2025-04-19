@@ -12,6 +12,7 @@ import useMeasure from 'react-use-measure';
 import { toast } from 'react-toastify';
 import ContextMenu from '../components/ContextMenu';
 import AddToPresetModal from '../components/AddToPresetModal';
+import LightboxModal from '../components/LightboxModal';
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -63,6 +64,7 @@ const typeIconsFA = {
 const RarityIcon = () => <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i>;
 const TypeIcon = () => <i className="fas fa-tag fa-fw" style={{ color: '#7acbf9' }}></i>;
 const DEFAULT_ENTITY_PLACEHOLDER_IMAGE = '/images/unknown.jpg';
+const FALLBACK_MOD_IMAGE = '/images/placeholder.jpg';
 
 // Global View Mode Key
 const VIEW_MODE_STORAGE_KEY = 'entityViewMode';
@@ -115,6 +117,9 @@ function EntityPage() {
 
     const [addToPresetAsset, setAddToPresetAsset] = useState(null); // Asset to add
     const [isAddToPresetModalOpen, setIsAddToPresetModalOpen] = useState(false);
+
+    const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+    const [lightboxImageUrl, setLightboxImageUrl] = useState(null);
 
     // Fetch data (includes loading view mode and sort option)
     const fetchData = useCallback(async () => {
@@ -491,6 +496,18 @@ function EntityPage() {
         setAddToPresetAsset(null);
     }, []);
 
+    const handleImageClick = useCallback((url) => {
+        if (url && url !== FALLBACK_MOD_IMAGE) { // Don't open lightbox for fallback
+            setLightboxImageUrl(url);
+            setIsLightboxOpen(true);
+        }
+    }, []);
+
+    const handleCloseLightbox = useCallback(() => {
+        setIsLightboxOpen(false);
+        setLightboxImageUrl(null);
+    }, []);
+
     // --- Define Context Menu Items ---
     const contextMenuItems = useMemo(() => {
         if (!contextMenuAsset) return []; // No asset, no menu
@@ -555,6 +572,7 @@ function EntityPage() {
                      isSelected={isSelected}
                      onSelectChange={handleAssetSelectChange}
                      onContextMenu={(e) => handleShowContextMenu(e, asset)}
+                     onImageClick={handleImageClick}
                  />
              </div>
         );
@@ -577,7 +595,7 @@ function EntityPage() {
                         onDelete={handleOpenDeleteModal}
                         viewMode="grid"
                         onContextMenu={(e) => handleShowContextMenu(e, asset)}
-                        // Selection not implemented for grid view
+                        onImageClick={handleImageClick}
                     />
                  </div>
              </div>
@@ -864,6 +882,13 @@ function EntityPage() {
                 yPos={contextMenuPosition.y}
                 items={contextMenuItems}
                 onClose={handleCloseContextMenu}
+            />
+
+            {/* --- Render Lightbox --- */}
+            <LightboxModal
+                isOpen={isLightboxOpen}
+                imageUrl={lightboxImageUrl}
+                onClose={handleCloseLightbox}
             />
 
             {/* Modals */}

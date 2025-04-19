@@ -26,11 +26,12 @@ function ModCard({
     isSelected = false,
     onSelectChange,
     onContextMenu,
+    onImageClick,
 }) {
     // State
     const isEnabled = asset.is_enabled;
     const [cleanRelativePath, setCleanRelativePath] = useState('');
-    const [imageUrl, setImageUrl] = useState(FALLBACK_MOD_IMAGE); // State holds the URL string
+    const [imageUrl, setImageUrl] = useState(null); // State holds the URL string
     const folderNameOnDisk = asset.folder_name; // Reflects disk state
     const [isToggling, setIsToggling] = useState(false);
     const [imageBgCss, setImageBgCss] = useState(FALLBACK_MOD_IMAGE_BG); // For grid view background
@@ -68,6 +69,12 @@ function ModCard({
             objectUrlRef.current = null;
         }
     }, []);
+
+    const handleImageClickInternal = useCallback(() => {
+        if (!imageLoading && !imageError && imageUrl && imageUrl !== FALLBACK_MOD_IMAGE && onImageClick) {
+            onImageClick(imageUrl);
+        }
+    }, [imageLoading, imageError, imageUrl, onImageClick]);
 
     // Toggle Handler
     const handleToggle = useCallback(async () => {
@@ -148,14 +155,18 @@ function ModCard({
     useEffect(() => {
         let isMounted = true;
         // Reset state upfront
-        setImageUrl(FALLBACK_MOD_IMAGE);
+        setImageUrl(null);
         setImageError(false);
         setImageLoading(false);
 
-        // console.log(`[ModCard ${asset.id}] Running Image Effect. ViewMode: ${viewMode}, Image Filename: ${asset.image_filename}`);
+        // No need to check viewMode here if list also shows image
+        if (!asset.image_filename) {
+            setImageUrl(FALLBACK_MOD_IMAGE); // Set fallback if no filename
+            return;
+        }
 
         // Guard condition: Only run for grid view AND if image filename exists
-        if (viewMode !== 'grid' || !asset.image_filename) {
+        if (!asset.image_filename) {
             // console.log(`[ModCard ${asset.id}] Skipping image load. ViewMode: ${viewMode}, Image Filename: ${asset.image_filename}`);
             return; // Exit early
         }
@@ -166,45 +177,30 @@ function ModCard({
         // Get the absolute path from the optimized backend command
         invoke('get_asset_image_path', { assetId: asset.id })
             .then(filePath => {
-                if (!isMounted) return; // Check if component is still mounted
-                if (!filePath) {
-                    console.log(`[ModCard ${asset.id}] Backend returned no path for image.`);
-                    throw new Error("No image path found."); // Trigger catch block
-                }
-
-                // console.log(`[ModCard ${asset.id}] Got absolute path: ${filePath}`);
-                // Convert the absolute path to a Tauri asset URL
+                if (!isMounted) return;
+                if (!filePath) throw new Error("No image path found.");
                 const assetUrl = convertFileSrc(filePath);
-                // console.log(`[ModCard ${asset.id}] Generated asset URL: ${assetUrl}`);
-
+                // console.log(`[ModCard ${asset.id}, ${viewMode}] Image URL set: ${assetUrl}`);
                 if (isMounted) {
-                    // Set the state to the asset:// URL. The browser/Tauri webview handles loading this.
                     setImageUrl(assetUrl);
                     setImageError(false);
                 }
             })
             .catch(err => {
                  if (isMounted) {
-                    const errorMsg = String(err.message || err);
-                    if (!errorMsg.includes('not found') && !errorMsg.includes('No image path found')) {
-                        console.warn(`[ModCard ${asset.id}] Failed to get image path or convert:`, errorMsg);
-                    }
-                    setImageUrl(FALLBACK_MOD_IMAGE); // Revert to fallback URL on error
+                    // console.warn(`[ModCard ${asset.id}, ${viewMode}] Failed image load:`, String(err.message || err));
+                    setImageUrl(FALLBACK_MOD_IMAGE);
                     setImageError(true);
                  }
             })
             .finally(() => {
                 if (isMounted) {
-                    setImageLoading(false); // Mark loading as complete
+                    setImageLoading(false);
                 }
             });
 
-        // No cleanup needed for convertFileSrc URLs
-        return () => {
-            isMounted = false;
-        };
-    // Dependencies: Rerun only if ID, filename, or viewMode changes.
-    }, [asset.id, asset.image_filename, viewMode]);
+        return () => { isMounted = false; };
+    }, [asset.id, asset.image_filename]);
 
     // Style for Image Container (only used in grid mode)
     const imageContainerStyle = useMemo(() => ({
@@ -228,6 +224,37 @@ function ModCard({
 
     // --- RENDER ---
 
+    const ImagePreview = () => (
+        <div
+            className={`mod-image-container view-${viewMode}`}
+            // Apply specific container styles based on viewMode
+            style={viewMode === 'grid' ? gridImageContainerStyle : listImageContainerStyle}
+            onClick={handleImageClickInternal}
+            title={imageUrl && imageUrl !== FALLBACK_MOD_IMAGE ? "Click to enlarge preview" : undefined}
+        >
+            {imageLoading && <i className="fas fa-spinner fa-spin"></i>}
+            {/* Render img only when not loading and URL is available */}
+            {!imageLoading && imageUrl && (
+                <img
+                    src={imageUrl}
+                    alt={imageError ? "Preview failed" : `${asset.name} preview`}
+                    className={`mod-image ${imageError ? 'error' : ''}`}
+                    // Apply specific image styles based on viewMode
+                    style={viewMode === 'grid' ? gridImageViewStyle : listImageViewStyle}
+                     // Let the useEffect handle the error state and fallback URL
+                     // onError={() => { if (!imageError) setImageError(true); setImageUrl(FALLBACK_MOD_IMAGE); }}
+                />
+            )}
+             {/* Show placeholder text only if not loading and no valid image URL (e.g., initial state or error) */}
+             {!imageLoading && !imageUrl && (
+                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)'}}>No Preview</span>
+             )}
+              {!imageLoading && imageUrl === FALLBACK_MOD_IMAGE && imageError && (
+                  <span style={{ fontSize: '10px', color: 'rgba(255,100,100,0.7)'}}>Load Failed</span>
+             )}
+        </div>
+    );
+
     // Compact List View Structure
     if (viewMode === 'list') {
         return (
@@ -238,27 +265,29 @@ function ModCard({
                     style={ isSelected ? { backgroundColor: 'rgba(156, 136, 255, 0.1)' } : {} }
                     onContextMenu={onContextMenu}
                 >
-                     <input
-                         type="checkbox" checked={isSelected} onChange={handleCheckboxChange}
-                         onClick={(e) => e.stopPropagation()}
-                         style={{ marginRight: '10px', cursor: 'pointer', width: '16px', height: '16px' }}
-                         aria-label={`Select mod ${asset.name}`}
-                     />
-                    <label className="toggle-switch compact-toggle">
-                        <input type="checkbox" checked={isEnabled} onChange={handleToggle} disabled={isToggling} aria-label={`Enable/Disable ${asset.name} mod`} />
-                        <span className="slider"></span>
-                    </label>
-                    <div className="mod-list-name"> {asset.name} </div>
-                    {asset.author && ( <div className="mod-list-author" title={`Author: ${asset.author}`}> By: {asset.author} </div> )}
-                    <div className="mod-list-actions">
-                        {/* No Add to Preset button in list view for now */}
-                        <button onClick={handleOpenKeybindsPopup} className="btn-icon compact-btn" title="View Keybinds" disabled={isToggling}> <i className="fas fa-keyboard fa-fw"></i> </button>
-                        <button onClick={handleEditClick} className="btn-icon compact-btn" title="Edit Mod Info" disabled={isToggling}> <i className="fas fa-pencil-alt fa-fw"></i> </button>
-                        <button onClick={handleDeleteClick} className="btn-icon compact-btn danger" title="Delete Mod" disabled={isToggling}> <i className="fas fa-trash-alt fa-fw"></i> </button>
-                    </div>
+                     {/* Checkbox */}
+                     <input type="checkbox" checked={isSelected} onChange={handleCheckboxChange} onClick={(e) => e.stopPropagation()} style={listStyles.checkbox} aria-label={`Select mod ${asset.name}`} />
+                     {/* Image Preview (Small) */}
+                     <ImagePreview /> {/* Renders the common component */}
+                     {/* Name & Author */}
+                     <div style={listStyles.nameAuthorContainer}>
+                         <div className="mod-list-name" style={listStyles.name}> {asset.name} </div>
+                         {asset.author && ( <div className="mod-list-author" style={listStyles.author} title={`Author: ${asset.author}`}> By: {asset.author} </div> )}
+                     </div>
+                     {/* Toggle */}
+                     <label className="toggle-switch compact-toggle" style={listStyles.toggle}>
+                         <input type="checkbox" checked={isEnabled} onChange={handleToggle} disabled={isToggling} aria-label={`Enable/Disable ${asset.name} mod`} />
+                         <span className="slider"></span>
+                     </label>
+                     {/* Actions */}
+                     <div className="mod-list-actions" style={listStyles.actions}>
+                         <button onClick={handleOpenKeybindsPopup} className="btn-icon compact-btn" title="View Keybinds" disabled={isToggling}> <i className="fas fa-keyboard fa-fw"></i> </button>
+                         <button onClick={handleEditClick} className="btn-icon compact-btn" title="Edit Mod Info" disabled={isToggling}> <i className="fas fa-pencil-alt fa-fw"></i> </button>
+                         <button onClick={handleDeleteClick} className="btn-icon compact-btn danger" title="Delete Mod" disabled={isToggling}> <i className="fas fa-trash-alt fa-fw"></i> </button>
+                     </div>
                 </div>
+                 {/* Modals */}
                 <KeybindsPopup isOpen={isKeybindsPopupOpen} onClose={handleCloseKeybindsPopup} assetId={asset.id} assetName={asset.name} keybinds={keybinds} isLoading={keybindsLoading} error={keybindsError} />
-                {/* AddToPresetModal is rendered outside the list item for potential reuse, maybe at page level? For now, keep it here */}
                 <AddToPresetModal assetId={asset.id} assetName={asset.name} isOpen={isAddToPresetModalOpen} onClose={handleCloseAddToPreset} />
             </>
         );
@@ -268,14 +297,8 @@ function ModCard({
     return (
         <>
             <div className={`mod-card mod-card-grid ${!isEnabled ? 'mod-disabled-visual' : ''}`} title={`Path: ${cleanRelativePath}`} style={{ height: '100%' }} onContextMenu={onContextMenu}>
-                <div style={imageContainerStyle}>
-                    {imageLoading && ( <i className="fas fa-spinner fa-spin fa-2x" style={{ color: 'rgba(255,255,255,0.6)' }}></i> )}
-                    {!imageLoading && imageUrl === FALLBACK_MOD_IMAGE && (
-                        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', padding: '5px', background: 'rgba(0,0,0,0.3)', borderRadius: '3px' }}>
-                            {imageError ? 'Preview failed' : 'No preview'}
-                        </span>
-                    )}
-                </div>
+                {/* Image Preview (Large Banner) */}
+                <ImagePreview />
                 <div className="mod-header">
                     <div className="mod-title">{asset.name}</div>
                     <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', gap: '5px' }}>
@@ -311,6 +334,56 @@ const gridButtonStyles = {
     delete: { ...gridButtonBase, color:'var(--danger)' },
     keybind: { ...gridButtonBase },
     addPreset: { ...gridButtonBase } // Style for the add to preset button
+};
+
+// Base styles for the image container div
+const imageContainerBaseStyle = {
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.2)', // Fallback BG
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+    cursor: 'default', // Default cursor
+};
+// Styles for Grid View Image
+const gridImageContainerStyle = {
+    ...imageContainerBaseStyle,
+    marginBottom: '15px',
+    height: '120px', // Keep banner height
+    borderRadius: '6px',
+    cursor: 'pointer', // Make it clickable
+};
+const gridImageViewStyle = {
+    display: 'block',
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain', // Or 'cover' if you prefer the original look
+};
+// Styles for List View Image
+const listImageContainerStyle = {
+    ...imageContainerBaseStyle,
+    width: '45px', // Fixed width for list item image
+    height: '45px', // Fixed height
+    borderRadius: '4px',
+    marginRight: '12px',
+    flexShrink: 0, // Prevent shrinking
+};
+const listImageViewStyle = {
+    display: 'block',
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover', // Cover usually looks better for small list icons
+};
+// Specific styles for list items layout using flex
+const listStyles = {
+    checkbox: { marginRight: '10px', cursor: 'pointer', width: '16px', height: '16px', flexShrink: 0 },
+    nameAuthorContainer: { display: 'flex', flexDirection: 'column', flexGrow: 1, overflow: 'hidden', marginRight: '10px' },
+    name: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: '2px' },
+    author: { fontSize: '11px', color: 'rgba(255, 255, 255, 0.6)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+    toggle: { marginLeft: 'auto', marginRight: '10px', flexShrink: 0 },
+    actions: { display: 'flex', gap: '2px', flexShrink: 0 },
 };
 
 export default React.memo(ModCard);
