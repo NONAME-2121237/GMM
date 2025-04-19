@@ -3196,7 +3196,7 @@ fn import_archive(
     })?;
     // --- End Get base path ---
 
-    let target_mod_folder_name = mod_name.trim().replace(" ", "_").replace(".", "_");
+    let target_mod_folder_name = mod_name.trim().replace(" ", "_").replace(".", "_").replace("'", "");
     if target_mod_folder_name.is_empty() { return Err("Mod Name results in invalid folder name.".to_string()); }
     let final_mod_dest_path = base_mods_path.join(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
 
