@@ -14,6 +14,7 @@ import ContextMenu from '../components/ContextMenu';
 import AddToPresetModal from '../components/AddToPresetModal';
 import LightboxModal from '../components/LightboxModal';
 import { motion, AnimatePresence } from 'framer-motion';
+import ModStatsDashboard from '../components/ModStatsDashboard';
 
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
@@ -68,7 +69,7 @@ const EnhancedScrollIndicator = ({ onViewMods }) => {
     return (
       <div className="scroll-indicator" style={{
         textAlign: 'center',
-        marginTop: '50px',
+        marginTop: '0',
         padding: '20px',
         display: 'flex',
         flexDirection: 'column',
@@ -771,7 +772,7 @@ function EntityPage() {
     return (
         <div 
             className={`character-page ${isZZZ ? 'zzz-character' : 'genshin-character'}`} 
-            style={{ height: '100vh', overflow: 'hidden', position: 'relative' }}
+            style={{ height: '100%', overflow: 'hidden', position: 'relative' }}
             ref={pageRef}
             onContextMenu={(e) => {
                 // If the click isn't on a card (which would stop propagation), close the menu
@@ -825,7 +826,7 @@ function EntityPage() {
                             <div className="character-profile" style={{ marginBottom: '30px' }}>
                                 <div
                                     className="character-avatar"
-                                    style={{ backgroundImage: `url('${avatarUrl}')` }}
+                                    style={{ backgroundImage: `url('${avatarUrl}')`, height: '300px', width: '220px' }}
                                     onError={handleAvatarError}
                                 >
                                 </div>
@@ -904,6 +905,21 @@ function EntityPage() {
                                     </p>
                                 </div>
                             </div>
+
+                            {/* Mod Statistics Dashboard */}
+                            <ModStatsDashboard
+                                totalMods={entity.mod_count || 0}
+                                enabledMods={entity.enabled_mod_count || 0}
+                                recentlyAdded={entity.recent_mod_count || 0} // You might need to add this to your entity details
+                                favoriteCount={entity.favorite_mod_count || 0} // You might need to add this to your entity details
+                                typeBreakdown={[
+                                    // Example - replace with actual data from your app if available
+                                    {type: 'Appearance', count: Math.round(entity.mod_count * 0.4) || 0},
+                                    {type: 'Animation', count: Math.round(entity.mod_count * 0.2) || 0},
+                                    {type: 'Texture', count: Math.round(entity.mod_count * 0.3) || 0},
+                                    {type: 'Effect', count: Math.round(entity.mod_count * 0.1) || 0},
+                                ]}
+                            />
 
                             {/* Scroll indicator */}
                             <EnhancedScrollIndicator onViewMods={handleScrollToMods} />

@@ -221,7 +221,7 @@ struct DeductionMaps {
 }
 
 #[derive(Serialize, Deserialize, Debug)] struct Category { id: i64, name: String, slug: String }
-#[derive(Serialize, Deserialize, Debug)] struct Entity { id: i64, category_id: i64, name: String, slug: String, description: Option<String>, details: Option<String>, base_image: Option<String>, mod_count: i32 }
+#[derive(Serialize, Deserialize, Debug)] struct Entity { id: i64, category_id: i64, name: String, slug: String, description: Option<String>, details: Option<String>, base_image: Option<String>, mod_count: i32, enabled_mod_count: Option<i32>, recent_mod_count: Option<i32>, favorite_mod_count: Option<i32> }
 #[derive(Serialize, Deserialize, Debug, Clone)] struct Asset { id: i64, entity_id: i64, name: String, description: Option<String>, folder_name: String, image_filename: Option<String>, author: Option<String>, category_tag: Option<String>, is_enabled: bool }
 
 #[derive(Serialize, Debug, Clone)]
@@ -1597,7 +1597,10 @@ fn get_category_entities(category_slug: String, db_state: State<DbState>) -> Cmd
             description: None,
             details: None,
             base_image: None,
-            mod_count: 0
+            mod_count: 0,
+            enabled_mod_count: None,
+            recent_mod_count: None,
+            favorite_mod_count: None,
         })
     }).map_err(|e| e.to_string())?;
     entity_iter.collect::<SqlResult<Vec<Entity>>>().map_err(|e| e.to_string())
@@ -1630,7 +1633,10 @@ fn get_entities_by_category(category_slug: String, db_state: State<DbState>) -> 
         Ok(Entity {
             id: row.get(0)?, category_id: row.get(1)?, name: row.get(2)?,
             slug: row.get(3)?, description: row.get(4)?, details: row.get(5)?,
-            base_image: row.get(6)?, mod_count: row.get(7)?
+            base_image: row.get(6)?, mod_count: row.get(7)?,
+            enabled_mod_count: None,
+            recent_mod_count: None,
+            favorite_mod_count: None
         })
     }).map_err(|e| e.to_string())?;
     entity_iter.collect::<SqlResult<Vec<Entity>>>().map_err(|e| e.to_string())
@@ -1639,22 +1645,146 @@ fn get_entities_by_category(category_slug: String, db_state: State<DbState>) -> 
 
 #[command]
 fn get_entity_details(entity_slug: String, db_state: State<DbState>) -> CmdResult<Entity> {
-    let conn = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
-     let mut stmt = conn.prepare(
-        "SELECT e.id, e.category_id, e.name, e.slug, e.description, e.details, e.base_image, COUNT(a.id) as mod_count
-         FROM entities e LEFT JOIN assets a ON e.id = a.entity_id
-         WHERE e.slug = ?1 GROUP BY e.id"
-    ).map_err(|e| e.to_string())?;
-    stmt.query_row(params![entity_slug], |row| {
-         Ok(Entity {
-            id: row.get(0)?, category_id: row.get(1)?, name: row.get(2)?,
-            slug: row.get(3)?, description: row.get(4)?, details: row.get(5)?,
-            base_image: row.get(6)?, mod_count: row.get(7)?
-        })
-    }).map_err(|e| match e { // Map specific internal errors to String
-        rusqlite::Error::QueryReturnedNoRows => format!("Entity '{}' not found", entity_slug),
-        _ => e.to_string(),
-    })
+    println!("[get_entity_details] Starting for entity: {}", entity_slug);
+    
+    // PART 1: Get base entity info with a brief lock
+    let entity_info = {
+        let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+        let conn = &*conn_guard; // Dereference the guard
+        
+        let mut stmt = conn.prepare(
+            "SELECT e.id, e.category_id, e.name, e.slug, e.description, e.details, e.base_image, COUNT(a.id) as mod_count
+             FROM entities e LEFT JOIN assets a ON e.id = a.entity_id
+             WHERE e.slug = ?1 GROUP BY e.id"
+        ).map_err(|e| format!("[get_entity_details] DB prepare error: {}", e))?;
+        
+        // Get basic entity details first
+        stmt.query_row(params![entity_slug], |row| {
+             Ok(Entity {
+                id: row.get(0)?, 
+                category_id: row.get(1)?, 
+                name: row.get(2)?,
+                slug: row.get(3)?, 
+                description: row.get(4)?, 
+                details: row.get(5)?,
+                base_image: row.get(6)?, 
+                mod_count: row.get(7)?,
+                enabled_mod_count: None,  // Will be populated later
+                recent_mod_count: None,   // Will be populated later
+                favorite_mod_count: None  // Will be populated later
+            })
+        }).map_err(|e| match e { 
+            rusqlite::Error::QueryReturnedNoRows => format!("Entity '{}' not found", entity_slug),
+            _ => format!("[get_entity_details] DB row error: {}", e),
+        })?
+    }; // conn_guard is released here
+    
+    // Create a mutable copy we'll update with the additional counts
+    let mut entity = entity_info;
+    
+    // PART 2: Get folder paths from DB with a separate brief lock
+    let asset_folder_paths: Vec<String> = {
+        let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+        let conn = &*conn_guard;
+        
+        // Prepare statement and collect all folder paths while holding lock
+        let mut stmt = conn.prepare("SELECT folder_name FROM assets WHERE entity_id = ?1")
+            .map_err(|e| format!("[get_entity_details] Error preparing folder query: {}", e))?;
+            
+        let folder_iter = stmt.query_map(params![entity.id], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("[get_entity_details] Error executing folder query: {}", e))?;
+            
+        // Collect all paths into a Vec to release the lock sooner
+        let mut paths = Vec::new();
+        for result in folder_iter {
+            match result {
+                Ok(path) => paths.push(path.replace("\\", "/")),
+                Err(e) => println!("[get_entity_details] Warning: Error fetching path: {}", e),
+            }
+        }
+        paths
+    }; // conn_guard is released here
+    
+    // PART 3: Get mods base path (uses a lock internally, so call outside of any lock section)
+    let base_mods_path = match get_mods_base_path_from_settings(&db_state) {
+        Ok(path) => path,
+        Err(e) => {
+            println!("[get_entity_details] Warning: Error getting base mods path: {}", e);
+            // We'll proceed with empty counts since we can't check the disk
+            entity.enabled_mod_count = Some(0);
+            entity.recent_mod_count = Some(0);
+            entity.favorite_mod_count = Some(0);
+            return Ok(entity);
+        }
+    };
+    
+    // PART 4: Count enabled mods by checking disk paths (NO DB LOCK NEEDED)
+    let mut enabled_count = 0;
+    for clean_relative_path_str in &asset_folder_paths {
+        let clean_relative_path = PathBuf::from(clean_relative_path_str);
+        let filename_osstr = match clean_relative_path.file_name() {
+            Some(name) => name,
+            None => continue, // Skip if we can't get filename
+        };
+        
+        let filename_str = filename_osstr.to_string_lossy();
+        if filename_str.is_empty() { continue; }
+        
+        // Check only enabled state path
+        let full_path_if_enabled = base_mods_path.join(&clean_relative_path);
+        if full_path_if_enabled.is_dir() {
+            enabled_count += 1;
+        }
+    }
+    entity.enabled_mod_count = Some(enabled_count);
+    
+    // PART 5: Get recent mod count and favorite counts with a final lock
+    {
+        let conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
+        let conn = &*conn_guard;
+        
+        // Count recent mods (approximation using ID sorting, assuming higher IDs are more recent)
+        if entity.mod_count > 0 {
+            match conn.query_row(
+                "SELECT COUNT(*) FROM assets 
+                 WHERE entity_id = ?1 
+                 AND id > (SELECT MAX(id) - (COUNT(*) / 4) FROM assets WHERE entity_id = ?1)",
+                params![entity.id],
+                |row| row.get::<_, i32>(0),
+            ) {
+                Ok(count) => {
+                    entity.recent_mod_count = Some(count);
+                },
+                Err(e) => {
+                    println!("[get_entity_details] Warning: Error counting recent mods: {}", e);
+                    entity.recent_mod_count = Some(0);
+                }
+            }
+        } else {
+            entity.recent_mod_count = Some(0);
+        }
+        
+        // Count mods in favorite presets
+        match conn.query_row(
+            "SELECT COUNT(DISTINCT a.id) FROM assets a
+             JOIN preset_assets pa ON a.id = pa.asset_id
+             JOIN presets p ON pa.preset_id = p.id
+             WHERE a.entity_id = ?1 AND p.is_favorite = 1",
+            params![entity.id],
+            |row| row.get::<_, i32>(0),
+        ) {
+            Ok(count) => {
+                entity.favorite_mod_count = Some(count);
+            },
+            Err(e) => {
+                println!("[get_entity_details] Warning: Error counting mods in favorite presets: {}", e);
+                entity.favorite_mod_count = Some(0);
+            }
+        }
+    } // Final conn_guard is released here
+    
+    println!("[get_entity_details] Completed for entity: {}", entity_slug);
+    Ok(entity)
 }
 
 #[command]
