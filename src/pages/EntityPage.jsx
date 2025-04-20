@@ -16,6 +16,20 @@ import LightboxModal from '../components/LightboxModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import ModStatsDashboard from '../components/ModStatsDashboard';
 
+const WIKI_BASE_URLS = {
+    "genshin": "https://genshin-impact.fandom.com/wiki/",
+    "zzz": "https://zenless-zone-zero.fandom.com/wiki/",
+    "hsr": "https://honkai-star-rail.fandom.com/wiki/",
+    "wuwa": "https://wutheringwaves.fandom.com/wiki/"
+};
+
+const getWikiUrl = (entityName, activeGame) => {
+    const formattedName = entityName.replace(/\s+/g, '_');
+    const baseUrl = WIKI_BASE_URLS[activeGame] || WIKI_BASE_URLS.genshin;
+    
+    return `${baseUrl}${formattedName}`;
+  };
+
 // Helper function to parse details JSON
 const parseDetails = (detailsJson) => {
     try {
@@ -34,9 +48,11 @@ const elementIconsFA = {
     Dendro: "fas fa-leaf",
 };
 const weaponIconsFA = {
-    Polearm: "fas fa-staff-aesculapius", Sword: "fas fa-sword",
-    Claymore: "fas fa-gavel", Bow: "fas fa-bow-arrow",
-    Catalyst: "fas fa-book-sparkles"
+    Polearm: "fas fa-utensils",
+    Sword: "fas fa-khanda",
+    Claymore: "fas fa-hammer",
+    Bow: "fas fa-bullseye",
+    Catalyst: "fas fa-book-open"
 };
 
 // ZZZ Font Awesome icons map
@@ -208,6 +224,36 @@ function EntityPage() {
     // For detecting scroll direction
     const [hasScrolled, setHasScrolled] = useState(false);
     const pageRef = useRef(null);
+
+    const [isWikiButtonHovered, setIsWikiButtonHovered] = useState(false);
+    const [wikiError, setWikiError] = useState('');
+    const [activeGame, setActiveGame] = useState('genshin');
+    
+    useEffect(() => {
+        const fetchActiveGame = async () => {
+          try {
+            const game = await invoke('get_active_game');
+            setActiveGame(game || 'genshin');
+          } catch (err) {
+            console.error("Failed to get active game:", err);
+            setActiveGame('genshin');
+          }
+        };
+        
+        fetchActiveGame();
+    }, []);
+
+    const openWiki = async (entityName) => {
+        setWikiError('');
+        try {
+            const wikiUrl = getWikiUrl(entityName, activeGame);
+            await open(wikiUrl);
+        } catch (err) {
+            console.error("Failed to open wiki:", err);
+            setWikiError("Failed to open wiki page");
+            toast.error("Failed to open wiki page");
+        }
+    };
 
     // Fetch data (includes loading view mode and sort option)
     const fetchData = useCallback(async () => {
@@ -750,9 +796,6 @@ function EntityPage() {
     const types = details?.types || [];
     const rank = details?.rank;
     
-    // Determine if this is a ZZZ character
-    const isZZZ = attribute || specialty || rank;
-    
     const avatarUrl = entity.base_image ? `/images/entities/${entitySlug}_base.jpg` : DEFAULT_ENTITY_PLACEHOLDER_IMAGE;
     const handleAvatarError = (e) => {
         if (e.target.src !== DEFAULT_ENTITY_PLACEHOLDER_IMAGE) {
@@ -771,7 +814,7 @@ function EntityPage() {
 
     return (
         <div 
-            className={`character-page ${isZZZ ? 'zzz-character' : 'genshin-character'}`} 
+            className={`character-page ${activeGame === 'zzz' ? 'zzz-character' : 'genshin-character'}`} 
             style={{ height: '100%', overflow: 'hidden', position: 'relative' }}
             ref={pageRef}
             onContextMenu={(e) => {
@@ -835,57 +878,51 @@ function EntityPage() {
                                     <h2 className="character-name">
                                         {entity.name}
                                         {/* Display element icon for Genshin characters */}
-                                        {elementIconClass && !isZZZ &&
+                                        {elementIconClass && activeGame === 'genshin' &&
                                             <span className="element-icon" style={{ color: `var(--${element?.toLowerCase()})` || 'var(--primary)' }} title={element}>
                                                 <i className={`${elementIconClass} fa-fw`}></i>
                                             </span>
                                         }
                                         {/* Display attribute icon for ZZZ characters */}
-                                        {attributeIconClass && isZZZ &&
+                                        {elementIconClass && activeGame === 'zzz' &&
                                             <span className="attribute-icon" style={{ color: `var(--zzz-${attribute?.toLowerCase()})` || 'var(--primary)' }} title={`Attribute: ${attribute}`}>
                                                 <i className={`${attributeIconClass} fa-fw`}></i>
                                             </span>
                                         }
                                     </h2>
                                     <div className="character-details">
-                                        {/* Common details for both character types */}
-                                        {details?.rarity && 
-                                            <div className="character-detail">
-                                                <RarityIcon /> {details.rarity} Star{details.rarity !== 1 ? 's' : ''}
-                                            </div>
-                                        }
-                                        
+                                        {/* Game-specific character details */}
                                         {/* Genshin-specific details */}
-                                        {!isZZZ && element && 
+                                        {activeGame === 'genshin' && element && 
                                             <div className="character-detail">
                                                 <i className={`${elementIconClass} fa-fw`}></i> {element}
                                             </div>
                                         }
-                                        {!isZZZ && weapon && 
+                                        {activeGame === 'genshin' && weapon && 
                                             <div className="character-detail">
                                                 <i className={`${weaponIconClass} fa-fw`}></i> {weapon}
                                             </div>
                                         }
                                         
                                         {/* ZZZ-specific details */}
-                                        {isZZZ && attribute && 
+                                        {activeGame === 'zzz' && attribute && 
                                             <div className="character-detail">
                                                 <i className={`${attributeIconClass} fa-fw`}></i> {attribute}
                                             </div>
                                         }
-                                        {isZZZ && specialty && 
+                                        {activeGame === 'zzz' && specialty && 
                                             <div className="character-detail">
                                                 <i className={`${specialtyIconClass} fa-fw`}></i> {specialty}
                                             </div>
                                         }
-                                        {isZZZ && rank && 
+                                        {activeGame === 'zzz' && rank && 
                                             <div className="character-detail">
                                                 <i className="fas fa-medal fa-fw" style={{ color: '#ffaa33' }}></i> Rank {rank}
                                             </div>
                                         }
                                         
                                         {/* Display types for ZZZ characters */}
-                                        {isZZZ && types.length > 0 && (
+                                        {activeGame === 'zzz' && types.length > 0 && (
                                             <div className="character-types">
                                                 {types.map((type, index) => (
                                                     <span key={index} className="character-type-tag">
@@ -900,9 +937,43 @@ function EntityPage() {
                                     ) : (
                                         <p className="character-description placeholder-text" style={{padding: 0, textAlign:'left'}}>No description available.</p>
                                     )}
-                                    <p style={{fontSize: '13px', color: 'rgba(255, 255, 255, 0.6)', marginTop:'15px'}}>
-                                        Mods in library: {entity.mod_count ?? '...'}
-                                    </p>
+
+                                    {/* Game-aware Wiki Button */}
+                                    <motion.button
+                                        className="btn wiki-button"
+                                        onClick={() => openWiki(entity.name)}
+                                        onMouseEnter={() => setIsWikiButtonHovered(true)}
+                                        onMouseLeave={() => setIsWikiButtonHovered(false)}
+                                        initial={{ scale: 1 }}
+                                        whileHover={{ 
+                                            scale: 1.05,
+                                            transition: { duration: 0.2 }
+                                        }}
+                                        whileTap={{ scale: 0.98 }}
+                                        style={{
+                                            marginTop: '15px',
+                                            background: `linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)`,
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            padding: '8px 16px',
+                                            fontSize: '14px',
+                                            fontWeight: '500',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px',
+                                            boxShadow: isWikiButtonHovered 
+                                                ? '0 5px 15px rgba(156, 136, 255, 0.5)' 
+                                                : '0 4px 10px rgba(156, 136, 255, 0.3)',
+                                            transition: 'box-shadow 0.3s ease',
+                                            maxWidth: 'fit-content'
+                                        }}
+                                    >
+                                        <i className="fas fa-book fa-fw"></i>
+                                        View in {activeGame.toUpperCase()} Wiki
+                                    </motion.button>
+                                    {wikiError && <p style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '5px' }}>{wikiError}</p>}
                                 </div>
                             </div>
 
@@ -967,7 +1038,7 @@ function EntityPage() {
                                         )}
                                         
                                         {/* --- Type Filters (for ZZZ characters) --- */}
-                                        {isZZZ && types.length > 0 && (
+                                        {activeGame === 'zzz' && types.length > 0 && (
                                             <div className="type-filters-container">
                                                 <div className="type-filters">
                                                     {types.map((type) => (
