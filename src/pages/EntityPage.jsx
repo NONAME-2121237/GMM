@@ -318,28 +318,7 @@ function EntityPage() {
         setAssets(currentAssets =>
             currentAssets.map(asset => {
                 if (asset.id === assetId) {
-                    // Logic to calculate the potentially new folder_name based on state
-                    // This is needed if ModCard itself doesn't know the "clean" relative path
-                    const isCurrentlyDisabledPrefixed = asset.folder_name.startsWith('DISABLED_');
-                    let cleanRelativePath = asset.folder_name;
-                    if (isCurrentlyDisabledPrefixed) {
-                        const parts = asset.folder_name.split('/');
-                        const filename = parts.pop() || '';
-                        cleanRelativePath = parts.length > 0 ? `${parts.join('/')}/${filename.substring(9)}` : filename.substring(9);
-                    }
-
-                    let updatedFolderName;
-                    if (newIsEnabledState) {
-                         updatedFolderName = cleanRelativePath; // Use clean path if enabled
-                    } else {
-                         const parts = cleanRelativePath.split('/');
-                         const filename = parts.pop() || '';
-                         const disabledFilename = `DISABLED_${filename}`;
-                         updatedFolderName = parts.length > 0 ? `${parts.join('/')}/${disabledFilename}` : disabledFilename;
-                     }
-
-                    const updatedAsset = { ...asset, is_enabled: newIsEnabledState, folder_name: updatedFolderName };
-                    console.log(`[EntityPage ${entitySlug}] Updated asset ${assetId} state:`, updatedAsset);
+                    const updatedAsset = { ...asset, is_enabled: newIsEnabledState };
                     return updatedAsset;
                 }
                 return asset;
@@ -1098,7 +1077,7 @@ function EntityPage() {
                                     ) : bounds.width > 0 && bounds.height > 0 ? (
                                         viewMode === 'list' ? (
                                             <FixedSizeList
-                                                height={bounds.height}
+                                                height={bounds.height - 100}
                                                 itemCount={filteredAndSortedAssets.length}
                                                 itemSize={LIST_ITEM_HEIGHT}
                                                 width={bounds.width}
@@ -1110,7 +1089,7 @@ function EntityPage() {
                                             <FixedSizeGrid
                                                 columnCount={gridColumnCount}
                                                 columnWidth={GRID_ITEM_WIDTH}
-                                                height={bounds.height}
+                                                height={bounds.height - 100}
                                                 rowCount={gridRowCount}
                                                 rowHeight={GRID_ITEM_HEIGHT}
                                                 width={bounds.width}

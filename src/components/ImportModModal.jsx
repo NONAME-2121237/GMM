@@ -127,6 +127,57 @@ const styles = {
     imagePreviewContainer: { marginTop: '10px', padding: '10px', border: '1px dashed rgba(255,255,255,0.2)', borderRadius: '6px', textAlign: 'center', minHeight: '100px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',},
     imagePreview: { maxWidth: '100%', maxHeight: '120px', borderRadius: '4px', marginBottom: '10px', objectFit: 'contain',},
     imagePlaceholderText: { fontSize: '13px', color: 'rgba(255,255,255,0.5)' },
+    checkboxContainer: { 
+        display: 'flex', 
+        alignItems: 'center', 
+        marginTop: '10px',
+        marginBottom: '15px',
+        cursor: 'pointer',
+        userSelect: 'none'
+    },
+    checkboxWrapper: {
+        position: 'relative',
+        width: '18px',
+        height: '18px',
+        marginRight: '10px',
+        flexShrink: 0
+    },
+    checkboxInput: {
+        position: 'absolute',
+        opacity: 0,
+        width: '100%',
+        height: '100%',
+        cursor: 'pointer',
+        zIndex: 2
+    },
+    checkboxVisual: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '16px',
+        height: '16px',
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '3px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'all 0.2s ease'
+    },
+    checkboxVisualChecked: {
+        backgroundColor: 'var(--primary)',
+        borderColor: 'var(--primary)'
+    },
+    checkboxLabel: {
+        fontSize: '14px',
+        fontWeight: '400',
+        color: 'var(--light)',
+        opacity: 0.9
+    },
+    checkboxDisabled: {
+        opacity: 0.5,
+        cursor: 'not-allowed'
+    }
 };
 
 const FALLBACK_MOD_IMAGE_MODAL = '/images/placeholder.jpg';
@@ -138,6 +189,7 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     const [author, setAuthor] = useState('');
     const [categoryTag, setCategoryTag] = useState('');
     const [selectedInternalRoot, setSelectedInternalRoot] = useState('');
+    const [extractAllFiles, setExtractAllFiles] = useState(false);
     // Entity Selection State
     const [categories, setCategories] = useState([]);
     const [entities, setEntities] = useState([]);
@@ -171,7 +223,6 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     // Format data for react-select
     const categoryOptions = useMemo(() => categories.map(cat => ({ value: cat.slug, label: cat.name })), [categories]);
     const entityOptions = useMemo(() => entities.map(ent => ({ value: ent.slug, label: ent.name })), [entities]);
-    // --- NEW: Preset Options ---
     const presetOptions = useMemo(() => allPresets.map(p => ({ value: p.id, label: p.name })), [allPresets]);
     // -------------------------
 
@@ -201,56 +252,46 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
     // --- Set Initial Values & Try Deduction when analysisResult and categories/presets are ready ---
     useEffect(() => {
         let isMounted = true;
-        // Wait for all initial loading to finish
         if (!analysisResult || categoryLoading || presetsLoading) return;
 
-        // Reset fields (including presets)
+        // Reset fields
         setDescription('');
         setAuthor('');
         setCategoryTag('');
         setSelectedEntityOption(null);
         setSelectedCategoryOption(null);
-        setSelectedPresets([]); // Reset selected presets
+        setSelectedPresets([]);
+        setExtractAllFiles(false);
         setError('');
         setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL);
         setSelectedPreviewAbsPath(null);
         setPastedImageFile(null);
         cleanupPreviewObjectUrl();
 
-        // Set deduced name/author
         const nameGuess = analysisResult.deduced_mod_name || analysisResult.file_path.split('/').pop().split('\\').pop().replace(/\.(zip|rar|7z)$/i, '');
         setModName(nameGuess);
         setAuthor(analysisResult.deduced_author || '');
 
-        // Select likely root
         const likelyRoot = analysisResult.entries?.find(e => e.is_likely_mod_root);
         const firstDir = analysisResult.entries?.find(e => e.is_dir);
         const rootToSelect = likelyRoot ? likelyRoot.path : (firstDir ? firstDir.path : '');
-        setSelectedInternalRoot(rootToSelect);
+        setSelectedInternalRoot(rootToSelect); // Still select a default root initially
 
-        // --- Use DEDUCED slugs from backend analysis ---
-        // Pre-select Category based on backend deduction
         if (analysisResult.deduced_category_slug) {
-            console.log("[ImportModal] Attempting to pre-select deduced category:", analysisResult.deduced_category_slug);
             const deducedCatOption = categoryOptions.find(opt => opt.value === analysisResult.deduced_category_slug);
             if (deducedCatOption) {
-                console.log("[ImportModal] Found matching category option:", deducedCatOption);
-                // Set the category state, which will trigger the entity loading effect
                 setSelectedCategoryOption(deducedCatOption);
-                // No need to manually set entity here, the other useEffect handles it
             } else {
-                console.warn("[ImportModal] Deduced category slug not found in fetched category options.");
+                 setSelectedCategoryOption(null); // Clear if not found
+                 setEntities([]);
+                 setSelectedEntityOption(null);
             }
-    } else {
-            console.log("[ImportModal] No category slug deduced by backend.");
-            // If no category deduced, clear selection (important!)
-            setSelectedCategoryOption(null);
-            setEntities([]); // Clear entities if category is cleared
-            setSelectedEntityOption(null); // Clear entity selection
-    }
-    // --- End Category Pre-selection ---
+        } else {
+             setSelectedCategoryOption(null);
+             setEntities([]);
+             setSelectedEntityOption(null);
+        }
 
-        // Load detected preview from archive (independent of deduction)
         if (analysisResult.detected_preview_internal_path) {
             setPreviewLoading(true);
             invoke('read_archive_file_content', {
@@ -288,7 +329,7 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
      useEffect(() => {
         let isMounted = true;
         const categorySlug = selectedCategoryOption?.value;
-    
+
         if (categorySlug) {
              setEntities([]);
              setSelectedEntityOption(null);
@@ -297,29 +338,18 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                  .then(loadedEntities => {
                      if (!isMounted) return;
                      setEntities(loadedEntities);
-                     console.log(`[ImportModal] Entities loaded for ${categorySlug}. Count: ${loadedEntities.length}`);
-    
-                     // --- Try pre-selecting entity based on BACKEND deduction first ---
-                     // Check if the current category matches the backend's deduced category
+                     // Pre-selection logic (same as before)
                      if (categorySlug === analysisResult?.deduced_category_slug && analysisResult?.deduced_entity_slug) {
                          const deducedEntityOption = loadedEntities
-                              .map(ent => ({ value: ent.slug, label: ent.name })) // Map to options format first
+                              .map(ent => ({ value: ent.slug, label: ent.name }))
                               .find(opt => opt.value === analysisResult.deduced_entity_slug);
-    
                          if (deducedEntityOption) {
                              setSelectedEntityOption(deducedEntityOption);
-                             console.log(`[ImportModal] Successfully pre-selected deduced entity: ${analysisResult.deduced_entity_slug}`);
-                             // If we successfully selected based on backend deduction, we can stop here for this effect run
-                             return; // Exit early after successful selection
-                         } else {
-                             console.warn("[ImportModal] Backend deduced entity slug not found in loaded entities for the category.");
+                             return;
                          }
                      }
-    
-                     // --- Fallback: Try matching raw INI target name if NO entity was selected above ---
                      if (analysisResult?.raw_ini_target) {
                          const rawTarget = analysisResult.raw_ini_target;
-                         console.log(`[ImportModal] Attempting to match raw target name: ${rawTarget}`);
                          const lowerRawTarget = rawTarget.toLowerCase();
                          const matchedEntity = loadedEntities.find(ent =>
                              ent.name.toLowerCase() === lowerRawTarget || ent.slug.toLowerCase() === lowerRawTarget
@@ -327,17 +357,12 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
                          if (matchedEntity) {
                              const matchedOption = { value: matchedEntity.slug, label: matchedEntity.name };
                              setSelectedEntityOption(matchedOption);
-                             console.log(`[ImportModal] Matched entity '${matchedOption.value}' from raw INI target '${rawTarget}'`);
-                         } else {
-                              console.log(`[ImportModal] Raw INI target '${rawTarget}' did not match any entity in category '${categorySlug}'.`);
                          }
                      }
-                     // --- End Fallback ---
                  })
                  .catch(err => {
                      console.error(`Failed to fetch entities for ${categorySlug}:`, err);
                      if(isMounted) setEntities([]);
-                     // Don't set selectedEntityOption to null on error here, might have been set by deduction
                   })
                 .finally(() => { if(isMounted) setEntityLoading(false); });
             } else {
@@ -429,51 +454,43 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
         if (!targetEntitySlugValue) { setError('Please select the target character/entity.'); return; }
         if (!modName.trim()) { setError('Please enter a mod name.'); return; }
         const hasDirectories = analysisResult?.entries?.some(e => e.is_dir);
-        if (!selectedInternalRoot && hasDirectories) { setError('Please select the mod root folder from the archive.'); return; }
+        if (!extractAllFiles && !selectedInternalRoot && hasDirectories) {
+             setError('Please select the mod root folder or check "Extract All Files".');
+             return;
+        }
 
         setIsImporting(true);
         let imageDataToSend = null;
 
-        // --- Read pasted image data if present ---
         if (pastedImageFile) {
             try {
                 const arrayBuffer = await pastedImageFile.arrayBuffer();
                 imageDataToSend = Array.from(new Uint8Array(arrayBuffer));
-                console.log("Prepared pasted image data for import (length):", imageDataToSend.length);
             } catch (readErr) {
-                console.error("Error reading pasted file for import:", readErr);
                 setError("Failed to read pasted image data.");
                 setIsImporting(false);
                 return;
             }
         }
-        // --- End Read ---
 
-        // --- Get selected preset IDs ---
-        const presetIdsToSend = selectedPresets.length > 0
-            ? selectedPresets.map(opt => opt.value)
-            : null;
-        // -----------------------------
+        const presetIdsToSend = selectedPresets.length > 0 ? selectedPresets.map(opt => opt.value) : null;
 
         try {
             await invoke('import_archive', {
                 archivePathStr: analysisResult.file_path,
                 targetEntitySlug: targetEntitySlugValue,
-                selectedInternalRoot: selectedInternalRoot || "",
+                selectedInternalRoot: extractAllFiles ? "" : (selectedInternalRoot || ""),
                 modName: modName.trim(),
                 description: description || null,
                 author: author || null,
                 categoryTag: categoryTag || null,
                 imageData: imageDataToSend,
                 selectedPreviewAbsolutePath: imageDataToSend ? null : selectedPreviewAbsPath,
-                // --- Pass preset IDs ---
                 presetIds: presetIdsToSend,
-                // -----------------------
             });
             onImportSuccess(targetEntitySlugValue, selectedCategoryOption?.value || 'characters');
         } catch (err) {
              const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown import error');
-             console.error("Import failed:", errorString);
              setError(`Import Failed: ${errorString}`);
         } finally {
             setIsImporting(false);
@@ -485,164 +502,154 @@ function ImportModModal({ analysisResult, onClose, onImportSuccess }) {
 
     // Helper to render file tree node
     const renderFileNode = (entry) => {
-         const indentLevel = entry.path.includes('/') ? entry.path.split('/').length - 1 : 0;
-         const isSelected = entry.path === selectedInternalRoot;
-         const canSelect = entry.is_dir; // Only allow selecting directories
+        const indentLevel = entry.path.includes('/') ? entry.path.split('/').length - 1 : 0;
+        const isSelected = entry.path === selectedInternalRoot;
+        const canSelect = entry.is_dir;
+        const isDisabled = extractAllFiles;
 
-        return (
-             <div
-                key={entry.path}
-                style={{
-                    ...styles.fileListItem,
-                    ...(isSelected ? styles.fileListItemSelected : {}),
-                    paddingLeft: `${12 + indentLevel * 15}px`,
-                    cursor: canSelect ? 'pointer' : 'default',
-                    opacity: canSelect ? 1 : 0.7
-                 }}
-                onClick={() => canSelect && setSelectedInternalRoot(entry.path)}
-                title={entry.path}
-            >
-                 <i className={`fas ${entry.is_dir ? 'fa-folder' : 'fa-file-alt'} fa-fw`} style={{...styles.icon, color: entry.is_dir ? 'var(--accent)' : undefined}}></i>
-                 <span style={{flexGrow: 1}}>{entry.path.split('/').pop() || entry.path}</span>
-                 {entry.is_likely_mod_root && <i className="fas fa-star fa-fw" style={{color:'var(--accent)', marginLeft:'auto', fontSize:'11px', flexShrink:0}} title="Likely Mod Root (Contains INI)"></i>}
-             </div>
-        );
-    }
+       return (
+            <div
+               key={entry.path}
+               style={{
+                   ...styles.fileListItem,
+                   ...(isSelected && !isDisabled ? styles.fileListItemSelected : {}), // Highlight only if selectable and selected
+                   paddingLeft: `${12 + indentLevel * 15}px`,
+                   cursor: canSelect && !isDisabled ? 'pointer' : 'default', // Change cursor based on state
+                   opacity: isDisabled ? 0.5 : (canSelect ? 1 : 0.7), // Dim if disabled or not selectable
+                }}
+               onClick={() => canSelect && !isDisabled && setSelectedInternalRoot(entry.path)} // Only allow click if enabled
+               title={isDisabled ? "Selection disabled (Extract All checked)" : entry.path}
+           >
+                <i className={`fas ${entry.is_dir ? 'fa-folder' : 'fa-file-alt'} fa-fw`} style={{...styles.icon, color: entry.is_dir ? 'var(--accent)' : undefined}}></i>
+                <span style={{flexGrow: 1}}>{entry.path.split('/').pop() || entry.path}</span>
+                {entry.is_likely_mod_root && <i className="fas fa-star fa-fw" style={{color:'var(--accent)', marginLeft:'auto', fontSize:'11px', flexShrink:0}} title="Likely Mod Root (Contains INI)"></i>}
+            </div>
+       );
+   }
 
-    return ReactDOM.createPortal(
+   return ReactDOM.createPortal(
         <div style={styles.overlay} onClick={onClose}>
             <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
                 {/* Header */}
                 <div style={styles.header}>
                     <h2 style={styles.title} title={archiveFilename}>Import Mod: {archiveFilename}</h2>
-                     <button
-                         onClick={onClose}
-                         style={styles.closeButton}
-                         title="Close"
-                         onMouseOver={(e) => e.currentTarget.style.opacity = 1}
-                         onMouseOut={(e) => e.currentTarget.style.opacity = 0.7}
-                         disabled={isImporting}
-                     >×</button>
+                    <button onClick={onClose} style={styles.closeButton} title="Close" onMouseOver={(e) => e.currentTarget.style.opacity = 1} onMouseOut={(e) => e.currentTarget.style.opacity = 0.7} disabled={isImporting}>×</button>
                 </div>
 
                 {/* Content */}
                 <div style={styles.content}>
                     {/* Left Panel: Archive Contents & Selection */}
                     <div style={styles.leftPanel}>
-                        <label style={styles.label}>Select Mod Root Folder (click folder name):</label>
-                        <div style={styles.fileListContainer}>
+                        <label style={styles.label}>Select Mod Root Folder (or check Extract All):</label>
+                        <div style={{ ...styles.fileListContainer, opacity: extractAllFiles ? 0.5 : 1 }}> {/* Dim if extractAll is checked */}
                             {analysisResult?.entries?.length > 0 ? (
                                 analysisResult.entries.map(renderFileNode)
-                             ) : (
+                            ) : (
                                 <p style={{padding:'10px', textAlign:'center', fontSize:'13px', color:'rgba(255,255,255,0.6)'}}>Analyzing archive or archive empty...</p>
-                             )}
+                            )}
                         </div>
-                         <p style={{fontSize:'12px', color:'rgba(255,255,255,0.6)', marginTop:'5px'}}>Selected Root: {selectedInternalRoot || '(None - extracting all)'}</p>
+                        {/* --- Extract All Checkbox --- */}
+                        <div 
+                            style={{
+                                ...styles.checkboxContainer,
+                                ...(isImporting ? styles.checkboxDisabled : {})
+                            }}
+                        >
+                            <div style={styles.checkboxWrapper}>
+                                <input
+                                    type="checkbox"
+                                    style={styles.checkboxInput}
+                                    checked={extractAllFiles}
+                                    onChange={(e) => !isImporting && setExtractAllFiles(e.target.checked)}
+                                    disabled={isImporting}
+                                    id="extract-all-checkbox"
+                                />
+                                <div 
+                                    style={{
+                                        ...styles.checkboxVisual,
+                                        ...(extractAllFiles ? styles.checkboxVisualChecked : {})
+                                    }}
+                                >
+                                    {extractAllFiles && (
+                                        <i className="fas fa-check" style={{ color: 'white', fontSize: '11px' }}></i>
+                                    )}
+                                </div>
+                            </div>
+                            <label 
+                                htmlFor="extract-all-checkbox" 
+                                style={styles.checkboxLabel}
+                            >
+                                Extract All Files (ignore selected root)
+                            </label>
+                        </div>
+                        {/* --- End Checkbox --- */}
+                        <p style={{fontSize:'12px', color:'rgba(255,255,255,0.6)', marginTop:'0px', minHeight:'16px'}}>
+                            Selected Root: {extractAllFiles ? '(Extracting All)' : (selectedInternalRoot || '(None)')}
+                        </p>
 
                         {/* Preview Section */}
                         <div style={{marginTop:'auto', paddingTop:'15px'}}>
-                             <label style={styles.label}>Preview Image:</label>
-                             {/* --- Add onPaste and tabIndex --- */}
-                              <div
-                                  style={styles.imagePreviewContainer}
-                                  onPaste={handlePaste}
-                                  tabIndex={0}
-                                  title="Click 'Select Preview' or paste image here"
-                              >
-                              {/* --- End Add --- */}
-                                 {previewLoading ? <i className="fas fa-spinner fa-spin fa-fw"></i>
-                                 : previewImageUrl !== FALLBACK_MOD_IMAGE_MODAL ? <img src={previewImageUrl} alt="Preview" style={styles.imagePreview} onError={() => setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL)} />
-                                 : <p style={styles.imagePlaceholderText}>No preview.</p>}
-                              </div>
-                              <button className="btn btn-outline" style={{marginTop:'10px', width:'100%'}} onClick={handleSelectPreviewImage} disabled={isImporting}>
-                                  <i className="fas fa-image fa-fw"></i> Change Image...
-                              </button>
-                              <p style={{fontSize:'11px', color:'rgba(255,255,255,0.5)', textAlign:'center', marginTop:'5px'}}>Paste image directly into box above.</p>
-                         </div>
+                            <label style={styles.label}>Preview Image:</label>
+                            <div style={styles.imagePreviewContainer} onPaste={handlePaste} tabIndex={0} title="Click 'Change Image' or paste image here">
+                                {previewLoading ? <i className="fas fa-spinner fa-spin fa-fw"></i>
+                                : previewImageUrl !== FALLBACK_MOD_IMAGE_MODAL ? <img src={previewImageUrl} alt="Preview" style={styles.imagePreview} onError={() => setPreviewImageUrl(FALLBACK_MOD_IMAGE_MODAL)} />
+                                : <p style={styles.imagePlaceholderText}>No preview.</p>}
+                            </div>
+                            <button className="btn btn-outline" style={{marginTop:'10px', width:'100%'}} onClick={handleSelectPreviewImage} disabled={isImporting}>
+                                <i className="fas fa-image fa-fw"></i> Change Image...
+                            </button>
+                            <p style={{fontSize:'11px', color:'rgba(255,255,255,0.5)', textAlign:'center', marginTop:'5px'}}>Paste image directly into box above.</p>
+                        </div>
                     </div> {/* End Left Panel */}
 
                     {/* Right Panel: Mod Info Form */}
                     <div style={styles.rightPanel}>
-                         {/* --- Category Select --- */}
-                         <div style={styles.formGroup}>
-                            <label style={styles.label} htmlFor="import-category">Target Category:</label>
-                            <Select
-                                id="import-category"
-                                styles={reactSelectStyles} // Apply custom styles
-                                options={categoryOptions}
-                                value={selectedCategoryOption}
-                                onChange={setSelectedCategoryOption} // react-select passes the whole option object
-                                placeholder={categoryLoading ? 'Loading...' : 'Select Category...'}
-                                isLoading={categoryLoading}
-                                isDisabled={isImporting || categoryLoading}
-                                isClearable={false}
-                                isSearchable={true} // Enable searching
-                                menuPosition={'fixed'}
-                            />
-                        </div>
-
-                        {/* --- Entity Select --- */}
+                        {/* Category Select */}
                         <div style={styles.formGroup}>
-                             <label style={styles.label} htmlFor="import-entity">Target Entity:</label>
-                             <Select
-                                id="import-entity"
-                                styles={reactSelectStyles} // Apply custom styles
-                                options={entityOptions}
-                                value={selectedEntityOption}
-                                onChange={setSelectedEntityOption} // react-select passes the whole option object
-                                placeholder={entityLoading ? 'Loading...' : (selectedCategoryOption ? (entities.length > 0 ? 'Select or type to search...' : 'No entities found') : 'Select Category First')}
-                                isLoading={entityLoading}
-                                isDisabled={isImporting || !selectedCategoryOption || entityLoading || entities.length === 0}
-                                isClearable={false}
-                                isSearchable={true} // Enable searching
-                                menuPosition={'fixed'}
-                             />
-                         </div>
-
+                            <label style={styles.label} htmlFor="import-category">Target Category:</label>
+                            <Select id="import-category" styles={reactSelectStyles} options={categoryOptions} value={selectedCategoryOption} onChange={setSelectedCategoryOption} placeholder={categoryLoading ? 'Loading...' : 'Select Category...'} isLoading={categoryLoading} isDisabled={isImporting || categoryLoading} isClearable={false} isSearchable={true} menuPosition={'fixed'} />
+                        </div>
+                        {/* Entity Select */}
+                        <div style={styles.formGroup}>
+                            <label style={styles.label} htmlFor="import-entity">Target Entity:</label>
+                            <Select id="import-entity" styles={reactSelectStyles} options={entityOptions} value={selectedEntityOption} onChange={setSelectedEntityOption} placeholder={entityLoading ? 'Loading...' : (selectedCategoryOption ? (entities.length > 0 ? 'Select or type to search...' : 'No entities found') : 'Select Category First')} isLoading={entityLoading} isDisabled={isImporting || !selectedCategoryOption || entityLoading || entities.length === 0} isClearable={false} isSearchable={true} menuPosition={'fixed'} />
+                        </div>
+                        {/* Mod Name */}
                         <div style={styles.formGroup}>
                             <label style={styles.label} htmlFor="import-mod-name">Mod Name:</label>
                             <input id="import-mod-name" type="text" value={modName} onChange={e => setModName(e.target.value)} style={styles.input} required disabled={isImporting}/>
                         </div>
+                        {/* Author */}
                         <div style={styles.formGroup}>
-                             <label style={styles.label} htmlFor="import-author">Author:</label>
-                             <input id="import-author" type="text" value={author} onChange={e => setAuthor(e.target.value)} style={styles.input} disabled={isImporting}/>
-                         </div>
-                         <div style={styles.formGroup}>
-                             <label style={styles.label} htmlFor="import-category-tag">Category Tags (comma-separated):</label>
-                             <input id="import-category-tag" type="text" value={categoryTag} onChange={e => setCategoryTag(e.target.value)} style={styles.input} placeholder="Outfit, Retexture, Effect..." disabled={isImporting}/>
-                         </div>
-                         <div style={styles.formGroup}>
-                             <label style={styles.label} htmlFor="import-description">Description:</label>
-                             <textarea id="import-description" value={description} onChange={e => setDescription(e.target.value)} style={styles.textarea} disabled={isImporting}/>
-                         </div>
-                         <div style={styles.formGroup}>
-                             <label style={styles.label} htmlFor="import-presets">Add to Preset(s) (Optional):</label>
-                             <Select
-                                id="import-presets"
-                                isMulti
-                                styles={reactSelectStyles} // Use shared styles
-                                options={presetOptions}
-                                value={selectedPresets}
-                                onChange={setSelectedPresets}
-                                placeholder={presetsLoading ? 'Loading...' : 'Select presets...'}
-                                isLoading={presetsLoading}
-                                isDisabled={isImporting || presetsLoading}
-                                closeMenuOnSelect={false}
-                                menuPosition={'fixed'}
-                             />
-                         </div>
+                            <label style={styles.label} htmlFor="import-author">Author:</label>
+                            <input id="import-author" type="text" value={author} onChange={e => setAuthor(e.target.value)} style={styles.input} disabled={isImporting}/>
+                        </div>
+                        {/* Tags */}
+                        <div style={styles.formGroup}>
+                            <label style={styles.label} htmlFor="import-category-tag">Category Tags (comma-separated):</label>
+                            <input id="import-category-tag" type="text" value={categoryTag} onChange={e => setCategoryTag(e.target.value)} style={styles.input} placeholder="Outfit, Retexture, Effect..." disabled={isImporting}/>
+                        </div>
+                        {/* Description */}
+                        <div style={styles.formGroup}>
+                            <label style={styles.label} htmlFor="import-description">Description:</label>
+                            <textarea id="import-description" value={description} onChange={e => setDescription(e.target.value)} style={styles.textarea} disabled={isImporting}/>
+                        </div>
+                        {/* Preset Select */}
+                        <div style={styles.formGroup}>
+                            <label style={styles.label} htmlFor="import-presets">Add to Preset(s) (Optional):</label>
+                            <Select id="import-presets" isMulti styles={reactSelectStyles} options={presetOptions} value={selectedPresets} onChange={setSelectedPresets} placeholder={presetsLoading ? 'Loading...' : 'Select presets...'} isLoading={presetsLoading} isDisabled={isImporting || presetsLoading} closeMenuOnSelect={false} menuPosition={'fixed'} />
+                        </div>
                     </div>{/* End Right Panel */}
                 </div> {/* End Content */}
 
-
                 {/* Footer */}
                 <div style={styles.footer}>
-                     {error && <p style={styles.errorText}>{error}</p>}
+                    {error && <p style={styles.errorText}>{error}</p>}
                     <button className="btn btn-outline" onClick={onClose} disabled={isImporting}>Cancel</button>
                     <button
                         className="btn btn-primary"
                         onClick={handleConfirmImport}
-                        disabled={isImporting || !selectedEntityOption || !modName.trim() || (!selectedInternalRoot && analysisResult?.entries?.some(e=>e.is_dir))} // Check selectedEntityOption
+                        disabled={isImporting || !selectedEntityOption || !modName.trim() || (!extractAllFiles && !selectedInternalRoot && analysisResult?.entries?.some(e=>e.is_dir))}
                     >
                         {isImporting ? <><i className="fas fa-spinner fa-spin fa-fw"></i> Importing...</> : <><i className="fas fa-check fa-fw"></i> Confirm Import</>}
                     </button>

@@ -2144,11 +2144,17 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
         .min_depth(1)
         .into_iter()
         .filter_map(|e| e.ok().filter(|entry| entry.file_type().is_dir()))
-        .filter(|e| has_ini_file(&e.path().to_path_buf()))
+        .filter(|e| {
+             // Temporary check for rename condition as well for count (might be slightly inaccurate if rename fails later)
+             let path = e.path();
+             let filename = path.file_name().unwrap_or_default().to_string_lossy();
+             // Check for INI OR if it needs renaming (so it's counted)
+             has_ini_file(&path.to_path_buf()) || (filename.starts_with("DISABLED") && !filename.starts_with(DISABLED_PREFIX))
+         })
         .map(|e| e.path().to_path_buf())
         .collect();
     let total_to_process = potential_mod_folders_for_count.len();
-    println!("[Scan Prep] Found {} potential mod folders for progress total.", total_to_process);
+    println!("[Scan Prep] Found {} potential mod folders for progress total (includes folders needing rename).", total_to_process);
 
     app_handle.emit_all(SCAN_PROGRESS_EVENT, ScanProgress {
             processed: 0, total: total_to_process, current_path: None, message: "Starting scan...".to_string()
@@ -2165,23 +2171,15 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
         { // Scope for the statement
             let mut stmt = conn.prepare("SELECT id, folder_name FROM assets")
                 .map_err(|e| format!("Failed to prepare asset fetch statement: {}", e))?;
-            // *** FIX: Add .map_err inside the query_map closure if needed, or handle row errors later ***
-            // Note: Errors during row iteration are handled below in the loop.
             let rows = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)));
-
-             // Handle potential error from preparing the iterator itself
              let row_iter = rows.map_err(|e| format!("Error creating asset query iterator: {}", e))?;
-
             for row_result in row_iter {
                  match row_result {
                      Ok((id, folder_name)) => {
                          initial_db_assets.insert(id, folder_name.replace("\\", "/"));
                      }
                      Err(e) => {
-                          // Log error for the specific row but continue fetching others
                           eprintln!("[Scan Task Prep] Error fetching asset row from DB: {}", e);
-                          // Optionally, you could return an error here to stop the whole scan
-                          // return Err(format!("Error fetching asset row from DB: {}", e));
                      }
                  }
             }
@@ -2194,6 +2192,7 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
         let mut errors_count = 0;
         let mut processed_mod_paths = HashSet::new(); // Track processed paths to avoid duplicates if structure is odd
         let mut found_asset_ids = HashSet::<i64>::new(); // Track IDs found on disk
+        let mut renamed_count = 0; // Count renamed folders
 
         // --- Iterate using WalkDir ---
         let mut walker = WalkDir::new(&base_mods_path_clone).min_depth(1).into_iter();
@@ -2201,138 +2200,167 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
         while let Some(entry_result) = walker.next() {
             match entry_result {
                 Ok(entry) => {
-                    let path = entry.path().to_path_buf();
+                    // Use mutable path as it might be changed by rename logic
+                    let mut current_path = entry.path().to_path_buf();
+                    let is_directory = entry.file_type().is_dir(); // Check type once
 
-                    if entry.file_type().is_dir()
-                       && has_ini_file(&path)
-                       && !processed_mod_paths.contains(&path)
-                    {
-                        processed_count += 1;
-                        processed_mod_paths.insert(path.clone());
-                        let path_display = path.display().to_string();
-                        let folder_name_only = path.file_name().unwrap_or_default().to_string_lossy();
+                    if is_directory && !processed_mod_paths.contains(&current_path) {
+                        // --- START: Check for DISABLED without underscore and rename ---
+                        let filename_osstr = current_path.file_name().unwrap_or_default();
+                        let filename_str = filename_osstr.to_string_lossy();
 
-                        app_handle_clone.emit_all(SCAN_PROGRESS_EVENT, ScanProgress {
-                             processed: processed_count,
-                             total: total_to_process,
-                             current_path: Some(path_display.clone()),
-                             message: format!("Processing: {}", folder_name_only)
-                         }).unwrap_or_else(|e| eprintln!("Failed to emit scan progress: {}", e));
+                        let needs_rename = filename_str.starts_with("DISABLED") && !filename_str.starts_with(DISABLED_PREFIX);
+                        let mut current_path_for_processing = current_path.clone(); // Path to use for has_ini and processing
 
-                         match deduce_mod_info_v2(&path, &base_mods_path_clone, &maps_clone) {
-                            Some(deduced) => {
-                                println!("[Scan Task] Deduced slug for '{}': {}", path_display, deduced.entity_slug); // Log the deduced slug
-                        
-                                // Directly look up the deduced slug (could be specific like 'klee' or fallback like 'characters-other')
-                                let target_entity_id_result: Option<i64> = maps_clone.entity_slug_to_id.get(&deduced.entity_slug).copied(); // Use .copied() to get Option<i64>
-                        
-                                if let Some(target_entity_id) = target_entity_id_result {
-                                     // Successfully found ID for the deduced slug (whether specific or fallback)
-                                     println!("[Scan Task] Found entity ID {} for slug '{}'", target_entity_id, deduced.entity_slug);
-                        
-                                     // --- Proceed with relative path calculation and DB insert/update ---
-                                     let relative_path_buf = match path.strip_prefix(&base_mods_path_clone) {
-                                         Ok(p) => p.to_path_buf(),
-                                         Err(_) => {
-                                             eprintln!("[Scan Task] Error: Could not strip base path prefix from '{}'. Skipping.", path.display());
-                                             errors_count += 1;
-                                             continue; // Skip this mod folder if path stripping fails
-                                         }
-                                     };
-                        
-                                     // Calculate the clean relative path to store in the DB
-                                     let filename_osstr = relative_path_buf.file_name().unwrap_or_default();
-                                     let filename_str = filename_osstr.to_string_lossy();
-                                     let clean_filename = filename_str.trim_start_matches(DISABLED_PREFIX); // Use the base name without prefix
-                                     let relative_parent_path = relative_path_buf.parent();
-                                     // Construct the path: parent/clean_filename
-                                     let relative_path_to_store = match relative_parent_path {
-                                         Some(parent) if parent.as_os_str().len() > 0 => parent.join(clean_filename).to_string_lossy().to_string(),
-                                         _ => clean_filename.to_string(), // No parent or parent is root
-                                     };
-                                     // Ensure forward slashes for consistency
-                                     let relative_path_to_store = relative_path_to_store.replace("\\", "/");
-                                     println!("[Scan Task] Calculated DB path: '{}'", relative_path_to_store);
-                        
-                        
-                                     // Check if asset already exists in DB using the TARGET entity ID and the CLEAN relative path
-                                     let existing_db_asset_id: Option<i64> = conn.query_row(
-                                        "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
-                                        params![target_entity_id, relative_path_to_store],
-                                        |row| row.get(0),
-                                     ).optional() // Use optional to handle QueryReturnedNoRows gracefully
-                                      .map_err(|e| format!("DB error checking for existing asset '{}': {}", relative_path_to_store, e))?; // Propagate other DB errors
-                        
-                                     if let Some(asset_id) = existing_db_asset_id {
-                                          // Asset exists, mark it as found on disk
-                                          println!("[Scan Task] Asset already in DB (ID: {}), path '{}'. Marking as found.", asset_id, relative_path_to_store);
-                                          found_asset_ids.insert(asset_id);
-                                          // Optional: Implement metadata update logic here if needed
-                                          // mods_updated_count += 1;
-                                     } else {
-                                          // Asset doesn't exist, insert it
-                                          println!("[Scan Task] Inserting new asset: EntityID={}, Name='{}', Path='{}'", target_entity_id, deduced.mod_name, relative_path_to_store);
-                                          let insert_result = conn.execute(
-                                             "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                                             params![
-                                                 target_entity_id,
-                                                 deduced.mod_name,
-                                                 deduced.description,
-                                                 relative_path_to_store, // Store the clean relative path
-                                                 deduced.image_filename,
-                                                 deduced.author,
-                                                 deduced.mod_type_tag
-                                             ]
-                                          );
-                        
-                                           match insert_result {
-                                               Ok(changes) => {
-                                                   if changes > 0 {
-                                                       mods_added_count += 1;
-                                                       let new_id = conn.last_insert_rowid();
-                                                       found_asset_ids.insert(new_id);
-                                                       println!("[Scan Task]   -> Insert successful (New ID: {})", new_id);
-                                                   } else {
-                                                        // This case might indicate an issue, though execute should return > 0 on success.
-                                                        eprintln!("[Scan Task]   -> Insert reported 0 changes for '{}'.", relative_path_to_store);
-                                                        errors_count += 1;
-                                                   }
-                                               }
-                                               Err(e) => {
-                                                    // Check for UNIQUE constraint violation on folder_name specifically
-                                                    if e.to_string().contains("UNIQUE constraint failed: assets.folder_name") {
-                                                         // This means the same 'clean_relative_path' exists, possibly under a *different* entity_id.
-                                                         // This can happen if a mod was manually moved without updating the DB.
-                                                         // Pruning should eventually remove the old entry if the original folder is gone.
-                                                         // For now, log it and skip inserting the duplicate path.
-                                                         eprintln!("[Scan Task]   -> Insert failed due to UNIQUE constraint on folder_name '{}'. Asset might exist under a different entity or needs pruning. Skipping insert.", relative_path_to_store);
-                                                         // errors_count += 1; // Decide if this counts as an error
-                                                    } else {
-                                                         // Handle other DB errors during insert
-                                                         eprintln!("[Scan Task]   -> DB error inserting new asset '{}': {}", relative_path_to_store, e);
-                                                         errors_count += 1;
-                                                    }
-                                               }
-                                           }
-                                     }
-                                     // --- End DB insert/update ---
-                        
-                                } else {
-                                     // Deduction returned a slug, but it's NOT in the entity_slug_to_id map.
-                                     // This indicates a problem - either deduction maps are incomplete/wrong,
-                                     // or deduce_mod_info_v2 returned an invalid slug (e.g., "unknown-other" if unknown wasn't handled).
-                                     // This *shouldn't* happen if initialize_database correctly creates all fallback entities.
-                                     eprintln!("[Scan Task] CRITICAL ERROR: Deduced slug '{}' for path '{}' does NOT exist in the entity map! Skipping mod. Check DB initialization and deduction logic.", deduced.entity_slug, path_display);
-                                     errors_count += 1;
+                        if needs_rename {
+                            let new_filename = format!("{}{}", DISABLED_PREFIX, filename_str.strip_prefix("DISABLED").unwrap_or(&filename_str));
+                            if let Some(parent_path) = current_path.parent() {
+                                let new_path = parent_path.join(&new_filename);
+                                println!("[Scan Task - Rename] Found incorrect prefix: '{}'. Renaming to '{}'", current_path.display(), new_path.display());
+
+                                // Emit progress before rename attempt
+                                app_handle_clone.emit_all(SCAN_PROGRESS_EVENT, ScanProgress {
+                                     processed: processed_count, // Don't increment processed count for rename yet
+                                     total: total_to_process,
+                                     current_path: Some(current_path.display().to_string()),
+                                     message: format!("Renaming: {}", filename_str)
+                                }).unwrap_or_else(|e| eprintln!("Failed to emit rename progress: {}", e));
+
+                                match fs::rename(&current_path, &new_path) {
+                                    Ok(_) => {
+                                        println!("[Scan Task - Rename] Successfully renamed.");
+                                        current_path_for_processing = new_path; // Use the NEW path for further processing
+                                        renamed_count += 1;
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[Scan Task - Rename] ERROR: Failed to rename folder '{}': {}. Skipping folder.", current_path.display(), e);
+                                        errors_count += 1;
+                                        // Don't process this folder if rename failed
+                                        walker.skip_current_dir(); // Skip children as well
+                                        continue; // Move to the next entry in WalkDir
+                                    }
                                 }
-                            }
-                            None => { // deduce_mod_info_v2 itself returned None
-                                 eprintln!("[Scan Task] Error: Failed to deduce mod info for path '{}'", path_display);
-                                 errors_count += 1;
+                            } else {
+                                eprintln!("[Scan Task - Rename] ERROR: Cannot get parent path for '{}'. Skipping rename and folder.", current_path.display());
+                                errors_count += 1;
+                                walker.skip_current_dir(); // Skip children
+                                continue; // Move to the next entry
                             }
                         }
-                        walker.skip_current_dir(); // Skip children after processing a mod folder
+                        // --- END: Rename Check ---
+
+                        // Now check if the (potentially renamed) folder has an INI file
+                        if has_ini_file(&current_path_for_processing) {
+                            // This is a mod folder (or was successfully renamed to be treated as one)
+                            processed_count += 1; // Increment processed count *here*
+                            processed_mod_paths.insert(current_path_for_processing.clone()); // Add the path we actually processed
+                            let path_display = current_path_for_processing.display().to_string();
+                            let folder_name_only = current_path_for_processing.file_name().unwrap_or_default().to_string_lossy();
+
+                            // Emit progress for actual mod processing
+                            app_handle_clone.emit_all(SCAN_PROGRESS_EVENT, ScanProgress {
+                                processed: processed_count,
+                                total: total_to_process,
+                                current_path: Some(path_display.clone()),
+                                message: format!("Processing: {}", folder_name_only)
+                            }).unwrap_or_else(|e| eprintln!("Failed to emit scan progress: {}", e));
+
+                            // --- Start Original Deduction/DB Logic (using current_path_for_processing) ---
+                            match deduce_mod_info_v2(&current_path_for_processing, &base_mods_path_clone, &maps_clone) {
+                                Some(deduced) => {
+                                    println!("[Scan Task] Deduced slug for '{}': {}", path_display, deduced.entity_slug);
+                                    let target_entity_id_result: Option<i64> = maps_clone.entity_slug_to_id.get(&deduced.entity_slug).copied();
+
+                                    if let Some(target_entity_id) = target_entity_id_result {
+                                        println!("[Scan Task] Found entity ID {} for slug '{}'", target_entity_id, deduced.entity_slug);
+
+                                        let relative_path_buf = match current_path_for_processing.strip_prefix(&base_mods_path_clone) {
+                                            Ok(p) => p.to_path_buf(),
+                                            Err(_) => {
+                                                eprintln!("[Scan Task] Error: Could not strip base path prefix from '{}'. Skipping.", path_display);
+                                                errors_count += 1;
+                                                continue; // Skip only this mod folder deduction/DB part
+                                            }
+                                        };
+
+                                        let filename_osstr = relative_path_buf.file_name().unwrap_or_default();
+                                        let filename_str = filename_osstr.to_string_lossy();
+                                        // --- Critical: Ensure stripping the CORRECT prefix after potential rename ---
+                                        let clean_filename = filename_str.strip_prefix(DISABLED_PREFIX).unwrap_or(&filename_str);
+                                        // ---
+                                        let relative_parent_path = relative_path_buf.parent();
+                                        let relative_path_to_store = match relative_parent_path {
+                                            Some(parent) if parent.as_os_str().len() > 0 => parent.join(clean_filename).to_string_lossy().to_string(),
+                                            _ => clean_filename.to_string(),
+                                        };
+                                        let relative_path_to_store = relative_path_to_store.replace("\\", "/");
+                                        println!("[Scan Task] Calculated DB path: '{}'", relative_path_to_store);
+
+                                        let existing_db_asset_id: Option<i64> = conn.query_row(
+                                            "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
+                                            params![target_entity_id, relative_path_to_store],
+                                            |row| row.get(0),
+                                        ).optional().map_err(|e| format!("DB error checking for existing asset '{}': {}", relative_path_to_store, e))?;
+
+                                        if let Some(asset_id) = existing_db_asset_id {
+                                            println!("[Scan Task] Asset already in DB (ID: {}), path '{}'. Marking as found.", asset_id, relative_path_to_store);
+                                            found_asset_ids.insert(asset_id);
+                                            // mods_updated_count += 1; // Optional update logic here
+                                        } else {
+                                            println!("[Scan Task] Inserting new asset: EntityID={}, Name='{}', Path='{}'", target_entity_id, deduced.mod_name, relative_path_to_store);
+                                            let insert_result = conn.execute(
+                                                "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                                params![
+                                                    target_entity_id,
+                                                    deduced.mod_name,
+                                                    deduced.description,
+                                                    relative_path_to_store,
+                                                    deduced.image_filename,
+                                                    deduced.author,
+                                                    deduced.mod_type_tag
+                                                ]
+                                            );
+
+                                            match insert_result {
+                                                Ok(changes) => {
+                                                    if changes > 0 {
+                                                        mods_added_count += 1;
+                                                        let new_id = conn.last_insert_rowid();
+                                                        found_asset_ids.insert(new_id);
+                                                        println!("[Scan Task]   -> Insert successful (New ID: {})", new_id);
+                                                    } else {
+                                                        eprintln!("[Scan Task]   -> Insert reported 0 changes for '{}'.", relative_path_to_store);
+                                                        errors_count += 1;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    if e.to_string().contains("UNIQUE constraint failed: assets.folder_name") {
+                                                        eprintln!("[Scan Task]   -> Insert failed due to UNIQUE constraint on folder_name '{}'. Asset might exist under a different entity or needs pruning. Skipping insert.", relative_path_to_store);
+                                                        // Maybe don't count as error if pruning will fix it?
+                                                    } else {
+                                                        eprintln!("[Scan Task]   -> DB error inserting new asset '{}': {}", relative_path_to_store, e);
+                                                        errors_count += 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        eprintln!("[Scan Task] CRITICAL ERROR: Deduced slug '{}' for path '{}' does NOT exist in the entity map! Skipping mod. Check DB initialization and deduction logic.", deduced.entity_slug, path_display);
+                                        errors_count += 1;
+                                    }
+                                }
+                                None => {
+                                    eprintln!("[Scan Task] Error: Failed to deduce mod info for path '{}'", path_display);
+                                    errors_count += 1;
+                                }
+                            }
+                            // --- End Original Deduction/DB Logic ---
+                            walker.skip_current_dir(); // Skip children after processing a mod folder
+                        }
+                        // If it's a directory but doesn't have an INI (and wasn't renamed+processed),
+                        // we just let WalkDir continue into its children.
                     }
+                    // If it's not a directory, or already processed, ignore.
                 }
                 Err(e) => {
                      eprintln!("[Scan Task] Error accessing path during scan: {}", e);
@@ -2341,7 +2369,7 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
             }
         }
 
-        // --- Pruning Logic ---
+        // --- Pruning Logic (Remains the same) ---
         let mut mods_to_prune_ids = Vec::new();
         for (asset_id, _clean_path) in initial_db_assets.iter() {
             if !found_asset_ids.contains(asset_id) {
@@ -2367,9 +2395,8 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
 
                 app_handle_clone.emit_all(PRUNING_PROGRESS_EVENT, format!("Deleting {} entries...", ids_to_delete_sql.len())).ok();
 
-                // *** FIX: Add .map_err here ***
                 let delete_result = conn.execute(&sql, rusqlite::params_from_iter(ids_to_delete_sql))
-                                        .map_err(|e| format!("DB error during pruning: {}", e)); // Don't use ?, handle below
+                                        .map_err(|e| format!("DB error during pruning: {}", e));
 
                 match delete_result {
                     Ok(count) => {
@@ -2380,7 +2407,7 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
                     Err(e) => {
                         eprintln!("[Scan Task Pruning] {}", e);
                          pruning_errors_count += 1;
-                         app_handle_clone.emit_all(PRUNING_ERROR_EVENT, e).ok(); // Send the error string
+                         app_handle_clone.emit_all(PRUNING_ERROR_EVENT, e).ok();
                     }
                 }
             } else {
@@ -2393,15 +2420,17 @@ async fn scan_mods_directory(db_state: State<'_, DbState>, app_handle: AppHandle
         // --- End Pruning Logic ---
 
         let total_errors = errors_count + pruning_errors_count;
-        Ok::<_, String>((processed_count, mods_added_count, mods_updated_count, total_errors, pruned_count))
+        // Return renamed_count as well
+        Ok::<_, String>((processed_count, mods_added_count, mods_updated_count, total_errors, pruned_count, renamed_count))
     });
 
     // --- Handle Task Result ---
      match scan_task.await {
-         Ok(Ok((processed, added, _updated, errors, pruned))) => {
+         Ok(Ok((processed, added, _updated, errors, pruned, renamed))) => { // Add renamed here
+             let rename_msg = if renamed > 0 { format!(" Renamed {} incorrectly prefixed folders.", renamed) } else { "".to_string() };
              let summary = format!(
-                 "Scan complete. Processed {} mod folders. Added {} new mods. Pruned {} missing mods. {} errors occurred.",
-                 processed, added, pruned, errors
+                 "Scan complete. Processed {} mod folders. Added {} new mods. Pruned {} missing mods.{} {} errors occurred.",
+                 processed, added, pruned, rename_msg, errors
             );
              println!("{}", summary);
              app_handle.emit_all(SCAN_COMPLETE_EVENT, summary.clone()).unwrap_or_else(|e| eprintln!("Failed to emit scan complete event: {}", e));
@@ -3286,20 +3315,22 @@ fn read_archive_file_content(archive_path_str: String, internal_file_path: Strin
 fn import_archive(
     archive_path_str: String,
     target_entity_slug: String,
-    selected_internal_root: String,
+    selected_internal_root: String, // Frontend still provides this, empty means "extract all"
     mod_name: String,
     description: Option<String>,
     author: Option<String>,
     category_tag: Option<String>,
-    // --- Add image data parameter ---
     image_data: Option<Vec<u8>>,
-    // Keep existing file path param as fallback/alternative
     selected_preview_absolute_path: Option<String>,
     preset_ids: Option<Vec<i64>>,
     db_state: State<DbState>
 ) -> CmdResult<()> {
     println!("[import_archive] Importing '{}', internal path '{}' for entity '{}'. Image Data Provided: {}. Add to presets: {:?}",
-        archive_path_str, selected_internal_root, target_entity_slug, image_data.is_some(), preset_ids);
+        archive_path_str,
+        if selected_internal_root.is_empty() { "(Extract All)" } else { &selected_internal_root }, // Indicate if extracting all
+        target_entity_slug,
+        image_data.is_some(),
+        preset_ids);
 
     // --- Basic Validation & Setup ---
     if mod_name.trim().is_empty() { return Err("Mod Name cannot be empty.".to_string()); }
@@ -3307,55 +3338,45 @@ fn import_archive(
     let archive_path = PathBuf::from(&archive_path_str);
     if !archive_path.is_file() { return Err(format!("Archive file not found: {}", archive_path.display())); }
 
-    // --- Get mutable access via MutexGuard ---
     let mut conn_guard = db_state.0.lock().map_err(|_| "DB lock poisoned".to_string())?;
-    // --- End Fix 1 ---
 
-    // --- Get base path and entity info (can use immutable borrow from guard here) ---
     let base_mods_path_str = get_setting_value(&conn_guard, SETTINGS_KEY_MODS_FOLDER)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Mods folder path not set".to_string())?;
     let base_mods_path = PathBuf::from(base_mods_path_str);
 
-    let (target_category_slug, target_entity_id): (String, i64) = conn_guard.query_row( // Use conn_guard directly
+    let (target_category_slug, target_entity_id): (String, i64) = conn_guard.query_row(
         "SELECT c.slug, e.id FROM entities e JOIN categories c ON e.category_id = c.id WHERE e.slug = ?1",
         params![target_entity_slug], |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => format!("Target entity '{}' not found.", target_entity_slug),
         _ => format!("DB Error get target entity: {}", e)
     })?;
-    // --- End Get base path ---
 
     let target_mod_folder_name = mod_name.trim().replace(" ", "_").replace(".", "_").replace("'", "").replace("\"", "");
     if target_mod_folder_name.is_empty() { return Err("Mod Name results in invalid folder name.".to_string()); }
     let final_mod_dest_path = base_mods_path.join(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
 
-    // Create directory *before* transaction starts, as it's a file system operation
     fs::create_dir_all(&final_mod_dest_path)
         .map_err(|e| format!("Failed create dest directory '{}': {}", final_mod_dest_path.display(), e))?;
     println!("[import_archive] Target destination folder created/ensured: {}", final_mod_dest_path.display());
 
-
-    // --- Start Transaction ---
-    // Use conn_guard directly here. transaction() takes &mut Connection, which MutexGuard provides via DerefMut.
     let tx = conn_guard.transaction().map_err(|e| format!("Failed start import transaction: {}", e))?;
-    // --- End Transaction Start ---
 
     // --- Extraction Logic ---
-    // (Needs to happen *before* DB commit, but *after* transaction start if it needs tx?)
-    // (Assuming extraction doesn't need the DB transaction itself)
     println!("[import_archive] Starting extraction...");
     let extension = archive_path.extension().and_then(|os| os.to_str()).map(|s| s.to_lowercase());
+    // Normalize and prepare the prefix path IF a root was selected
     let prefix_to_extract_norm = selected_internal_root.replace("\\", "/");
     let prefix_to_extract = prefix_to_extract_norm.strip_suffix('/').unwrap_or(&prefix_to_extract_norm);
     let prefix_path = Path::new(prefix_to_extract);
+    let extract_all = prefix_to_extract.is_empty(); // Flag to determine if extracting all
+    println!("[import_archive] Extract All Mode: {}", extract_all);
     let mut files_extracted_count = 0;
 
-    // Wrap extraction in a closure to handle potential errors and allow rollback
     let extraction_result: Result<usize, String> = (|| {
         match extension.as_deref() {
         Some("zip") => {
-            // ... (zip extraction logic remains the same) ...
              let file = fs::File::open(&archive_path).map_err(|e| format!("Zip Extract: Failed open: {}", e))?;
              let mut archive = ZipArchive::new(file).map_err(|e| format!("Zip Extract: Failed read archive: {}", e))?;
              for i in 0..archive.len() {
@@ -3363,11 +3384,25 @@ fn import_archive(
                   let internal_path_obj_opt = file_in_zip.enclosed_name().map(|p| p.to_path_buf());
                   if internal_path_obj_opt.is_none() { continue; }
                   let internal_path_obj = internal_path_obj_opt.unwrap();
-                  let should_extract = prefix_to_extract.is_empty() || internal_path_obj.starts_with(prefix_path);
-                  if !should_extract { continue; }
-                  let relative_path_to_dest = if prefix_to_extract.is_empty() { &internal_path_obj } else { match internal_path_obj.strip_prefix(prefix_path) { Ok(p) => p, Err(_) => continue } };
-                  if relative_path_to_dest.as_os_str().is_empty() { continue; }
-                  let outpath = final_mod_dest_path.join(relative_path_to_dest);
+
+                  let (should_extract, relative_path_to_dest_obj) = if extract_all {
+                      // Extracting all: always extract, relative path is the full internal path
+                      (true, internal_path_obj.clone()) // Clone needed as we check it later
+                  } else {
+                      // Specific root selected: check prefix
+                      let should = internal_path_obj.starts_with(prefix_path);
+                      let relative_path = if should {
+                          // Strip the prefix if it matches
+                          internal_path_obj.strip_prefix(prefix_path).map(|p| p.to_path_buf()).ok()
+                      } else {
+                          None
+                      };
+                      (should && relative_path.is_some(), relative_path.unwrap_or_default())
+                  };
+
+                  if !should_extract || relative_path_to_dest_obj.as_os_str().is_empty() { continue; }
+                  let outpath = final_mod_dest_path.join(&relative_path_to_dest_obj);
+
                   if file_in_zip.is_dir() {
                       fs::create_dir_all(&outpath).map_err(|e| format!("Zip Extract: Failed create dir '{}': {}", outpath.display(), e))?;
                   } else {
@@ -3379,80 +3414,67 @@ fn import_archive(
              }
         }
         Some("7z") => {
-             // --- FIX: Use Password::empty() ---
             let mut archive = sevenz_rust::SevenZReader::open(&archive_path_str, Password::empty())
                 .map_err(|e| format!("7z Extract: Failed open: {}", e))?;
-
-             // --- FIX: Use for_each_entries ---
              archive.for_each_entries(|entry, reader| {
                  let internal_path_str = entry.name().replace("\\", "/");
                  let internal_path_obj = PathBuf::from(&internal_path_str);
 
-                 let should_extract = prefix_to_extract.is_empty() || internal_path_obj.starts_with(prefix_path);
-                 if !should_extract { return Ok(true); }
-
-                 let relative_path_to_dest = if prefix_to_extract.is_empty() {
-                     internal_path_obj.as_path()
+                 let (should_extract, relative_path_to_dest_obj) = if extract_all {
+                      (true, internal_path_obj.clone())
                  } else {
-                     match internal_path_obj.strip_prefix(prefix_path) { Ok(p) => p, Err(_) => return Ok(true) }
+                      let should = internal_path_obj.starts_with(prefix_path);
+                      let relative_path = if should { internal_path_obj.strip_prefix(prefix_path).map(|p| p.to_path_buf()).ok() } else { None };
+                      (should && relative_path.is_some(), relative_path.unwrap_or_default())
                  };
-                 if relative_path_to_dest.as_os_str().is_empty() { return Ok(true); }
+                 if !should_extract || relative_path_to_dest_obj.as_os_str().is_empty() { return Ok(true); } // Skip to next
+                 let outpath = final_mod_dest_path.join(&relative_path_to_dest_obj);
 
-                 let outpath = final_mod_dest_path.join(relative_path_to_dest);
                  if entry.is_directory() {
                     fs::create_dir_all(&outpath)?;
-                } else {
+                 } else {
                     if let Some(p) = outpath.parent() { if !p.exists() { fs::create_dir_all(&p)?; }}
                     let mut outfile = fs::File::create(&outpath)?;
-                
                     let mut buffer = [0u8; 4096];
-                    // --- FIX: Corrected read loop ---
                     loop {
-                        let bytes_read = reader.read(&mut buffer)?; // Returns Result<usize, io::Error>, '?' gets usize or returns sevenz_rust::Error
-                        if bytes_read == 0 { break; } // Check the usize directly
-                        outfile.write_all(&buffer[..bytes_read])?; // '?' handles write error
+                        let bytes_read = reader.read(&mut buffer)?;
+                        if bytes_read == 0 { break; }
+                        outfile.write_all(&buffer[..bytes_read])?;
                     }
-                    // --- END FIX ---
                     files_extracted_count += 1;
-                }
+                 }
                  Ok(true) // Continue to next entry
              })
-             // --- Map the specific error type from the closure ---
              .map_err(|e: sevenz_rust::Error| format!("7z Extract: Error processing entries: {}", e))?;
         }
         Some("rar") => {
-            // Use map_err for ? conversion
             let mut archive = Archive::new(&archive_path_str).open_for_processing()
                 .map_err(|e| e.to_string())?;
-        
             loop {
-                // Use map_err for ? conversion
                 match archive.read_header().map_err(|e| e.to_string())? {
                     Some(header_state) => {
                         let entry_filename = &header_state.entry().filename;
                         let internal_path_str = entry_filename.to_string_lossy().replace("\\", "/").to_string();
                         let internal_path_obj = PathBuf::from(&internal_path_str);
-        
-                        // --- Prefix/Path logic (unchanged) ---
-                        let should_extract = prefix_to_extract.is_empty() || internal_path_obj.starts_with(prefix_path);
-                        if !should_extract {
-                             archive = header_state.skip().map_err(|e| e.to_string())?;
-                             continue;
+
+                        let (should_extract, relative_path_to_dest_obj) = if extract_all {
+                            (true, internal_path_obj.clone())
+                        } else {
+                            let should = internal_path_obj.starts_with(prefix_path);
+                            let relative_path = if should { internal_path_obj.strip_prefix(prefix_path).map(|p| p.to_path_buf()).ok() } else { None };
+                            (should && relative_path.is_some(), relative_path.unwrap_or_default())
+                        };
+                        if !should_extract || relative_path_to_dest_obj.as_os_str().is_empty() {
+                            archive = header_state.skip().map_err(|e| e.to_string())?;
+                            continue; // Skip to next
                         }
-                        let relative_path_to_dest = if prefix_to_extract.is_empty() { internal_path_obj.as_path() }
-                            else { match internal_path_obj.strip_prefix(prefix_path) { Ok(p) => p, Err(_) => { archive = header_state.skip().map_err(|e| e.to_string())?; continue; }}};
-                        if relative_path_to_dest.as_os_str().is_empty() { archive = header_state.skip().map_err(|e| e.to_string())?; continue; }
-                        let outpath = final_mod_dest_path.join(relative_path_to_dest);
-                        // --- End Prefix/Path ---
-        
+                        let outpath = final_mod_dest_path.join(&relative_path_to_dest_obj);
+
                         if header_state.entry().is_directory() {
                             fs::create_dir_all(&outpath).map_err(|e| format!("Rar Extract: Failed create dir '{}': {}", outpath.display(), e))?;
                             archive = header_state.skip().map_err(|e| e.to_string())?;
                         } else {
                             if let Some(p) = outpath.parent() { if !p.exists() { fs::create_dir_all(&p).map_err(|e| format!("Rar Extract: Failed create parent '{}': {}", p.display(), e))?; }}
-        
-                            // Use extract_to which returns Result<NextArchiveState, Error>
-                            // The '?' will propagate the error and stop the whole function if extraction fails.
                             archive = header_state.extract_to(&outpath).map_err(|e| e.to_string())?;
                             files_extracted_count += 1;
                         }
@@ -3466,99 +3488,72 @@ fn import_archive(
         Ok(files_extracted_count) // Return count on success
     })();
 
-    // Handle extraction result: if it failed, cleanup folder and return Err (will rollback tx)
+    // Handle extraction result
     let files_extracted_count = extraction_result.map_err(|e| {
-         fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup on extraction error
-         e // Return the error string
+         fs::remove_dir_all(&final_mod_dest_path).ok();
+         e
     })?;
     println!("[import_archive] Extracted {} files.", files_extracted_count);
 
-
-    // --- Handle Preview Image (Logic remains the same) ---
+    // --- Handle Preview Image ---
     let mut image_filename_for_db: Option<String> = None;
-
-    // --- Priority 1: Pasted image data ---
-    if let Some(data) = image_data { // image_data is Option<Vec<u8>> from frontend
+    if let Some(data) = image_data {
         println!("[import_archive] Handling provided image data ({} bytes)", data.len());
-        // The TARGET_IMAGE_FILENAME constant is defined earlier, usually "preview.png"
         let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
-        // Use fs::write which creates/truncates the file
-        match fs::write(&target_image_path, data) { // Check the result of fs::write
+        match fs::write(&target_image_path, data) {
             Ok(_) => {
                 println!("[import_archive] Image data written successfully to '{}'.", target_image_path.display());
-                // --- SET FILENAME HERE ---
                 image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
             }
             Err(e) => {
-                // If writing the pasted image fails, we should NOT set image_filename_for_db
-                // And ideally, we should probably error out the whole import? Or at least log prominently.
                 eprintln!("[import_archive] ERROR: Failed to save pasted image data to '{}': {}. Preview will be missing.", target_image_path.display(), e);
-                // image_filename_for_db remains None
-                // Consider returning an error here?
-                // return Err(format!("Failed to save pasted image data: {}", e)); // This would roll back the DB transaction
             }
         }
     }
-    // --- Priority 2: Selected external file path ---
-    // Only runs if image_data was None
     else if let Some(user_preview_path_str) = selected_preview_absolute_path {
         println!("[import_archive] Handling selected image file path: {}", user_preview_path_str);
         let source_path = PathBuf::from(&user_preview_path_str);
         if source_path.is_file() {
             let target_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
-            match fs::copy(&source_path, &target_image_path) { // Check result of fs::copy
+            match fs::copy(&source_path, &target_image_path) {
                 Ok(_) => {
                     println!("[import_archive] Image file copied successfully to '{}'.", target_image_path.display());
-                    // --- SET FILENAME HERE ---
                     image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
                 }
                 Err(e) => {
                     eprintln!("[import_archive] ERROR: Failed copy user preview to '{}': {}. Preview will be missing.", target_image_path.display(), e);
-                    // image_filename_for_db remains None
-                    // Consider returning an error?
-                    // return Err(format!("Failed to copy selected preview: {}", e));
                 }
             }
         } else {
              println!("[import_archive] Warning: Selected preview file '{}' not found, skipping.", user_preview_path_str);
-             // image_filename_for_db remains None
         }
     }
-    // --- Priority 3: Check if default name was extracted ---
-    // Only runs if image_data and selected_preview_absolute_path were None
     else {
         let potential_extracted_image_path = final_mod_dest_path.join(TARGET_IMAGE_FILENAME);
         if potential_extracted_image_path.is_file() {
             println!("[import_archive] Using extracted {} as preview.", TARGET_IMAGE_FILENAME);
-            // --- SET FILENAME HERE ---
             image_filename_for_db = Some(TARGET_IMAGE_FILENAME.to_string());
         } else {
              println!("[import_archive] No pasted, selected, or extracted preview found.");
-             // image_filename_for_db remains None
         }
     }
-    // --- This log runs regardless of success/failure above ---
     println!("[import_archive] Image handling complete. Filename to save in DB: {:?}", image_filename_for_db);
 
-
-    // --- Add to Database (Check Existing & Insert - Uses TRANSACTION) ---
+    // --- Add to Database ---
     let relative_path_for_db = Path::new(&target_category_slug).join(&target_entity_slug).join(&target_mod_folder_name);
     let relative_path_for_db_str = relative_path_for_db.to_string_lossy().replace("\\", "/");
 
-    // Check if entry already exists within the transaction
     let check_existing: Option<i64> = tx.query_row(
         "SELECT id FROM assets WHERE entity_id = ?1 AND folder_name = ?2",
         params![target_entity_id, relative_path_for_db_str], |row| row.get(0)
-    ).optional().map_err(|e| format!("DB error check existing import '{}': {}", relative_path_for_db_str, e))?; // Use ?
+    ).optional().map_err(|e| format!("DB error check existing import '{}': {}", relative_path_for_db_str, e))?;
 
     if check_existing.is_some() {
-        fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup folder
-        // Return Err to trigger automatic rollback
+        fs::remove_dir_all(&final_mod_dest_path).ok();
         return Err(format!("Database entry already exists for '{}'. Aborting.", relative_path_for_db_str));
     }
 
     println!("[import_archive] Adding asset to DB: entity_id={}, name={}, path={}, image={:?}", target_entity_id, mod_name, relative_path_for_db_str, image_filename_for_db);
-    // Execute insert within the transaction
     tx.execute(
         "INSERT INTO assets (entity_id, name, description, folder_name, image_filename, author, category_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
@@ -3567,25 +3562,23 @@ fn import_archive(
             image_filename_for_db, author, category_tag
         ]
     ).map_err(|e| {
-        // Cleanup folder on DB error, error propagation will handle rollback
         fs::remove_dir_all(&final_mod_dest_path).ok();
         format!("Failed add imported mod to database: {}", e)
-    })?; // Use ?
+    })?;
 
-    let new_asset_id = tx.last_insert_rowid(); // Get ID from transaction
+    let new_asset_id = tx.last_insert_rowid();
     println!("[import_archive] Asset inserted with ID: {}", new_asset_id);
 
+    // --- Add to Presets ---
     if let Some(ids) = preset_ids {
         if !ids.is_empty() {
             println!("[import_archive] Adding new asset {} to presets: {:?}", new_asset_id, ids);
-            // Prepare statement within the transaction scope
             let mut insert_preset_stmt = tx.prepare_cached(
                 "INSERT OR IGNORE INTO preset_assets (preset_id, asset_id, is_enabled) VALUES (?1, ?2, ?3)"
-            ).map_err(|e| format!("Failed prepare preset asset insert: {}", e))?; // Use ?
-
+            ).map_err(|e| format!("Failed prepare preset asset insert: {}", e))?;
             for preset_id in ids {
-                 insert_preset_stmt.execute(params![preset_id, new_asset_id, 1]) // Enabled = 1
-                    .map_err(|e| format!("Failed insert new asset {} into preset {}: {}", new_asset_id, preset_id, e))?; // Use ?
+                 insert_preset_stmt.execute(params![preset_id, new_asset_id, 1]) // Default to enabled state 1 when importing
+                    .map_err(|e| format!("Failed insert new asset {} into preset {}: {}", new_asset_id, preset_id, e))?;
             }
             println!("[import_archive] Finished adding asset {} to presets.", new_asset_id);
         }
@@ -3593,10 +3586,9 @@ fn import_archive(
 
     // --- Commit Transaction ---
     tx.commit().map_err(|e| {
-        fs::remove_dir_all(&final_mod_dest_path).ok(); // Cleanup on commit failure
+        fs::remove_dir_all(&final_mod_dest_path).ok();
         format!("Failed to commit import transaction: {}", e)
     })?;
-    // --- End Commit ---
 
    println!("[import_archive] Import successful for '{}'", mod_name);
    Ok(())
