@@ -6,7 +6,7 @@ import EntityCard from '../components/EntityCard';
 import { getLocalStorageItem, setLocalStorageItem } from '../utils/localStorage';
 import EntityCardSkeleton from '../components/EntityCardSkeleton';
 
-// Element data
+// Element data for Genshin
 const elements = [
     { key: 'all', name: 'All', icon: 'fas fa-circle-nodes', color: 'var(--light)' },
     { key: 'Pyro', name: 'Pyro', icon: 'fas fa-fire', color: 'var(--pyro)' },
@@ -16,6 +16,17 @@ const elements = [
     { key: 'Dendro', name: 'Dendro', icon: 'fas fa-leaf', color: 'var(--dendro)' },
     { key: 'Cryo', name: 'Cryo', icon: 'fas fa-snowflake', color: 'var(--cryo)' },
     { key: 'Geo', name: 'Geo', icon: 'fas fa-mountain', color: 'var(--geo)' },
+];
+
+// Attribute data for ZZZ
+const attributes = [
+    { key: 'all', name: 'All', icon: 'fas fa-circle-nodes', color: 'var(--light)' },
+    { key: 'Electric', name: 'Electric', icon: 'fas fa-bolt', color: 'var(--zzz-electric)' },
+    { key: 'Fire', name: 'Fire', icon: 'fas fa-fire', color: 'var(--zzz-fire)' },
+    { key: 'Ice', name: 'Ice', icon: 'fas fa-snowflake', color: 'var(--zzz-ice)' },
+    { key: 'Frost', name: 'Frost', icon: 'fas fa-snowflake', color: 'var(--zzz-ice)' },
+    { key: 'Ether', name: 'Ether', icon: 'fas fa-star', color: 'var(--zzz-ether)' },
+    { key: 'Physical', name: 'Physical', icon: 'fas fa-fist-raised', color: 'var(--zzz-physical)' },
 ];
 
 // Helper to safely parse JSON
@@ -50,6 +61,7 @@ function HomePage() {
     const [error, setError] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedElement, setSelectedElement] = useState('all');
+    const [selectedAttribute, setSelectedAttribute] = useState('all');
     const [sortOption, setSortOption] = useState(DEFAULT_SORT_OPTION);
     const [activeGame, setActiveGame] = useState('genshin');
     const sortStorageKey = `categorySort_${categorySlug}`;
@@ -75,6 +87,7 @@ function HomePage() {
         setError(null);
         setEntitiesWithCounts([]); // Clear previous entities
         setSelectedElement('all');
+        setSelectedAttribute('all');
         setSearchTerm('');
         const savedSort = getLocalStorageItem(sortStorageKey, DEFAULT_SORT_OPTION);
         setSortOption(savedSort);
@@ -109,11 +122,18 @@ function HomePage() {
 
         // Filtering Logic
         tempEntities = tempEntities.filter(entity => {
-            // Element Filter (only for characters category)
-            if (categorySlug === 'characters' && selectedElement !== 'all') {
+            // Element Filter (only for Genshin characters category)
+            if (categorySlug === 'characters' && activeGame === 'genshin' && selectedElement !== 'all') {
                 const details = safeParseJson(entity.details, {});
                 if (details?.element !== selectedElement) return false;
             }
+            
+            // Attribute Filter (only for ZZZ characters category)
+            if (categorySlug === 'characters' && activeGame === 'zzz' && selectedAttribute !== 'all') {
+                const details = safeParseJson(entity.details, {});
+                if (details?.attribute !== selectedAttribute) return false;
+            }
+            
             // Search Term Filter
             if (searchTerm) {
                 const lowerSearch = searchTerm.toLowerCase();
@@ -147,11 +167,12 @@ function HomePage() {
         });
 
         return tempEntities;
-    }, [entitiesWithCounts, searchTerm, selectedElement, categorySlug, sortOption]); // Dependencies for memoization
+    }, [entitiesWithCounts, searchTerm, selectedElement, selectedAttribute, categorySlug, sortOption, activeGame]); // Dependencies for memoization
 
 
     const pageTitle = categoryInfo.name; // Use state for title
     const showElementFilters = categorySlug === 'characters' && activeGame === 'genshin';
+    const showAttributeFilters = categorySlug === 'characters' && activeGame === 'zzz';
 
     return (
         <div className="home-page fadeIn">
@@ -159,14 +180,17 @@ function HomePage() {
                  <h1 className="page-title">{pageTitle}</h1>
 
                  {/* Sort Dropdown */}
-                 <div className="sort-dropdown-container" style={{ marginLeft: showElementFilters ? '20px' : 'auto', marginRight: '20px' }}>
+                 <div className="sort-dropdown-container" style={{ 
+                     marginLeft: (showElementFilters || showAttributeFilters) ? '20px' : 'auto', 
+                     marginRight: '20px' 
+                 }}>
                      <label htmlFor="sort-select" style={styles.sortLabel}>Sort by:</label>
                      <select id="sort-select" value={sortOption} onChange={handleSortChange} style={styles.sortSelect} aria-label="Sort entities">
                          {sortOptions.map(option => ( <option key={option.value} value={option.value}>{option.label}</option> ))}
                      </select>
                  </div>
 
-                 {/* Element Filters (Conditional) */}
+                 {/* Element Filters (Conditional for Genshin) */}
                  {showElementFilters && (
                      <div className="element-filters">
                           {elements.map(element => (
@@ -179,6 +203,24 @@ function HomePage() {
                              >
                                  <i className={`${element.icon} fa-fw`}></i>
                                  <span className="filter-button-name">{element.name}</span>
+                             </button>
+                         ))}
+                     </div>
+                 )}
+
+                 {/* Attribute Filters (Conditional for ZZZ) */}
+                 {showAttributeFilters && (
+                     <div className="attribute-filters">
+                          {attributes.map(attribute => (
+                             <button
+                                 key={attribute.key}
+                                 className={`attribute-filter-button ${selectedAttribute === attribute.key ? 'active' : ''}`}
+                                 onClick={() => setSelectedAttribute(attribute.key)}
+                                 title={attribute.name}
+                                 style={{ '--attribute-color': attribute.color }}
+                             >
+                                 <i className={`${attribute.icon} fa-fw`}></i>
+                                 <span className="filter-button-name">{attribute.name}</span>
                              </button>
                          ))}
                      </div>

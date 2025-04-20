@@ -21,6 +21,13 @@
     --anemo: #75c4a9;
     --geo: #f8b63e;
     --dendro: #a0d73c;
+
+    /* ZZZ Attribute Colors */
+    --zzz-electric: #a176e7;
+    --zzz-fire: #ff7a3d;
+    --zzz-ice: #99d8f0;
+    --zzz-ether: #d17df5;
+    --zzz-physical: #c2c8ce;
 }
 
 /* Base styles */
@@ -1544,3 +1551,108 @@ input:disabled + .slider {
   .view-mods-button:hover::after {
     transform: translateX(100%);
   }
+
+  /* Attribute Filters Styling */
+.attribute-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.attribute-filter-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 20px;
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.attribute-filter-button i {
+    font-size: 14px;
+    color: var(--attribute-color, var(--light));
+}
+
+.attribute-filter-button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.attribute-filter-button.active {
+    background-color: var(--attribute-color, var(--primary));
+    border-color: var(--attribute-color, var(--primary));
+    color: var(--darker);
+    font-weight: 600;
+    box-shadow: 0 0 10px rgba(var(--attribute-color, 156, 136, 255), 0.3);
+}
+
+.attribute-filter-button.active i {
+    color: inherit;
+}
+
+/* Animation for filtering */
+@keyframes filterFadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Apply animation to entities when filter changes */
+.cards-grid .character-card {
+    animation: filterFadeIn 0.4s ease-out;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .attribute-filters {
+        padding: 0 5px;
+        gap: 5px;
+    }
+    
+    .attribute-filter-button {
+        padding: 5px 10px;
+    }
+    
+    .filter-button-name {
+        display: none; /* Hide text on small screens, show only icon */
+    }
+    
+    .attribute-filter-button i {
+        font-size: 16px; /* Slightly larger icons on mobile */
+    }
+}
+
+@media (min-width: 769px) {
+    .filter-button-name {
+        display: inline; /* Show text on larger screens */
+    }
+}
+
+/* Specific color highlights for entity cards based on attribute */
+.character-card[data-attribute="Electric"] {
+    border-left: 3px solid var(--zzz-electric);
+}
+
+.character-card[data-attribute="Fire"] {
+    border-left: 3px solid var(--zzz-fire);
+}
+
+.character-card[data-attribute="Ice"],
+.character-card[data-attribute="Frost"] {
+    border-left: 3px solid var(--zzz-ice);
+}
+
+.character-card[data-attribute="Ether"] {
+    border-left: 3px solid var(--zzz-ether);
+}
+
+.character-card[data-attribute="Physical"] {
+    border-left: 3px solid var(--zzz-physical);
+}
