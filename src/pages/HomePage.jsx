@@ -51,22 +51,22 @@ function HomePage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedElement, setSelectedElement] = useState('all');
     const [sortOption, setSortOption] = useState(DEFAULT_SORT_OPTION);
-    const [activeGame, setActiveGame] = useState(null);
+    const [activeGame, setActiveGame] = useState('genshin');
     const sortStorageKey = `categorySort_${categorySlug}`;
 
     // Fetch Active Game Info
     useEffect(() => {
-        invoke('get_active_game')
-            .then(activeGame => {
-                if (activeGame) {
-                    setActiveGame(activeGame);
-                } else {
-                    console.warn("No active game found.");
-                }
-            })
-            .catch(err => {
-                console.error("Failed to fetch active game:", err);
-            });
+        const fetchActiveGame = async () => {
+            try {
+            const game = await invoke('get_active_game');
+            setActiveGame(game || 'genshin');
+            } catch (err) {
+            console.error("Failed to get active game:", err);
+            setActiveGame('genshin');
+            }
+        };
+        
+        fetchActiveGame();
     }, []);
 
     // Fetch Category Info and Entities with Counts
@@ -85,7 +85,6 @@ function HomePage() {
         invoke('get_entities_by_category_with_counts', { categorySlug })
             .then(fetchedData => {
                 // Add console log to verify data structure
-                console.log(`[HomePage ${categorySlug}] Fetched entities with counts:`, fetchedData);
                 setEntitiesWithCounts(fetchedData || []); // Ensure it's an array
             })
             .catch(err => {
@@ -152,7 +151,7 @@ function HomePage() {
 
 
     const pageTitle = categoryInfo.name; // Use state for title
-    const showElementFilters = categorySlug === 'characters' && activeGame?.game === 'genshin';
+    const showElementFilters = categorySlug === 'characters' && activeGame === 'genshin';
 
     return (
         <div className="home-page fadeIn">
