@@ -1,6 +1,6 @@
 # Genshin Mod Manager (GMM)
 
-![image](https://github.com/user-attachments/assets/b70e9905-e7b4-404e-b117-dc0ab9df3fe5)
+![Characters List](https://github.com/user-attachments/assets/c45b7d4d-6a2a-45a9-8f44-ded6ef450b1d)
 
 **A modern, cross-platform manager for Genshin Impact & Zenless Zone Zero, built with Tauri and React.**
 
@@ -32,9 +32,11 @@ GMM aims to simplify the process of installing, organizing, and switching betwee
 
 ## 📸 Screenshots
 
-![image](https://github.com/user-attachments/assets/8f378729-6029-48ed-a609-ac52f68bf961)
+![Dashboard](https://github.com/user-attachments/assets/6e9f6d59-45bc-4a2c-97d2-35849f77186a)
 
-![image](https://github.com/user-attachments/assets/3c695fec-b311-4940-8948-e198b5db0f48)
+![Character page](https://github.com/user-attachments/assets/1e387440-f39f-43c6-a2e1-83b389017e5e)
+
+![Character mods](https://github.com/user-attachments/assets/17d812a6-0b66-4fc9-abcd-1353291ea807)
 
 ---
 
