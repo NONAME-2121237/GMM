@@ -766,6 +766,7 @@ function EntityPage() {
     const elementIconClass = element ? (elementIconsFA[element] || 'fas fa-question-circle') : null;
     const weapon = details?.weapon;
     const weaponIconClass = weapon ? (weaponIconsFA[weapon] || 'fas fa-question-circle') : null;
+    const rarity = details?.rarity;
     
     // ZZZ-specific properties
     const attribute = details?.attribute;
@@ -880,6 +881,11 @@ function EntityPage() {
                                         {activeGame === 'genshin' && weapon && 
                                             <div className="character-detail">
                                                 <i className={`${weaponIconClass} fa-fw`}></i> {weapon}
+                                            </div>
+                                        }
+                                        {activeGame === 'genshin' && rarity &&
+                                            <div className="character-detail">
+                                                <i className="fas fa-star fa-fw" style={{ color: '#ffcc00' }}></i> {rarity}
                                             </div>
                                         }
                                         
