@@ -1,4 +1,4 @@
-# Genshin Mod Manager (GMM)
+# GMM - Mod Manager
 
 ![Characters List](https://github.com/user-attachments/assets/c45b7d4d-6a2a-45a9-8f44-ded6ef450b1d)
 
