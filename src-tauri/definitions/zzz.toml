@@ -37,6 +37,8 @@ entities = [
     { name = "Tsukishiro Yanagi", slug = "tsukishiro", description = "Tsukishiro Yanagi is a playable Agent in Zenless Zone Zero, and the Deputy Chief of Hollow Special Operations Section 6.", details = '{"rank": "S", "attribute": "Electric", "specialty": "Anomaly", "type": ["Slash"]}', base_image = "tsukishiro_base.jpg" },
     { name = "Von Lycaon", slug = "von", description = "Von Lycaon is a playable Agent in Zenless Zone Zero, and the Leader of Victoria Housekeeping Co.", details = '{"rank": "S", "attribute": "Ice", "specialty": "Stun", "type": ["Strike"]}', base_image = "von_base.jpg" },
     { name = "Zhu Yuan", slug = "zhu", description = "Zhu Yuan is a playable Agent in Zenless Zone Zero, and the Leader of the Criminal Investigation Special Response Team.", details = '{"rank": "S", "attribute": "Ether", "specialty": "Attack", "type": ["Pierce"]}', base_image = "zhu_base.jpg" },
+    { name = "Vivian Banshee", slug = "vivian", description = "Vivian Banshee is a playable Agent in Zenless Zone Zero, and a member of Mockingbird.", details = '{"rank": "S", "attribute": "Ether", "specialty": "Anomaly", "type": [""]}', base_image = "vivan_base.jpg" },
+    { name = "Hugo Vlad", slug = "hugo", description = "Hugo Vlad is a playable Agent in Zenless Zone Zero, and a member of Mockingbird.", details = '{"rank": "S", "attribute": "Ice", "specialty": "Attack", "type": [""]}', base_image = "hugo_base.jpg" },
 ]
 
 # ===================
