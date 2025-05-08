@@ -22,6 +22,18 @@ jobs:
         run: |
           vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
 
+      # Node.js 缓存
+      - name: Cache Node modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            node_modules
+            ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+
       # 缓存Cargo依赖
       - name: Cache Cargo
         uses: actions/cache@v3
