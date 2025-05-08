@@ -49,6 +49,19 @@ jobs:
       - name: NPM Install
         run: npm install
 
+      # 修复git换行符
+      - name: Configure Git Line Endings
+        run: |
+          git config --global core.autocrlf false
+          git rm --cached -r .
+          git reset --hard
+
+      # 修复换行符故障
+      - name: Fix File Encodings
+        run: |
+          dos2unix src-tauri/wix/main.wxs
+          sed -i '1s/^\xEF\xBB\xBF//' src-tauri/wix/main.wxs
+
       # 构建Tauri应用
       - name: Build with Tauri
         run: npm run tauri build
@@ -56,6 +69,7 @@ jobs:
           VCPKG_INSTALLATION_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:\vcpkg' }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_WIX_USE_MSI_V4: "true"
           CI: false
 
       # 发布产物（使用v4版本）
