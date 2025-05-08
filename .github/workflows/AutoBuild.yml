@@ -10,6 +10,7 @@ jobs:
   build:
     name: Build Project
     runs-on: windows-latest
+    environment: Builder
 
     steps:
       - name: Checkout code
@@ -52,7 +53,9 @@ jobs:
       - name: Build with Tauri
         run: npm run tauri build
         env:
-          VCPKG_INSTALLATION_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:\vcpkg' }}  # 使用镜像预配置路径
+          VCPKG_INSTALLATION_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:\vcpkg' }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           CI: false
 
       # 发布产物（使用v4版本）
