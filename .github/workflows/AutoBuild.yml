@@ -22,12 +22,6 @@ jobs:
         run: |
           vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
 
-      # 安装Tauri必要依赖（WebView2）
-      - name: Install WebView2
-        run: |
-          curl -L -o webview2.exe https://go.microsoft.com/fwlink/p/?LinkId=2124703
-          start /wait webview2.exe /install /quiet /norestart
-
       # 缓存Cargo依赖
       - name: Cache Cargo
         uses: actions/cache@v3
