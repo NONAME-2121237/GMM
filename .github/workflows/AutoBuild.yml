@@ -49,13 +49,6 @@ jobs:
       - name: NPM Install
         run: npm install
 
-
-      # 修复换行符故障
-      - name: Fix File Encodings
-        run: |
-          dos2unix src-tauri/wix/main.wxs
-          sed -i '1s/^\xEF\xBB\xBF//' src-tauri/wix/main.wxs
-
       # 构建Tauri应用
       - name: Build with Tauri
         run: npm run tauri build
