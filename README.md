@@ -1,126 +1,125 @@
-# GMM - Mod Manager
+# GMM - 模组管理器
 
-![Characters List](https://github.com/user-attachments/assets/c45b7d4d-6a2a-45a9-8f44-ded6ef450b1d)
+![角色列表](https://github.com/user-attachments/assets/c45b7d4d-6a2a-45a9-8f44-ded6ef450b1d)
 
-**A modern, cross-platform manager for Genshin Impact & Zenless Zone Zero, built with Tauri and React.**
+**基于 Tauri 和 React 构建的现代化跨平台《原神》&《Zenless Zone Zero》模组管理器**
 
-[![Latest Release](https://img.shields.io/github/v/release/Eidenz/gmm-updates?label=Latest%20Release&style=for-the-badge)](https://github.com/Eidenz/gmm/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Eidenz/gmm-updates/total?style=for-the-badge)](https://github.com/Eidenz/gmm/releases)
+[![最新版本](https://img.shields.io/github/v/release/Eidenz/gmm-updates?label=最新版本&style=for-the-badge)](https://github.com/Eidenz/gmm/releases/latest)
+[![下载量](https://img.shields.io/github/downloads/Eidenz/gmm-updates/total?style=for-the-badge)](https://github.com/Eidenz/gmm/releases)
 
-GMM aims to simplify the process of installing, organizing, and switching between game mods. It provides a clean user interface and useful tools like presets and keybind viewing.
-
----
-
-## ✨ Key Features
-
-*   **🎮 Multi-Game Support:** Manage mods for different games (currently supports **Genshin Impact** and **Zenless Zone Zero**) with separate configurations and databases. Easily switch between supported games.
-*   **🗂️ Mod Library & Categorization:** Automatically scans your mods folder and organizes mods by category (Characters, Weapons, UI, etc.) and entity for the selected game.
-*   **🖱️ Simple Enable/Disable:** Easily toggle mods on or off with a switch. GMM handles the `DISABLED_` prefix renaming for you.
-*   **🖱️ Drag & Drop Import:** Drag archive files (.zip, .7z, .rar) directly onto the application window to initiate the import process.
-*   **📦 Enhanced Archive Import (.zip, .7z, .rar):** Import mods directly from archive files. GMM analyzes contents (including INI hints), suggests mod details, allows root folder selection, or extracts all files.
-*   **🤖 Advanced Mod Info Deduction:** Attempts to deduce mod name, author, and target entity from folder structure, internal filenames, and INI files during scan/import.
-*   **✨ Presets System:** Save your current mod setup as a preset for the active game and quickly switch between different mod combinations. Mark favorites for quick access via the sidebar.
-*   **📊 Enhanced Dashboard:** Get a quick glance at your library stats for the active game, including total mods, enabled/disabled counts, and category breakdowns with visual charts.
-*   **🚀 Quick Launch Integration:** Configure a path to your game executable or a mod launcher for one-click launching. Supports standard launch and **elevated (Admin) launch** on Windows if required.
-*   **⌨️ Keybind Viewer:** Quickly view keybinds defined within a mod's INI files (specifically looks for `key = ...` lines within `[Key.*]` sections *after* a `; Constants` marker).
-*   **🖼️ Image Previews & Lightbox:** Automatically detects and displays common preview images (`preview.png`, etc.). Allows changing previews via file selection or pasting. Click previews to view them in a larger lightbox overlay.
-*   **🖱️ Context Menu Actions:** Right-click on mods (in list view) for quick actions like opening the mod folder, adding to presets, editing, or deleting.
-*   **🔄 Built-in Updater:** Stay up-to-date with the latest features and fixes via the integrated updater (powered by Tauri).
-*   **🦀 Tauri Powered:** Built with Rust (backend) and React (frontend) via Tauri for a fast and efficient cross-platform experience.
+GMM 致力于简化模组的安装、管理和切换流程，提供清爽的界面和实用功能（如预设配置和快捷键查看）。
 
 ---
 
-## 📸 Screenshots
+## ✨ 核心功能
 
-![Dashboard](https://github.com/user-attachments/assets/6e9f6d59-45bc-4a2c-97d2-35849f77186a)
-
-![Character page](https://github.com/user-attachments/assets/1e387440-f39f-43c6-a2e1-83b389017e5e)
-
-![Character mods](https://github.com/user-attachments/assets/17d812a6-0b66-4fc9-abcd-1353291ea807)
-
----
-
-## 💾 Installation
-
-1.  **Download:** Go to the [**Latest Release**](https://github.com/Eidenz/gmm-updates/releases/latest) page.
-2.  **Installer:** Download the `.msi` installer file (e.g., `GenshinModManager_X.Y.Z_x64_en-US.msi`).
-3.  **Run:** Execute the downloaded `.msi` file and follow the installation prompts.
-4.  **Updates:** The application has a built-in updater and will notify you when a new version is available.
-
----
-
-## 🚀 Usage Guide
-
-1.  **Initial Setup:**
-    *   On first launch, you'll be prompted to select the game you want to configure first (e.g., Genshin Impact).
-    *   You *must* select the main folder where you store your mods for that specific game (e.g., `...\GIMI\Mods`).
-    *   Optionally, select the game or launcher executable for Quick Launch for that game.
-2.  **Switching Games:** Use the game switcher on the **Dashboard** or in the **Initial Setup** screen. Switching games requires an application restart (GMM will prompt and handle this). Settings and mods are kept separate for each game.
-3.  **Scanning:** After setting the mods folder for a game, go to **Settings -> Scan Mods Folder -> Scan Now**. This populates the library for the *currently active* game.
-4.  **Importing:**
-    *   **Method 1 (Button):** Click the **Import Mod** button in the sidebar. Select a `.zip`, `.7z`, or `.rar` archive.
-    *   **Method 2 (Drag & Drop):** Drag and drop a supported archive file directly onto the GMM window.
-    *   **Process:** Review the detected archive contents. GMM may suggest a root folder. Select the correct **Mod Root Folder** (containing the INI/mod files) OR check **Extract All Files**. Fill in/correct the Mod Name, Target Entity (for the current game), and other details. Click **Confirm Import**.
-5.  **Browsing:** Use the sidebar to navigate the library for the *currently active* game. Click on an entity card (e.g., Raiden Shogun) to view its mods.
-6.  **Managing Mods:**
-    *   Click the toggle switch on a mod card (Grid view) or list item (List view) to enable or disable it.
-    *   Use the pencil icon to edit mod details (name, description, author, tags, preview image, target entity).
-    *   Use the trash icon to delete a mod (removes from disk and database).
-    *   Use the keyboard icon to view detected keybinds.
-    *   Right-click a mod in list view for context menu actions (Open Folder, Add to Preset, Edit, Delete).
-    *   Click on mod preview images to view them larger in a lightbox.
-7.  **Bulk Actions (List View):**
-    *   Check the boxes next to mods in the list view.
-    *   Use the "Enable Selected" / "Disable Selected" buttons that appear in the header.
-8.  **Presets:**
-    *   Presets are specific to the *currently active* game.
-    *   Go to the **Presets** page.
-    *   Enter a name and click **Create Preset** to save the current mod configuration for this game.
-    *   Click the play icon next to a preset to apply it.
-    *   Use other icons to overwrite, favorite (appears in sidebar), or delete presets.
-9.  **Quick Launch:** Click the **Quick Launch** button in the sidebar. GMM will attempt a standard launch first. If that fails with an elevation error (on Windows), it will prompt for admin permission to launch elevated.
+*   **🎮 多游戏支持:** 管理不同游戏的模组（当前支持《原神》和《Zenless Zone Zero》），各游戏拥有独立配置和数据库，可快速切换支持的游戏。
+*   **🗂️ 模组库分类管理:** 自动扫描模组文件夹，按游戏将模组分类整理（角色、武器、UI等）。
+*   **🖱️ 一键启用/禁用:** 通过开关快速切换模组状态，自动处理 `DISABLED_` 前缀重命名。
+*   **🖱️ 拖拽导入:** 直接将压缩文件（.zip/.7z/.rar）拖拽至应用窗口进行导入。
+*   **📦 增强压缩包导入:** 支持从压缩包直接导入模组，自动分析内容（含INI提示），智能建议模组信息，可选根目录或解压全部文件。
+*   **🤖 智能信息提取:** 在扫描/导入时通过文件夹结构、内部文件名和INI文件自动推断模组名称、作者和目标实体。
+*   **✨ 预设系统:** 将当前模组配置保存为预设方案，快速切换不同模组组合。可将常用预设标记为收藏并显示在侧边栏。
+*   **📊 强化仪表盘:** 实时查看当前游戏模组库统计，包括模组总数、启用/禁用状态和分类饼状图。
+*   **🚀 快速启动集成:** 配置游戏主程序路径或模组启动器实现一键启动，支持Windows系统管理员权限启动。
+*   **⌨️ 快捷键查看器:** 快速查看模组INI文件中定义的快捷键（自动识别 `[Key.*]` 章节中 `; Constants` 标记后的 `key = ...` 行）。
+*   **🖼️ 图片预览与灯箱:** 自动检测常见预览图（preview.png等），支持通过文件选择或粘贴更换预览图，点击预览可放大查看。
+*   **🖱️ 右键菜单操作:** 在列表视图右键点击模组可快速执行操作（打开文件夹/添加至预设/编辑/删除）。
+*   **🔄 内置更新器:** 通过集成更新器保持最新版本（基于Tauri实现）。
+*   **🦀 Tauri驱动:** 采用Rust（后端）+ React（前端）的Tauri框架，打造高效跨平台体验。
 
 ---
 
-## 🛠️ Development
+## 📸 界面截图
 
-**Prerequisites:**
+![仪表盘](https://github.com/user-attachments/assets/6e9f6d59-45bc-4a2c-97d2-35849f77186a)
 
-*   [Node.js](https://nodejs.org/) (LTS recommended) and npm/yarn
-*   [Rust Language Toolchain](https://www.rust-lang.org/tools/install)
-*   Tauri Prerequisites (See the [Tauri Guide](https://tauri.app/v1/guides/getting-started/prerequisites))
+![角色页面](https://github.com/user-attachments/assets/1e387440-f39f-43c6-a2e1-83b389017e5e)
 
-**Setup:**
+![角色模组](https://github.com/user-attachments/assets/17d812a6-0b66-4fc9-abcd-1353291ea807)
 
-1.  **Clone the repository:**
+---
+
+## 💾 安装指南
+
+1.  **下载:** 访问[最新版本](https://github.com/Eidenz/gmm-updates/releases/latest)页面。
+2.  **安装程序:** 下载 `.msi` 安装文件（例如 `GenshinModManager_X.Y.Z_x64_en-US.msi`）。
+3.  **运行:** 执行下载的 `.msi` 文件并按照提示完成安装。
+4.  **更新:** 应用内置更新器会在新版本发布时通知您。
+
+---
+
+## 🚀 使用教程
+
+1.  **初始设置:**
+    *   首次启动时需选择要配置的游戏（例如《原神》）
+    *   必须选择该游戏模组的主存储目录（例如 `...\GIMI\Mods`）
+    *   可选配置游戏主程序路径以实现快速启动
+2.  **切换游戏:** 通过仪表盘或初始设置界面切换游戏，切换需要重启应用（GMM会自动处理）。各游戏的设置和模组相互独立。
+3.  **扫描模组:** 设置模组目录后，前往 **设置 -> 扫描模组文件夹 -> 立即扫描** 来构建当前游戏的模组库。
+4.  **导入模组:**
+    *   **方法1（按钮）:** 点击侧边栏 **导入模组** 按钮，选择支持的压缩文件。
+    *   **方法2（拖拽）:** 直接将压缩文件拖拽至GMM窗口。
+    *   **处理流程:** 检查压缩包内容，GMM会自动建议根目录。选择正确的 **模组根目录**（包含INI文件的文件夹）或勾选 **解压全部文件**。填写/修正模组名称、目标实体等信息后点击 **确认导入**。
+5.  **浏览模组:** 通过侧边栏导航查看当前游戏的模组库。点击实体卡片（如雷电将军）查看相关模组。
+6.  **管理模组:**
+    *   在卡片视图或列表视图中通过开关启用/禁用模组
+    *   使用铅笔图标编辑模组详情（名称/描述/作者/标签/预览图/目标实体）
+    *   使用垃圾桶图标删除模组（同时删除本地文件和数据库记录）
+    *   使用键盘图标查看检测到的快捷键
+    *   在列表视图右键点击模组执行快捷操作
+    *   点击预览图可通过灯箱放大查看
+7.  **批量操作（列表视图）:**
+    *   勾选列表视图中的模组复选框
+    *   使用顶部出现的 "启用选中"/"禁用选中" 按钮
+8.  **预设管理:**
+    *   预设方案与当前游戏绑定
+    *   前往 **预设** 页面
+    *   输入名称点击 **创建预设** 保存当前模组配置
+    *   点击播放图标应用预设
+    *   使用其他图标进行覆盖/收藏（显示在侧边栏）/删除操作
+9.  **快速启动:** 点击侧边栏 **快速启动** 按钮，GMM会尝试普通启动。若Windows系统提示权限不足，将请求管理员权限进行提权启动。
+
+---
+
+## 🛠️ 开发指南
+
+**环境要求:**
+
+*   [Node.js](https://nodejs.org/)（推荐LTS版本）及npm/yarn
+*   [Rust工具链](https://www.rust-lang.org/tools/install)
+*   [Tauri前置条件](https://tauri.app/v1/guides/getting-started/prerequisites)
+
+**配置步骤:**
+
+1.  **克隆仓库:**
     ```bash
     git clone https://github.com/Eidenz/gmm.git
     cd gmm
     ```
-2.  **Install frontend dependencies:**
+2.  **安装前端依赖:**
     ```bash
     npm install
-    # or
+    # 或
     yarn install
     ```
-3.  **Run in development mode:**
+3.  **开发模式运行:**
     ```bash
     npm run tauri dev
     ```
-    This will start the Vite frontend dev server and the Tauri backend.
+    这将同时启动Vite前端开发服务器和Tauri后端
 
-**Build:**
+**构建命令:**
 
 ```bash
 npm run tauri build
 ```
+根据tauri.conf.json配置生成最终应用程序
 
-This will build the frontend and bundle the final application according to your tauri.conf.json settings.
+## 💻 技术栈
 
-## 💻 Technology Stack
-
-- **Framework:** Tauri
-- **Backend:** Rust
-- **Frontend:** React, Vite, Framer Motion
-- **Database:** SQLite (via rusqlite)
-- **Icons:** Font Awesome, Lucide React
+- **框架:** Tauri
+- **后端:** Rust
+- **前端:** React + Vite + Framer Motion
+- **数据库:** SQLite（通过rusqlite驱动）
+- **图标库:** Font Awesome + Lucide React
