@@ -49,10 +49,12 @@ jobs:
           VCPKG_INSTALLATION_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:\vcpkg' }}  # 使用镜像预配置路径
           CI: false
 
-      # 发布产物
+      # 发布产物（使用v4版本）
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: tauri-build
           path: src-tauri/target/release/
           if-no-files-found: error
+          retention-days: 5
+          overwrite: true
