@@ -49,12 +49,6 @@ jobs:
       - name: NPM Install
         run: npm install
 
-      # 修复git换行符
-      - name: Configure Git Line Endings
-        run: |
-          git config --global core.autocrlf false
-          git rm --cached -r .
-          git reset --hard
 
       # 修复换行符故障
       - name: Fix File Encodings
