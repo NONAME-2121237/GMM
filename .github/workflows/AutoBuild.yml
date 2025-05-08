@@ -1,0 +1,58 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  build:
+    name: Build Project
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+
+      # 检查MSVC构建工具（镜像已预装Visual Studio 2022）
+      - name: Verify MSVC Tools
+        shell: cmd
+        run: |
+          vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+
+      # 安装Tauri必要依赖（WebView2）
+      - name: Install WebView2
+        run: |
+          curl -L -o webview2.exe https://go.microsoft.com/fwlink/p/?LinkId=2124703
+          start /wait webview2.exe /install /quiet /norestart
+
+      # 缓存Cargo依赖
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\.cargo\registry
+            ~\.cargo\git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # 安装项目依赖
+      - name: NPM Install
+        run: npm install
+
+      # 构建Tauri应用
+      - name: Build with Tauri
+        run: npm run tauri build
+        env:
+          VCPKG_INSTALLATION_ROOT: ${{ env.VCPKG_INSTALLATION_ROOT || 'C:\vcpkg' }}  # 使用镜像预配置路径
+          CI: false
+
+      # 发布产物
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: tauri-build
+          path: src-tauri/target/release/
+          if-no-files-found: error
