@@ -39,7 +39,7 @@
     },
     "bundle": {
       "active": true,
-      "identifier": "GenshinModManager",
+      "identifier": "原神模组管理器",
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
@@ -52,6 +52,9 @@
          "definitions/"
        ],
       "windows": {
+        "wix": {
+          "language": "zh-CN"
+        },
          "certificateThumbprint": null,
          "digestAlgorithm": "sha256",
          "timestampUrl": ""
@@ -63,7 +66,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "GMM - A Tauri Mod Manager for GIMI",
+        "title": "GMM - 一个Tauri GIMI模组管理器",
         "width": 1400,
         "height": 800,
         "minWidth": 900,
@@ -75,6 +78,5 @@
         "center": true
       }
     ]
-    
   }
 }
