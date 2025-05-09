@@ -74,14 +74,7 @@
         "visible": true,
         "center": true
       }
-    ],
-    "updater": {
-      "active": true,
-      "dialog": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVGOEU4M0NGNDcyN0VCODUKUldTRjZ5ZEh6NE9PWHpMTlFLMzVkaGwzdWp2LzlMMURJUHQvNGZ6SkJmNk9hdEZ1VXhuaXR6aFAK",
-      "endpoints": [
-        "https://eidenz.github.io/gmm-updates/latest.json"
-      ]
-    }
+    ]
+    
   }
 }
