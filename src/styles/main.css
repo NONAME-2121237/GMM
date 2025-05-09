@@ -14,20 +14,20 @@
     --accent-rgb: 255, 159, 67;
     
     /* Element colors */
-    --electro: #a757cb;
-    --pyro: #ff7a3d;
-    --cryo: #99d8f0;
-    --hydro: #4cc2f1;
-    --anemo: #75c4a9;
-    --geo: #f8b63e;
-    --dendro: #a0d73c;
+    --雷: #a757cb;
+    --火: #ff7a3d;
+    --冰: #99d8f0;
+    --水: #4cc2f1;
+    --风: #75c4a9;
+    --岩: #f8b63e;
+    --草: #a0d73c;
 
     /* ZZZ Attribute Colors */
-    --zzz-electric: #a176e7;
-    --zzz-fire: #ff7a3d;
-    --zzz-ice: #99d8f0;
-    --zzz-ether: #d17df5;
-    --zzz-physical: #c2c8ce;
+    --zzz-电: #a176e7;
+    --zzz-火: #ff7a3d;
+    --zzz-冰: #99d8f0;
+    --zzz-以太: #d17df5;
+    --zzz-物理: #c2c8ce;
 }
 
 /* Base styles */

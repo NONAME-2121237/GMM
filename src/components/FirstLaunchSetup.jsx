@@ -41,7 +41,7 @@ function FirstLaunchSetup() {
         }).catch(err => {
             if (isMounted) {
                 console.error("Failed to load game data for setup:", err);
-                setGameLoadError("Could not load game selection.");
+                setGameLoadError("无法加载游戏选择数据");
                 setAvailableGames([]);
                 setCurrentGameForSetup('');
             }
@@ -63,7 +63,7 @@ function FirstLaunchSetup() {
 
         setIsSwitchingGame(true);
         setGameSwitchError('');
-        toast.info(`Switching to ${targetGameSlug.toUpperCase()} and restarting setup...`);
+        toast.info(`正在切换到 ${targetGameSlug.toUpperCase()} 并重启配置流程...`);
 
         try {
             // This command triggers the restart
@@ -73,8 +73,8 @@ function FirstLaunchSetup() {
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown switch error');
             console.error("Failed to initiate game switch during setup:", errorString);
-            setGameSwitchError(`Failed to switch: ${errorString}`);
-            toast.error(`Failed to switch game: ${errorString}`);
+            setGameSwitchError(`切换失败: ${errorString}`);
+            toast.error(`游戏切换失败: ${errorString}`);
             setIsSwitchingGame(false); // Re-enable interaction
         }
         // No 'finally' needed here as success = restart
@@ -89,7 +89,7 @@ function FirstLaunchSetup() {
             }
         } catch (err) {
             console.error("Error selecting directory:", err);
-            setSaveError(`Failed to select folder: ${err}`);
+            setSaveError(`文件选择失败: ${err}`);
         }
     };
 
@@ -102,13 +102,13 @@ function FirstLaunchSetup() {
             }
         } catch (err) {
             console.error("Error selecting file:", err);
-             setSaveError(`Failed to select file: ${err}`);
+            setSaveError(`Failed to select file: ${err}`);
         }
     };
 
     const handleSave = async () => {
         if (!selectedModsFolder) {
-            setSaveError("The Mods Folder path must be selected before continuing.");
+            setSaveError("必须选择模组文件夹路径才能继续");
             return;
         }
         setIsSaving(true);
@@ -127,7 +127,7 @@ function FirstLaunchSetup() {
             }
         } catch (err) {
             console.error("Save error:", err);
-            setSaveError(`Failed to save settings: ${err.message || err}`);
+            setSaveError(`保存设置失败: ${err.message || err}`);
         } finally {
             setIsSaving(false);
         }
@@ -151,14 +151,14 @@ function FirstLaunchSetup() {
                         onError={handleLogoError}
                     />
                     <h1 style={styles.title}>
-                         Initial Setup for {currentGameForSetup ? currentGameForSetup.toUpperCase() : '...'}
+                        {currentGameForSetup ? currentGameForSetup.toUpperCase() : '...'} 初始设置
                     </h1>
                 </div>
                 {/* --- End Game Logo --- */}
 
                 {/* --- Game Selection - UPDATED WITH GAME SWITCHER --- */}
                 <div style={styles.gameSelectionBox}>
-                    <h3 style={styles.selectionLabel}>Setup for Game:</h3>
+                    <h3 style={styles.selectionLabel}>当前配置游戏：</h3>
                     
                     <GameSwitcher
                         availableGames={availableGames}
@@ -167,39 +167,39 @@ function FirstLaunchSetup() {
                         isLoading={isSwitchingGame}
                         error={gameSwitchError || gameLoadError}
                         compact={true}
-                        confirmMessage="This will restart the setup process for this game. Any path selections made will be lost."
+                        confirmMessage="切换游戏将重置当前配置流程，所有路径选择都将丢失"
                         isSetupMode={true}
                     />
                     
-                    <p style={styles.infoText}>Changing the game will restart the setup.</p>
+                    <p style={styles.infoText}>切换游戏将会重置当前配置进度</p>
                 </div>
                 {/* --- End Game Selection --- */}
 
                 <p style={styles.description}>
-                    Please select the main <b>Mods</b> folder for <b>{currentGameForSetup.toUpperCase()}</b>. This is required.
+                    请为 <b>{currentGameForSetup.toUpperCase()}</b> 选择<b>模组文件夹</b>（必填项）
                     <br />
-                    Optionally, select the game or launcher executable for Quick Launch.
+                    可选：选择游戏或启动器可执行文件用于快速启动
                 </p>
 
                 {/* Mods Folder Selection */}
                 <div style={styles.settingItem}>
-                    <label style={styles.label}>Mods Folder:</label>
+                    <label style={styles.label}>模组文件夹：</label>
                     <div style={styles.pathDisplay} title={selectedModsFolder}>
-                        {selectedModsFolder || 'Not Selected'}
+                        {selectedModsFolder || '未选择'}
                     </div>
                     <button onClick={handleSelectModsFolder} disabled={isActionDisabled} className="btn btn-outline">
-                         <i className="fas fa-folder-open fa-fw"></i> Select Folder
+                        <i className="fas fa-folder-open fa-fw"></i> 选择文件夹
                     </button>
                 </div>
 
                 {/* Quick Launch Selection */}
                 <div style={styles.settingItem}>
-                    <label style={styles.label}>Quick Launch:</label>
+                    <label style={styles.label}>快速启动：</label>
                     <div style={styles.pathDisplay} title={selectedQuickLaunch}>
-                        {selectedQuickLaunch || 'Not Selected'}
+                        {selectedQuickLaunch || '未选择'}
                     </div>
                     <button onClick={handleSelectQuickLaunch} disabled={isActionDisabled} className="btn btn-outline">
-                         <i className="fas fa-file-arrow-up fa-fw"></i> Select File
+                        <i className="fas fa-file-arrow-up fa-fw"></i> 选择文件
                     </button>
                 </div>
 
@@ -214,9 +214,9 @@ function FirstLaunchSetup() {
                     style={{ marginTop: '30px', width: '100%' }}
                 >
                     {isSaving ? (
-                        <><i className="fas fa-spinner fa-spin fa-fw"></i> Saving...</>
+                        <><i className="fas fa-spinner fa-spin fa-fw"></i> 保存中...</>
                     ) : (
-                        <><i className="fas fa-check fa-fw"></i> Save & Continue</>
+                        <><i className="fas fa-check fa-fw"></i> 保存并继续</>
                     )}
                 </button>
             </div>

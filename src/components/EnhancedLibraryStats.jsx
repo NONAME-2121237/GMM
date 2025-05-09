@@ -48,8 +48,8 @@ const EnhancedLibraryStats = ({ stats, loading, error }) => {
   const getPieData = () => {
     if (!stats) return [];
     return [
-      { name: 'Enabled', value: stats.enabled_mods },
-      { name: 'Disabled', value: stats.disabled_mods }
+      { name: '已启用', value: stats.enabled_mods },
+      { name: '已禁用', value: stats.disabled_mods }
     ];
   };
   
@@ -84,7 +84,7 @@ const EnhancedLibraryStats = ({ stats, loading, error }) => {
         <div className="stat-card total-mods">
           <i className="fas fa-cubes stat-icon"></i>
           <div className="stat-info">
-            <span className="stat-label">Total Mods</span>
+            <span className="stat-label">模组总数</span>
             <span className="stat-value"><AnimatedCounter value={stats.total_mods} /></span>
           </div>
         </div>
@@ -93,7 +93,7 @@ const EnhancedLibraryStats = ({ stats, loading, error }) => {
           <div className="stat-card enabled">
             <i className="fas fa-check-circle stat-icon"></i>
             <div className="stat-info">
-              <span className="stat-label">Enabled</span>
+              <span className="stat-label">已启用</span>
               <span className="stat-value"><AnimatedCounter value={stats.enabled_mods} /></span>
             </div>
           </div>
@@ -101,7 +101,7 @@ const EnhancedLibraryStats = ({ stats, loading, error }) => {
           <div className="stat-card disabled">
             <i className="fas fa-times-circle stat-icon"></i>
             <div className="stat-info">
-              <span className="stat-label">Disabled</span>
+              <span className="stat-label">已禁用</span>
               <span className="stat-value"><AnimatedCounter value={stats.disabled_mods} /></span>
             </div>
           </div>
@@ -111,7 +111,7 @@ const EnhancedLibraryStats = ({ stats, loading, error }) => {
           <div className="stat-card uncategorized">
             <i className="fas fa-exclamation-triangle stat-icon"></i>
             <div className="stat-info">
-              <span className="stat-label">Uncategorized</span>
+              <span className="stat-label">未分类</span>
               <span className="stat-value"><AnimatedCounter value={stats.uncategorized_mods} /></span>
             </div>
           </div>
@@ -122,7 +122,7 @@ const EnhancedLibraryStats = ({ stats, loading, error }) => {
       <div className="stats-charts">
         {/* Enabled/Disabled Pie Chart */}
         <div className="chart-container pie-chart">
-          <h4 className="chart-title">Enabled vs Disabled</h4>
+          <h4 className="chart-title">启用 vs 禁用</h4>
           <ResponsiveContainer width="100%" height={180}>
             <PieChart>
               <Pie
@@ -141,7 +141,7 @@ const EnhancedLibraryStats = ({ stats, loading, error }) => {
                 ))}
               </Pie>
               <Tooltip 
-                formatter={(value, name) => [`${value} mods`, name]}
+                formatter={(value, name) => [`${value} 模组`, name]}
                 contentStyle={{ 
                   background: 'rgba(30, 41, 59, 0.9)', 
                   border: 'none', 
@@ -164,7 +164,7 @@ const EnhancedLibraryStats = ({ stats, loading, error }) => {
         {/* Category Bar Chart */}
         {categoryData.length > 0 && (
           <div className="chart-container category-chart">
-            <h4 className="chart-title">Top Categories</h4>
+            <h4 className="chart-title">热门分类</h4>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={categoryData} layout="vertical" margin={{ left: 10, right: 10 }}>
                 <XAxis type="number" hide />

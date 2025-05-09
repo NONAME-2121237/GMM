@@ -9,7 +9,7 @@ function GameSwitcher({
   isLoading, 
   error,
   compact = false, // Compact mode for smaller spaces
-  confirmMessage = "Switching the game requires an application restart (the app will close on confirmation).", // Customizable message
+  confirmMessage = "切换游戏需要重新启动应用程序（确认后程序将关闭）。", // 可定制的提示消息
   isSetupMode = false // Different behavior for setup mode
 }) {
   
@@ -18,13 +18,13 @@ function GameSwitcher({
     // Don't do anything if clicking the active game or if already switching
     if (gameSlug === activeGame || isLoading) return;
     
-    const dialogTitle = isSetupMode ? "Confirm Game Change" : "Confirm Game Switch";
-    const okLabel = isSetupMode ? "Change Game & Close" : "Switch and Close";
-    const fullMessage = `${confirmMessage}\n\nSwitch to "${gameSlug.toUpperCase()}"?`;
+    const dialogTitle = isSetupMode ? "确认游戏更改" : "确认游戏切换";
+    const okLabel = isSetupMode ? "更改游戏并关闭" : "切换并关闭";
+    const fullMessage = `${confirmMessage}\n\n是否切换到 "${gameSlug.toUpperCase()}"?`;
     
     const confirmation = await ask(
       fullMessage,
-      { title: dialogTitle, type: 'warning', okLabel, cancelLabel: 'Cancel' }
+      { title: dialogTitle, type: 'warning', okLabel, cancelLabel: '取消' }
     );
     
     if (!confirmation) return;
@@ -50,7 +50,7 @@ function GameSwitcher({
     <div className="game-switcher-container">
       {availableGames.length === 0 ? (
         <div className="game-switcher-loading">
-          <i className="fas fa-spinner fa-spin fa-fw"></i> Loading games...
+          <i className="fas fa-spinner fa-spin fa-fw"></i> 正在加载游戏...
         </div>
       ) : (
         <div className="game-switcher-grid" style={gridStyle}>
@@ -59,7 +59,7 @@ function GameSwitcher({
               key={gameSlug} 
               className={`game-logo-item ${gameSlug === activeGame ? 'active' : ''} ${isLoading ? 'disabled' : ''}`}
               onClick={() => handleLogoClick(gameSlug)}
-              title={`Switch to ${gameSlug.toUpperCase()}`}
+              title={`切换到 ${gameSlug.toUpperCase()}`}
             >
               <div className="logo-wrapper">
                 <img 
@@ -79,7 +79,7 @@ function GameSwitcher({
       {error && <p className="game-switcher-error">{error}</p>}
       {isLoading && (
         <div className="game-switcher-loading-overlay">
-          <i className="fas fa-spinner fa-spin fa-fw"></i> Switching...
+          <i className="fas fa-spinner fa-spin fa-fw"></i> 切换中...
         </div>
       )}
       

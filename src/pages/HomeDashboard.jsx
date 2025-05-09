@@ -14,34 +14,34 @@ const GAME_LINKS = {
     "genshin": {
         "GAMEBANANA": "https://gamebanana.com/mods/games/8552",
         "USEFUL_URLS": [
-            { title: "Genshin Wiki", type: "Reference", url: "https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki", icon: "fas fa-book" },
-            { title: "Paimon.moe", type: "Wish Calculator", url: "https://paimon.moe", icon: "fas fa-calculator" },
-            { title: "Interactive Map", type: "Exploration", url: "https://act.hoyolab.com/ys/app/interactive-map/index.html", icon: "fas fa-map-marked-alt" },
-            { title: "KQM", type: "Guides", url: "https://keqingmains.com", icon: "fas fa-book" },
-            { title: "Genshin Center", type: "Planning", url: "https://genshin-center.com/planner", icon: "fas fa-calendar-alt" },
+            { title: "原神Wiki", type: "Reference", url: "https://genshin-impact.fandom.com/wiki/Genshin_Impact_Wiki", icon: "fas fa-book" },
+            { title: "Paimon.moe（祈愿分析）", type: "Wish Calculator", url: "https://paimon.moe", icon: "fas fa-calculator" },
+            { title: "提瓦特互动地图", type: "Exploration", url: "https://act.hoyolab.com/ys/app/interactive-map/index.html", icon: "fas fa-map-marked-alt" },
+            { title: "可莉指南", type: "Guides", url: "https://keqingmains.com", icon: "fas fa-book" },
+            { title: "原神规划中心", type: "Planning", url: "https://genshin-center.com/planner", icon: "fas fa-calendar-alt" },
         ]
     },
     "zzz": {
         "GAMEBANANA": "https://gamebanana.com/mods/games/19567",
         "USEFUL_URLS": [
-            { title: "ZZZ Wiki", type: "Reference", url: "https://zenless-zone-zero.fandom.com/wiki/Zenless_Zone_Zero_Wiki", icon: "fas fa-book" },
-            { title: "ZZZ Database", type: "Database", url: "https://zzz.gg/", icon: "fas fa-database" },
+            { title: "绝区零Wiki", type: "Reference", url: "https://zenless-zone-zero.fandom.com/wiki/Zenless_Zone_Zero_Wiki", icon: "fas fa-book" },
+            { title: "ZZZ数据库", type: "Database", url: "https://zzz.gg/", icon: "fas fa-database" },
         ]
     },
     "hsr": {
         "GAMEBANANA": "https://gamebanana.com/mods/games/18366",
         "USEFUL_URLS": [
-            { title: "HSR Wiki", type: "Reference", url: "https://honkai-star-rail.fandom.com/wiki/Honkai:_Star_Rail_Wiki", icon: "fas fa-book" },
-            { title: "KQM", type: "Guides", url: "https://hsr.keqingmains.com", icon: "fas fa-book" },
-            { title: "HSR Database", type: "Database", url: "https://www.prydwen.gg/star-rail/", icon: "fas fa-database" },
+            { title: "星穹铁道Wiki", type: "Reference", url: "https://honkai-star-rail.fandom.com/wiki/Honkai:_Star_Rail_Wiki", icon: "fas fa-book" },
+            { title: "星铁指南", type: "Guides", url: "https://hsr.keqingmains.com", icon: "fas fa-book" },
+            { title: "星铁数据库", type: "Database", url: "https://www.prydwen.gg/star-rail/", icon: "fas fa-database" },
         ]
     },
     "wuwa": {
         "GAMEBANANA": "https://gamebanana.com/mods/games/20357",
         "USEFUL_URLS": [
-            { title: "WuWa Wiki", type: "Reference", url: "https://wutheringwaves.fandom.com/wiki/Wuthering_Waves_Wiki", icon: "fas fa-book" },
-            { title: "DotGG", type: "Guides", url: "https://wutheringwaves.gg", icon: "fas fa-book" },
-            { title: "WuWa Database", type: "Database", url: "https://www.prydwen.gg/wuthering-waves/", icon: "fas fa-database" },
+            { title: "鸣潮Wiki", type: "Reference", url: "https://wutheringwaves.fandom.com/wiki/Wuthering_Waves_Wiki", icon: "fas fa-book" },
+            { title: "鸣潮指南（DotGG）", type: "Guides", url: "https://wutheringwaves.gg", icon: "fas fa-book" },
+            { title: "鸣潮数据库", type: "Database", url: "https://www.prydwen.gg/wuthering-waves/", icon: "fas fa-database" },
         ]
     }
 };
@@ -98,8 +98,8 @@ function HomeDashboard() {
                 setDashboardStats(statsResult.value);
             } else {
                 console.error("Error fetching dashboard stats:", statsResult.reason);
-                setStatsError("Could not load library statistics.");
-                setDashboardStats(null); // Ensure stats are cleared on error
+                setStatsError("无法加载库统计信息");  // 原"Could not load library statistics."
+                setDashboardStats(null);
             }
 
             // Handle Version
@@ -107,7 +107,7 @@ function HomeDashboard() {
                 setAppVersion(versionResult.value);
             } else {
                  console.error("Error fetching app version:", versionResult.reason);
-                 setVersionError("Could not load app version.");
+                 setVersionError("无法获取应用版本");  // 原"Could not load app version."
             }
 
             // Handle Available Games
@@ -115,7 +115,7 @@ function HomeDashboard() {
                 setAvailableGames(gamesResult.value || []);
             } else {
                 console.error("Error fetching available games:", gamesResult.reason);
-                setGameSwitchError("Could not load game list.");
+                setGameSwitchError("无法获取游戏列表");  // 原"Could not load game list."
                 setAvailableGames([]);
             }
 
@@ -124,14 +124,14 @@ function HomeDashboard() {
                  setActiveGame(activeGameResult.value || '');
              } else {
                  console.error("Error fetching active game:", activeGameResult.reason);
-                 setGameSwitchError("Could not load active game.");
+                 setGameSwitchError("无法获取当前游戏");  // 原"Could not load active game."
                  setActiveGame('');
              }
 
         } catch (err) {
              console.error("Error fetching dashboard data:", err);
-             setStatsError("An unexpected error occurred loading dashboard data.");
-             setVersionError("An unexpected error occurred loading dashboard data.");
+             setStatsError("加载仪表盘数据时发生意外错误");  // 原"An unexpected error..."
+             setVersionError("加载仪表盘数据时发生意外错误");  // 原"An unexpected error..."
         } finally {
             setStatsLoading(false);
             setVersionLoading(false);
@@ -195,24 +195,19 @@ function HomeDashboard() {
     return (
         <div className="fadeIn" style={{ position: 'relative', minHeight: 'calc(100vh - 50px)' }}>
             <div className="page-header" style={{ borderBottom: 'none', marginBottom: '15px' }}>
-                 <h1 className="page-title">Dashboard</h1>
+                 <h1 className="page-title">仪表盘</h1>
             </div>
 
             {/* Action Buttons Row */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
-                 <button className="btn btn-outline" onClick={handleOpenModsFolder} disabled={settingsLoading || !isSetupComplete} title={!isSetupComplete ? "Complete setup first" : "Open your configured Mods folder"}>
-                     <i className="fas fa-folder-open fa-fw"></i> Mods Folder
+                 <button className="btn btn-outline" onClick={handleOpenModsFolder} disabled={settingsLoading || !isSetupComplete} title={!isSetupComplete ? "请先完成设置" : "打开配置的Mods文件夹"}>
+                     <i className="fas fa-folder-open fa-fw"></i> Mods文件夹
                  </button>
-                 <button className="btn btn-outline" onClick={() => openExternalUrl(GAME_LINKS[activeGame].GAMEBANANA)} title="Open GameBanana Genshin Mods page">
+                 <button className="btn btn-outline" onClick={() => openExternalUrl(GAME_LINKS[activeGame].GAMEBANANA)} title="打开GameBanana模组页面">
                      <i className="fas fa-external-link-alt fa-fw"></i> GameBanana
                  </button>
-                 {customLibraryUrl && (
-                     <button className="btn btn-outline" onClick={() => openExternalUrl(customLibraryUrl)} title={`Open: ${customLibraryUrl}`}>
-                         <i className="fas fa-external-link-alt fa-fw"></i> {customLibraryButtonText}
-                     </button>
-                 )}
-                 <Link to="/settings" className="btn btn-primary" style={{ marginLeft: 'auto' }}>
-                     <i className="fas fa-cog fa-fw"></i> Settings
+                 <Link to="/settings" className="btn btn-primary" style={{ marginLeft: 'auto' }} title="应用配置中心">
+                     <i className="fas fa-cog fa-fw"></i> 设置
                  </Link>
             </div>
             {actionError && <p style={{ color: 'var(--danger)', fontSize: '12px', marginBottom: '15px' }}>{actionError}</p>}
@@ -221,17 +216,17 @@ function HomeDashboard() {
             {needsRestart && (
                 <div style={styles.restartNotice}>
                     <i className="fas fa-exclamation-triangle fa-fw"></i>
-                    Game switched successfully. **Please restart the application** for changes to take full effect.
+                    游戏切换成功，请重启应用使更改生效。
                 </div>
             )}
 
             {/* Scan Prompt */}
             {showScanPrompt && !needsRestart && ( // Don't show scan prompt if restart is needed
                 <div style={styles.infoBoxAccent}>
-                     <h3 style={styles.infoBoxTitle}><i className="fas fa-info-circle fa-fw"></i> Action Recommended</h3>
-                     <p>Setup is complete, but no mods are in the library for <b>{activeGame.toUpperCase()}</b>.</p>
+                     <h3 style={styles.infoBoxTitle}><i className="fas fa-info-circle fa-fw"></i> 操作建议</h3>
+                     <p>初始化已完成，但<b>{activeGame.toUpperCase()}</b>的库中未找到模组。</p>
                      <p style={{ marginTop: '5px' }}>
-                         Go to <Link to="/settings" style={styles.inlineLink}>Settings</Link> and click "Scan Now".
+                         请前往<Link to="/settings" style={styles.inlineLink}>设置</Link>并点击"立即扫描"
                     </p>
                 </div>
             )}
@@ -242,7 +237,7 @@ function HomeDashboard() {
 
                 {/* --- Left Column: Stats --- */}
                 <div style={styles.card}>
-                    <h3 style={styles.cardTitle}>Library Stats ({activeGame})</h3>
+                    <h3 style={styles.cardTitle}>库统计 ({activeGame})</h3>
                     <EnhancedLibraryStats
                         stats={dashboardStats}
                         loading={statsLoading}
@@ -254,8 +249,7 @@ function HomeDashboard() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
                     {/* Game Switch Box */}
                     <div style={styles.card}>
-                        <h3 style={styles.cardTitle}>Switch Game</h3>
-                        {/* Replace the dropdown with our new GameSwitcher component */}
+                        <h3 style={styles.cardTitle}>切换游戏</h3>
                         <GameSwitcher
                             availableGames={availableGames}
                             activeGame={activeGame}
@@ -263,31 +257,38 @@ function HomeDashboard() {
                             isLoading={isSwitchingGame}
                             error={gameSwitchError}
                         />
-                        {!gameSwitchError && <p style={styles.infoTextSmall}>Restart required after switching.</p>}
+                        {!gameSwitchError && <p style={styles.infoTextSmall}>切换后需要重启应用。</p>}
                     </div>
 
                     {/* Useful Links Box */}
                     <div style={styles.card}>
-                        <h3 style={styles.cardTitle}>Useful Links</h3>
-                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <h3 style={styles.cardTitle}>实用链接</h3>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                             {GAME_LINKS[activeGame]?.USEFUL_URLS.map((link, index) => (
                                 <button
                                     key={index}
                                     className="btn btn-outline link-btn"
                                     onClick={() => openExternalUrl(link.url)}
                                     style={styles.linkButton}
-                                    title={`Open ${link.title}`}
+                                    title={`打开${link.title}`}
                                 >
                                     <div style={styles.linkContent}>
                                         <div style={styles.linkMain}>
                                             <i className={`${link.icon} fa-fw`} style={styles.linkIcon}></i>
                                             <span style={styles.linkTitle}>{link.title}</span>
                                         </div>
-                                        <span style={styles.linkType}>{link.type}</span>
+                                        <span style={styles.linkType}>{{
+                                            'Reference': '参考',
+                                            'Wish Calculator': '祈愿计算',
+                                            'Exploration': '地图工具',
+                                            'Guides': '攻略指南',
+                                            'Planning': '规划工具',
+                                            'Database': '数据库'
+                                        }[link.type] || link.type}</span>
                                     </div>
                                 </button>
                             ))}
-                         </div>
+                        </div>
                     </div>
                 </div>
 

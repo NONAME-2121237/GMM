@@ -39,7 +39,7 @@ const ModStatsDashboard = ({
         gap: '8px'
       }}>
         <i className="fas fa-chart-pie" style={{ color: 'var(--primary)' }}></i>
-        Mod Statistics
+        模组统计
       </h3>
       
       <div className="stats-grid" style={{ 
@@ -51,27 +51,27 @@ const ModStatsDashboard = ({
         <StatCard 
           icon="fas fa-box-archive"
           iconColor="var(--primary)"
-          title="Total Mods"
+          title="总模组数"
           value={totalMods}
-          footer={`${recentlyAdded} added recently`}
+          footer={`最近添加${recentlyAdded} `}
         />
         
         {/* Enabled Status Card */}
         <StatCard 
           icon="fas fa-toggle-on"
           iconColor="#4ade80"
-          title="Enabled"
+          title="已启用"
           value={enabledMods}
-          footer={`${enabledPercentage}% of total mods`}
+          footer={`${enabledPercentage}% 总模组占比`}
         />
         
         {/* Disabled Status Card */}
         <StatCard 
           icon="fas fa-toggle-off"
           iconColor="#ff9800"
-          title="Disabled"
+          title="已禁用"
           value={disabledCount}
-          footer={`${100 - enabledPercentage}% of total mods`}
+          footer={`${100 - enabledPercentage}% 总模组占比`}
         />
       </div>
     </motion.div>
@@ -87,10 +87,10 @@ const getTypeColor = (type) => {
     'Effect': '#f59e0b',
     'Sound': '#10b981',
     'Model': '#6366f1',
-    // Add more type colors as needed
+    // 根据需要添加更多类型颜色
   };
   
-  return typeColors[type] || '#6b7280'; // Default gray
+  return typeColors[type] || '#6b7280'; // 默认灰色
 };
 
 // Stat Card Component

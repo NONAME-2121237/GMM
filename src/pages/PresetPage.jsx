@@ -84,7 +84,7 @@ function PresetPage() {
             setPresets(fetchedPresets);
         } catch (err) {
             console.error("Failed to fetch presets:", err);
-            toast.error('Failed to load presets.');
+            toast.error('加载预设失败');
         } finally {
             setIsLoading(false);
         }
@@ -100,7 +100,7 @@ function PresetPage() {
             applyListenersRef.current.unlistenStart = await listen(PRESET_APPLY_START_EVENT, (event) => {
                 if (applyingPresetId !== null) { // Check if an apply was actually initiated
                     console.log("Preset Apply Start:", event.payload);
-                    setApplyProgressData({ processed: 0, total: event.payload || 0, message: 'Starting...' });
+                    setApplyProgressData({ processed: 0, total: event.payload || 0, message: '正在启动...' });
                     setApplySummary('');
                     setShowApplyPopup(true);
                 }
@@ -115,7 +115,7 @@ function PresetPage() {
             applyListenersRef.current.unlistenComplete = await listen(PRESET_APPLY_COMPLETE_EVENT, (event) => {
                  if (applyingPresetId !== null) { // Only process if related to an ongoing apply
                     console.log("Preset Apply Complete:", event.payload);
-                    setApplySummary(event.payload || 'Preset applied successfully!');
+                    setApplySummary(event.payload || '预设应用成功！');
                     setApplyProgressData(null);
                     setShowApplyPopup(true); // Ensure popup shows completion
                     setApplyingPresetId(null); // Re-enable button
@@ -124,7 +124,7 @@ function PresetPage() {
             applyListenersRef.current.unlistenError = await listen(PRESET_APPLY_ERROR_EVENT, (event) => {
                 if (applyingPresetId !== null) { // Only process if related to an ongoing apply
                     console.error("Preset Apply Error:", event.payload);
-                    toast.error(event.payload || 'An unknown error occurred during preset application.');
+                    toast.error(event.payload || '应用预设时发生未知错误');
                     setApplyProgressData(null);
                     setApplySummary('');
                     setShowApplyPopup(true); // Ensure popup shows error
@@ -136,7 +136,7 @@ function PresetPage() {
         setupListeners();
 
         return () => {
-            console.log("Cleaning up preset apply listeners...");
+            console.log("正在清理预设应用监听器...");
             applyListenersRef.current.unlistenStart?.();
             applyListenersRef.current.unlistenProgress?.();
             applyListenersRef.current.unlistenComplete?.();
@@ -157,7 +157,7 @@ function PresetPage() {
             window.location.reload(); // Reload to fetch new preset list
         } catch (err) {
             console.error("Failed to create preset:", err);
-            toast.error('Failed to create preset.');
+            toast.error('创建预设失败');
         } finally {
             setIsCreating(false);
         }
@@ -176,7 +176,7 @@ function PresetPage() {
             // Start event will trigger popup display via listener
         } catch (err) {
             console.error("Failed to invoke apply_preset:", err);
-            const errorString = typeof err === 'string' ? err : (err?.message || 'Failed to start preset application');
+            const errorString = typeof err === 'string' ? err : (err?.message || '启动预设应用失败');
             setApplyError(errorString);
             toast.error(errorString);
             setShowApplyPopup(true); // Show popup to display the invocation error
@@ -206,7 +206,7 @@ function PresetPage() {
             ));
         } catch (err) {
              console.error("Failed to toggle favorite:", err);
-                toast.error('Failed to update favorite status.');
+                toast.error('更新收藏状态失败');
              // Optionally revert local state change on error
              setPresets(current => current.map(p =>
                  p.id === preset.id ? { ...p, is_favorite: preset.is_favorite } : p // Revert to original
@@ -233,10 +233,10 @@ function PresetPage() {
             await invoke('delete_preset', { presetId: presetToDelete.id });
             await fetchPresets(); // Refetch list after deleting
             closeDeleteModal();
-            toast.success(`Preset ${presetToDelete.name} deleted successfully.`);
+            toast.success(`预设「${presetToDelete.name}」已成功删除`);
         } catch (err) {
              console.error("Failed to delete preset:", err);
-                toast.error('Failed to delete preset.');
+                toast.error('删除预设失败');
              setIsDeleting(false); // Keep modal open
         }
     };
@@ -260,11 +260,11 @@ function PresetPage() {
             await invoke('overwrite_preset', { presetId: presetToOverwrite.id });
             console.log(`Preset ${presetToOverwrite.id} overwritten successfully.`);
             closeOverwriteModal();
-            toast.success(`Preset ${presetToOverwrite.name} overwritten successfully.`);
+            toast.success(`预设「${presetToOverwrite.name}」已成功覆盖`);
         } catch (err) {
-             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown overwrite error');
+             const errorString = typeof err === 'string' ? err : (err?.message || '未知覆盖错误');
              console.error(`Failed to overwrite preset ${presetToOverwrite.id}:`, errorString);
-                toast.error(`Failed to overwrite preset: ${errorString}`);
+                toast.error(`覆盖预设失败：${errorString}`);
              setIsOverwriting(false); // Keep modal open
         }
     };
@@ -275,7 +275,7 @@ function PresetPage() {
     return (
         <div style={styles.container} className="fadeIn">
             <div style={styles.pageHeader}>
-                <h1 style={styles.pageTitle}>Mod Presets</h1>
+                <h1 style={styles.pageTitle}>模组预设</h1>
             </div>
 
             <form onSubmit={handleCreatePreset} style={styles.createSection}>
@@ -284,8 +284,8 @@ function PresetPage() {
                     style={styles.input}
                     value={newPresetName}
                     onChange={(e) => setNewPresetName(e.target.value)}
-                    placeholder="Enter new preset name..."
-                    aria-label="New preset name"
+                    placeholder="输入新预设名称..."
+                    aria-label="新预设名称"
                     disabled={isOtherActionRunning}
                 />
                 <button
@@ -294,18 +294,18 @@ function PresetPage() {
                     disabled={!newPresetName.trim() || isOtherActionRunning}
                 >
                     {isCreating ? (
-                        <><i className="fas fa-spinner fa-spin fa-fw"></i> Saving...</>
+                        <><i className="fas fa-spinner fa-spin fa-fw"></i> 保存中...</>
                     ) : (
-                        <><i className="fas fa-save fa-fw"></i> Create Preset</>
+                        <><i className="fas fa-save fa-fw"></i> 创建预设</>
                     )}
                 </button>
             </form>
 
             <div>
                 {isLoading ? (
-                    <p style={styles.placeholderText}>Loading presets...</p>
+                    <p style={styles.placeholderText}>正在加载预设...</p>
                 ) : presets.length === 0 ? (
-                    <p style={styles.placeholderText}>No presets created yet. Create one above to save your current mod setup.</p>
+                    <p style={styles.placeholderText}>尚未创建任何预设，请在上方创建以保存当前模组配置</p>
                 ) : (
                     <ul style={styles.presetList}>
                         {presets.map(preset => (
@@ -316,7 +316,7 @@ function PresetPage() {
                                     <button
                                         style={styles.iconButton}
                                         className="preset-action-btn apply" // Add class for CSS hover styling
-                                        title="Apply Preset"
+                                        title="应用预设"
                                         onClick={() => handleApplyPreset(preset.id)}
                                         disabled={applyingPresetId === preset.id || isOtherActionRunning}
                                     >
@@ -330,7 +330,7 @@ function PresetPage() {
                                      <button
                                          style={styles.iconButton}
                                          className="preset-action-btn overwrite" // Add class for CSS hover styling
-                                         title="Overwrite with Current Setup"
+                                         title="确认覆盖"
                                          onClick={() => openOverwriteModal(preset)}
                                          disabled={isOtherActionRunning}
                                      >
@@ -340,7 +340,7 @@ function PresetPage() {
                                      <button
                                          style={styles.iconButton}
                                          className="preset-action-btn favorite" // Add class for CSS hover styling
-                                         title={preset.is_favorite ? "Remove from Favorites" : "Add to Favorites"}
+                                         title={preset.is_favorite ? "从收藏中移除" : "添加到收藏"}
                                          onClick={() => handleToggleFavorite(preset)}
                                          disabled={isOtherActionRunning}
                                      >
@@ -350,7 +350,7 @@ function PresetPage() {
                                      <button
                                         style={styles.iconButton}
                                         className="preset-action-btn delete" // Add class for CSS hover styling
-                                        title="Delete Preset"
+                                        title="删除预设"
                                         onClick={() => openDeleteModal(preset)}
                                         disabled={isOtherActionRunning}
                                      >
@@ -369,13 +369,10 @@ function PresetPage() {
                     isOpen={isOverwriteModalOpen}
                     onClose={closeOverwriteModal}
                     onConfirm={confirmOverwritePreset}
-                    title="Confirm Overwrite"
-                    confirmText="Overwrite"
-                    confirmButtonVariant="primary" // Keep primary for save-like action
-                    isLoading={isOverwriting}
+                    title="确认覆盖"
+                    confirmText="覆盖"
                  >
-                    Are you sure you want to overwrite the preset "{presetToOverwrite.name}"
-                    with your current mod enabled/disabled states? This cannot be undone.
+                    确定要用当前的模组启用/禁用状态覆盖预设「{presetToOverwrite.name}」吗？此操作无法撤销。
                  </ConfirmationModal>
              )}
 
@@ -385,13 +382,12 @@ function PresetPage() {
                     isOpen={isDeleteModalOpen}
                     onClose={closeDeleteModal}
                     onConfirm={confirmDeletePreset}
-                    title="Confirm Preset Deletion"
-                    confirmText="Delete"
+                    title="确认删除预设"
+                    confirmText="删除"
                     confirmButtonVariant="danger"
                     isLoading={isDeleting}
                  >
-                    Are you sure you want to permanently delete the preset "{presetToDelete.name}"?
-                    This action cannot be undone.
+                    确定要永久删除预设「{presetToDelete.name}」吗？此操作无法撤销。
                  </ConfirmationModal>
              )}
 
@@ -402,7 +398,7 @@ function PresetPage() {
                 summary={applySummary}
                 error={applyError}
                 onClose={closeApplyPopup}
-                baseTitle="Applying Preset..."
+                baseTitle="正在应用预设..."
             />
         </div>
     );

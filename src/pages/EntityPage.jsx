@@ -105,7 +105,7 @@ const EnhancedScrollIndicator = ({ onViewMods }) => {
           }}
           style={{ marginBottom: '15px' }}
         >
-          Scroll down to view mods
+          向下滚动查看模组
         </motion.p>
         
         {/* Enhanced button with animation */}
@@ -151,7 +151,7 @@ const EnhancedScrollIndicator = ({ onViewMods }) => {
               ease: "easeInOut"
             }}
           />
-          View Mods
+          查看模组
         </motion.button>
       </div>
     );
@@ -170,12 +170,12 @@ const GRID_ITEM_HEIGHT = 350; // Includes padding inside the cell
 
 // --- Sort Options ---
 const SORT_OPTIONS = [
-    { value: 'name-asc', label: 'Name (A-Z)' },
-    { value: 'name-desc', label: 'Name (Z-A)' },
-    { value: 'id-desc', label: 'Date Added (Newest First)' },
-    { value: 'id-asc', label: 'Date Added (Oldest First)' },
-    { value: 'enabled-desc', label: 'Status (Enabled First)' },
-    { value: 'enabled-asc', label: 'Status (Disabled First)' },
+    { value: 'name-asc', label: '名称（升序）' },
+    { value: 'name-desc', label: '名称（降序）' },
+    { value: 'id-desc', label: '添加日期（新→旧）' },
+    { value: 'id-asc', label: '添加日期（旧→新）' },
+    { value: 'enabled-desc', label: '状态（启用优先）' },
+    { value: 'enabled-asc', label: '状态（禁用优先）' },
 ];
 const DEFAULT_SORT_OPTION = 'name-asc';
 // ----------------------
@@ -250,8 +250,8 @@ function EntityPage() {
             await open(wikiUrl);
         } catch (err) {
             console.error("Failed to open wiki:", err);
-            setWikiError("Failed to open wiki page");
-            toast.error("Failed to open wiki page");
+            setWikiError("无法打开百科界面");
+            toast.error("无法打开百科界面");
         }
     };
 
@@ -284,8 +284,8 @@ function EntityPage() {
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown error');
             console.error(`[EntityPage ${entitySlug}] Failed to load data:`, errorString);
-             if (errorString.includes("not found")) setError(`Entity '${entitySlug}' not found.`);
-             else setError(`Could not load details or mods for ${entitySlug}. Details: ${errorString}`);
+             if (errorString.includes("not found")) setError(`实体 '${entitySlug}' 未找到。`);
+             else setError(`无法加载 ${entitySlug}的详情或模组。错误详情： ${errorString}`);
         } finally {
             setLoading(false);
             console.log(`[EntityPage ${entitySlug}] Fetching complete. Loading: ${false}`);
@@ -363,12 +363,12 @@ function EntityPage() {
         handleCloseEditModal();
         if (targetSlug && targetSlug !== entitySlug) {
              console.log(`Asset relocated from ${entitySlug} to ${targetSlug}. Refreshing data.`);
-             toast.info(`Mod relocated to ${targetSlug}. Refreshing list...`);
+             toast.info(`模组将被移动到 ${targetSlug}。正在刷新列表......`);
              // Refresh the current page's data (which will now exclude the moved mod)
              fetchData();
         } else {
             console.log(`Asset updated within ${entitySlug}. Refreshing data.`);
-            toast.success(`Mod details updated.`);
+            toast.success(`模组详情已更新。`);
             fetchData(); // Refetch all data for the current entity
         }
     }, [handleCloseEditModal, entitySlug, fetchData]);
@@ -395,15 +395,15 @@ function EntityPage() {
         try {
             await invoke('delete_asset', { assetId: assetToDelete.id });
             console.log(`Asset ${assetToDelete.id} deleted successfully.`);
-            toast.success(`Mod "${assetToDelete.name}" deleted.`);
+            toast.success(`模组"${assetToDelete.name}"已删除。`);
             setAssets(currentAssets => currentAssets.filter(asset => asset.id !== assetToDelete.id));
              setEntity(currentEntity => ({ ...currentEntity, mod_count: Math.max(0, (currentEntity?.mod_count || 0) - 1) }));
              handleCloseDeleteModal();
         } catch (err) {
             const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown delete error');
             console.error(`Failed to delete asset ${assetToDelete.id}:`, errorString);
-            setDeleteError(`Failed to delete: ${errorString}`); // Show error in modal
-            toast.error(`Failed to delete "${assetToDelete.name}": ${errorString}`); // Also show toast
+            setDeleteError(`删除"${errorString}"失败`); // Show error in modal
+            toast.error(`删除"${assetToDelete.name}"失败：${errorString}`); // Also show toast
              setIsDeleting(false); // Keep modal open on error
         }
     }, [assetToDelete, handleCloseDeleteModal]);
@@ -519,7 +519,7 @@ function EntityPage() {
         const updatedAssetsMap = new Map(assets.map(a => [a.id, { ...a }])); // Create a mutable map
 
         // Use toast for progress indication
-        const toastId = toast.loading(`Processing ${selectedAssetIds.size} mods...`, { closeButton: false });
+        const toastId = toast.loading(`正在处理${selectedAssetIds.size}个模组......`, { closeButton: false });
 
         // Process items sequentially to avoid overwhelming backend/UI updates too rapidly
         for (const assetId of selectedAssetIds) {
@@ -556,11 +556,11 @@ function EntityPage() {
                 updatedAssetsMap.set(assetId, { ...currentAsset, is_enabled: newIsEnabledState, folder_name: updatedFolderName });
 
                 successCount++;
-                toast.update(toastId, { render: `${enable ? 'Enabling' : 'Disabling'} mod ${successCount}/${selectedAssetIds.size}...` });
+                toast.update(toastId, { render: `${enable ? '正在启用' : '正在禁用'}${successCount}/${selectedAssetIds.size}个模组......` });
             } catch (err) {
                 failCount++;
-                const errorString = typeof err === 'string' ? err : (err?.message || 'Unknown toggle error');
-                console.error(`Bulk toggle failed for asset ${assetId}:`, errorString);
+                const errorString = typeof err === 'string' ? err : (err?.message || '未知的切换错误');
+                console.error(`批量操作失败 ${assetId}:`, errorString);
                 // Optionally show individual errors, but might be too noisy.
                 // toast.error(`Failed for "${currentAsset.name}": ${errorString.substring(0,50)}`);
             }
@@ -572,9 +572,9 @@ function EntityPage() {
 
         // Update toast based on outcome
         if (failCount === 0) {
-             toast.update(toastId, { render: `${enable ? 'Enabled' : 'Disabled'} ${successCount} mods successfully!`, type: 'success', isLoading: false, autoClose: 3000 });
+             toast.update(toastId, { render: `${enable ? '已成功启用' : '已成功禁用'} ${successCount}个模组！`, type: 'success', isLoading: false, autoClose: 3000 });
         } else {
-             toast.update(toastId, { render: `Bulk action completed. ${successCount} succeeded, ${failCount} failed.`, type: 'warning', isLoading: false, autoClose: 5000 });
+             toast.update(toastId, { render: `批量作已完成。${successCount}项成功, ${failCount}项失败。`, type: 'warning', isLoading: false, autoClose: 5000 });
         }
 
         setIsBulkProcessing(false);
@@ -582,7 +582,7 @@ function EntityPage() {
         // Refetch entity details to update counts
         invoke('get_entity_details', { entitySlug })
             .then(updatedEntityDetails => setEntity(updatedEntityDetails))
-            .catch(err => console.error("Failed refetch entity details after bulk toggle:", err));
+            .catch(err => console.error("批量切换后重新获取实体详细信息失败：", err));
     };
 
     // --- End Bulk Action Handlers ---
@@ -665,7 +665,7 @@ function EntityPage() {
 
         return [
             {
-                label: 'Open Mod Folder',
+                label: '打开模组文件夹',
                 icon: 'fas fa-folder-open',
                 onClick: async () => {
                     handleCloseContextMenu(); // Close immediately
@@ -677,7 +677,7 @@ function EntityPage() {
                 }
             },
             {
-                label: 'Add to Preset(s)...',
+                label: '添加到预设...',
                 icon: 'fas fa-plus-circle',
                 onClick: () => {
                     handleCloseContextMenu(); // Close context menu
@@ -686,7 +686,7 @@ function EntityPage() {
             },
             { separator: true }, // Add a visual separator
             {
-                label: 'Edit Mod Info',
+                label: '编辑模组信息',
                 icon: 'fas fa-pencil-alt',
                 onClick: () => {
                     handleCloseContextMenu();
@@ -694,7 +694,7 @@ function EntityPage() {
                 }
             },
             {
-                label: 'Delete Mod',
+                label: '删除模组',
                 icon: 'fas fa-trash-alt',
                 danger: true, // Mark as danger for styling
                 onClick: () => {
@@ -827,7 +827,7 @@ function EntityPage() {
                         className="btn-icon" 
                         onClick={handleScrollToEntity}
                         style={{ fontSize: '20px', color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer' }}
-                        title="Back to character profile"
+                        title="返回角色简介"
                     >
                         <i className="fas fa-chevron-up"></i>
                     </button>
@@ -865,7 +865,7 @@ function EntityPage() {
                                         }
                                         {/* Display attribute icon for ZZZ characters */}
                                         {elementIconClass && activeGame === 'zzz' &&
-                                            <span className="attribute-icon" style={{ color: `var(--zzz-${attribute?.toLowerCase()})` || 'var(--primary)' }} title={`Attribute: ${attribute}`}>
+                                            <span className="attribute-icon" style={{ color: `var(--zzz-${attribute?.toLowerCase()})` || 'var(--primary)' }} title={`属性： ${attribute}`}>
                                                 <i className={`${attributeIconClass} fa-fw`}></i>
                                             </span>
                                         }
@@ -920,7 +920,7 @@ function EntityPage() {
                                     {entity.description ? (
                                         <p className="character-description">{entity.description}</p>
                                     ) : (
-                                        <p className="character-description placeholder-text" style={{padding: 0, textAlign:'left'}}>No description available.</p>
+                                        <p className="character-description placeholder-text" style={{padding: 0, textAlign:'left'}}>没有可用的描述。</p>
                                     )}
 
                                     {/* Game-aware Wiki Button */}
@@ -956,7 +956,7 @@ function EntityPage() {
                                         }}
                                     >
                                         <i className="fas fa-book fa-fw"></i>
-                                        View in {activeGame.toUpperCase()} Wiki
+                                        在 {activeGame.toUpperCase()} 百科中查看
                                     </motion.button>
                                     {wikiError && <p style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '5px' }}>{wikiError}</p>}
                                 </div>
@@ -994,17 +994,17 @@ function EntityPage() {
                                 <div className="section-header" style={{ alignItems: 'center' }}>
                                     {/* --- Left Aligned Group (Title & Select All) --- */}
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                                        <h2 className="section-title" style={{ marginBottom: 0 }}>Available Mods ({filteredAndSortedAssets.length})</h2>
+                                        <h2 className="section-title" style={{ marginBottom: 0 }}>可用模组 ({filteredAndSortedAssets.length})</h2>
                                         {viewMode === 'list' && filteredAndSortedAssets.length > 0 && (
                                             <input
                                                 type="checkbox"
-                                                title={isAllFilteredSelected ? "Deselect All" : "Select All Visible"}
+                                                title={isAllFilteredSelected ? "取消全选" : "选择所有可见项"}
                                                 checked={isAllFilteredSelected}
                                                 ref={el => el && (el.indeterminate = isIndeterminate)}
                                                 onChange={handleSelectAllChange}
                                                 disabled={isBulkProcessing}
                                                 style={{ cursor: 'pointer', width:'16px', height:'16px' }}
-                                                aria-label="Select all mods"
+                                                aria-label="选择全部Mod"
                                             />
                                         )}
                                     </div>
@@ -1013,11 +1013,11 @@ function EntityPage() {
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginLeft: 'auto' }}>
                                         {viewMode === 'list' && selectedAssetIds.size > 0 && (
                                             <div style={{ display: 'flex', gap: '10px' }}>
-                                                <button className="btn btn-primary" onClick={() => handleBulkToggle(true)} disabled={isBulkProcessing} title="Enable selected mods">
-                                                    {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-check fa-fw"></i>} Enable ({selectedAssetIds.size})
+                                                <button className="btn btn-primary" onClick={() => handleBulkToggle(true)} disabled={isBulkProcessing} title="启用选中模组">
+                                                    {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-check fa-fw"></i>} 已启用 ({selectedAssetIds.size})
                                                 </button>
-                                                <button className="btn btn-outline" onClick={() => handleBulkToggle(false)} disabled={isBulkProcessing} title="Disable selected mods">
-                                                    {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-times fa-fw"></i>} Disable ({selectedAssetIds.size})
+                                                <button className="btn btn-outline" onClick={() => handleBulkToggle(false)} disabled={isBulkProcessing} title="禁用选中模组">
+                                                    {isBulkProcessing ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-times fa-fw"></i>} 已禁用 ({selectedAssetIds.size})
                                                 </button>
                                             </div>
                                         )}
@@ -1040,7 +1040,7 @@ function EntityPage() {
                                                         <button 
                                                             className="type-filter-clear" 
                                                             onClick={clearTypeFilters}
-                                                            title="Clear all type filters"
+                                                            title="清除所有筛选项"
                                                         >
                                                             <i className="fas fa-times"></i> Clear
                                                         </button>
@@ -1051,8 +1051,8 @@ function EntityPage() {
                                         
                                         {/* --- Sort Dropdown --- */}
                                         <div className="sort-dropdown-container">
-                                            <label htmlFor="mod-sort-select" style={sortStyles.sortLabel}>Sort by:</label>
-                                            <select id="mod-sort-select" value={sortOption} onChange={handleSortChange} style={sortStyles.sortSelect} aria-label="Sort mods">
+                                            <label htmlFor="mod-sort-select" style={sortStyles.sortLabel}>排序方式:</label>
+                                            <select id="mod-sort-select" value={sortOption} onChange={handleSortChange} style={sortStyles.sortSelect} aria-label="排序模组">
                                                 {SORT_OPTIONS.map(option => ( <option key={option.value} value={option.value}>{option.label}</option> ))}
                                             </select>
                                         </div>
@@ -1060,7 +1060,7 @@ function EntityPage() {
                                         <div className="search-bar-container">
                                             <div className="search-bar">
                                                 <i className="fas fa-search"></i>
-                                                <input type="text" placeholder={`Search mods...`} value={modSearchTerm} onChange={(e) => setModSearchTerm(e.target.value)} aria-label={`Search mods`} data-global-search="true" />
+                                                <input type="text" placeholder={`搜索模组...`} value={modSearchTerm} onChange={(e) => setModSearchTerm(e.target.value)} aria-label={`搜索模组`} data-global-search="true" />
                                             </div>
                                         </div>
                                         <div className="view-mode-toggle">
@@ -1078,7 +1078,7 @@ function EntityPage() {
                                         </div>
                                     ) : !filteredAndSortedAssets.length ? (
                                         <p className="placeholder-text" style={{ gridColumn: '1 / -1', width: '100%', paddingTop: '30px' }}>
-                                            {assets.length === 0 ? `No mods found for ${entity.name}.` : 'No mods found matching search/filters.'}
+                                            {assets.length === 0 ? `没有找到“${entity.name}”的模组。` : '没有找到符合搜索/筛选条件的模组。'}
                                         </p>
                                     ) : bounds.width > 0 && bounds.height > 0 ? (
                                         viewMode === 'list' ? (
@@ -1143,8 +1143,8 @@ function EntityPage() {
                     isLoading={isDeleting}
                     errorMessage={deleteError}
                 >
-                    Are you sure you want to permanently delete the mod "{assetToDelete.name}"?
-                    This action will remove the mod files from your disk and cannot be undone.
+                    你确定要永久删除模组"{assetToDelete.name}"吗?
+                    将会从硬盘中永久移除mod文件, 无法恢复.
                 </ConfirmationModal>
             )}
             {isAddToPresetModalOpen && addToPresetAsset && ( <AddToPresetModal assetId={addToPresetAsset.id} assetName={addToPresetAsset.name} isOpen={isAddToPresetModalOpen} onClose={handleCloseAddToPresetModal} /> )}

@@ -31,7 +31,7 @@ export function SettingsProvider({ children }) {
             setCustomLibraryUrl(libraryResult || '');
         } catch (err) {
             console.error("Failed to fetch settings:", err);
-            setError("Could not load application settings.");
+            setError("无法加载应用程序设置");
             setModsFolder('');
             setQuickLaunchPath('');
             setCustomLibraryUrl(''); // Reset on error
@@ -58,7 +58,7 @@ export function SettingsProvider({ children }) {
             return true; // Indicate success
         } catch (err) {
             console.error(`Failed to set setting ${key}:`, err);
-            setError(`Failed to save setting: ${key}`);
+            setError(`保存设置失败: ${key}`);
             return false; // Indicate failure
         }
     }, []);
@@ -90,7 +90,7 @@ export function SettingsProvider({ children }) {
 export function useSettings() {
     const context = useContext(SettingsContext);
     if (!context) {
-        throw new Error('useSettings must be used within a SettingsProvider');
+        throw new Error('useSettings必须在SettingsProvider内使用');
     }
     return context;
 }

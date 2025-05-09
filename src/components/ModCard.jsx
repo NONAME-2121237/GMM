@@ -243,7 +243,7 @@ function ModCard({
             // Apply specific container styles based on viewMode
             style={viewMode === 'grid' ? gridImageContainerStyle : listImageContainerStyle}
             onClick={handleImageClickInternal}
-            title={imageUrl && imageUrl !== FALLBACK_MOD_IMAGE ? "Click to enlarge preview" : undefined}
+            title={imageUrl && imageUrl !== FALLBACK_MOD_IMAGE ? "点击放大预览" : undefined}
         >
             {imageLoading && <i className="fas fa-spinner fa-spin"></i>}
             {/* Render img only when not loading and URL is available */}
@@ -295,11 +295,11 @@ function ModCard({
                      {/* Actions */}
                      <div className="mod-list-actions" style={listStyles.actions}>
                          {/* --- ADDED: Open Folder Button --- */}
-                         <button onClick={handleOpenFolder} className="btn-icon compact-btn" title="Open Mod Folder" disabled={isToggling}> <i className="fas fa-folder-open fa-fw"></i> </button>
+                         <button onClick={handleOpenFolder} className="btn-icon compact-btn" title="打开模组文件夹" disabled={isToggling}> <i className="fas fa-folder-open fa-fw"></i> </button>
                          {/* --- End Added Button --- */}
-                         <button onClick={handleOpenKeybindsPopup} className="btn-icon compact-btn" title="View Keybinds" disabled={isToggling}> <i className="fas fa-keyboard fa-fw"></i> </button>
-                         <button onClick={handleEditClick} className="btn-icon compact-btn" title="Edit Mod Info" disabled={isToggling}> <i className="fas fa-pencil-alt fa-fw"></i> </button>
-                         <button onClick={handleDeleteClick} className="btn-icon compact-btn danger" title="Delete Mod" disabled={isToggling}> <i className="fas fa-trash-alt fa-fw"></i> </button>
+                         <button onClick={handleOpenKeybindsPopup} className="btn-icon compact-btn" title="查看按键绑定" disabled={isToggling}> <i className="fas fa-keyboard fa-fw"></i> </button>
+                         <button onClick={handleEditClick} className="btn-icon compact-btn" title="编辑模组信息" disabled={isToggling}> <i className="fas fa-pencil-alt fa-fw"></i> </button>
+                         <button onClick={handleDeleteClick} className="btn-icon compact-btn danger" title="删除模组" disabled={isToggling}> <i className="fas fa-trash-alt fa-fw"></i> </button>
                      </div>
                 </div>
                  {/* Modals */}
@@ -329,9 +329,9 @@ function ModCard({
                     <div className="mod-author">{asset.author ? `By: ${asset.author}` : '(Unknown author)'}</div>
                      <div style={{ display: 'flex', gap: '5px' }}> {/* Button group */}
                          {/* Add to Preset Button */}
-                         <button className="btn-icon add-preset-button" onClick={handleOpenAddToPreset} title="Add to Preset(s)" style={gridButtonStyles.addPreset} disabled={isToggling} > <i className="fas fa-plus-circle fa-fw"></i> </button>
+                         <button className="btn-icon add-preset-button" onClick={handleOpenAddToPreset} title="添加到预设" style={gridButtonStyles.addPreset} disabled={isToggling} > <i className="fas fa-plus-circle fa-fw"></i> </button>
                          {/* --- ADDED: Open Folder Button --- */}
-                         <button className="btn-icon open-folder-button" onClick={handleOpenFolder} title="Open Mod Folder" style={gridButtonStyles.openFolder} disabled={isToggling} > <i className="fas fa-folder-open fa-fw"></i> </button>
+                         <button className="btn-icon open-folder-button" onClick={handleOpenFolder} title="打开模组文件夹" style={gridButtonStyles.openFolder} disabled={isToggling} > <i className="fas fa-folder-open fa-fw"></i> </button>
                          {/* --- End Added Button --- */}
                          {/* Keybind Button */}
                          <button className="btn-icon keybind-button" onClick={handleOpenKeybindsPopup} title="View Keybinds" style={gridButtonStyles.keybind} disabled={isToggling} aria-label={`View keybinds for ${asset.name}`} > <i className="fas fa-keyboard fa-fw"></i> </button>

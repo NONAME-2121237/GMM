@@ -8,25 +8,25 @@ import EntityCardSkeleton from '../components/EntityCardSkeleton';
 
 // Element data for Genshin
 const elements = [
-    { key: 'all', name: 'All', icon: 'fas fa-circle-nodes', color: 'var(--light)' },
-    { key: 'Pyro', name: 'Pyro', icon: 'fas fa-fire', color: 'var(--pyro)' },
-    { key: 'Hydro', name: 'Hydro', icon: 'fas fa-tint', color: 'var(--hydro)' },
-    { key: 'Anemo', name: 'Anemo', icon: 'fas fa-wind', color: 'var(--anemo)' },
-    { key: 'Electro', name: 'Electro', icon: 'fas fa-bolt', color: 'var(--electro)' },
-    { key: 'Dendro', name: 'Dendro', icon: 'fas fa-leaf', color: 'var(--dendro)' },
-    { key: 'Cryo', name: 'Cryo', icon: 'fas fa-snowflake', color: 'var(--cryo)' },
-    { key: 'Geo', name: 'Geo', icon: 'fas fa-mountain', color: 'var(--geo)' },
+    { key: 'all', name: '全部', icon: 'fas fa-circle-nodes', color: 'var(--light)' },
+    { key: '火', name: '火', icon: 'fas fa-fire', color: 'var(--火)' },
+    { key: '水', name: '水', icon: 'fas fa-tint', color: 'var(--水)' },
+    { key: '风', name: '风', icon: 'fas fa-wind', color: 'var(--风)' },
+    { key: '雷', name: '雷', icon: 'fas fa-bolt', color: 'var(--雷)' },
+    { key: '草', name: '草', icon: 'fas fa-leaf', color: 'var(--草)' },
+    { key: '冰', name: '冰', icon: 'fas fa-snowflake', color: 'var(--冰)' },
+    { key: '岩', name: '岩', icon: 'fas fa-mountain', color: 'var(--岩)' },
 ];
 
 // Attribute data for ZZZ
 const attributes = [
-    { key: 'all', name: 'All', icon: 'fas fa-circle-nodes', color: 'var(--light)' },
-    { key: 'Electric', name: 'Electric', icon: 'fas fa-bolt', color: 'var(--zzz-electric)' },
-    { key: 'Fire', name: 'Fire', icon: 'fas fa-fire', color: 'var(--zzz-fire)' },
-    { key: 'Ice', name: 'Ice', icon: 'fas fa-snowflake', color: 'var(--zzz-ice)' },
-    { key: 'Frost', name: 'Frost', icon: 'fas fa-snowflake', color: 'var(--zzz-ice)' },
-    { key: 'Ether', name: 'Ether', icon: 'fas fa-star', color: 'var(--zzz-ether)' },
-    { key: 'Physical', name: 'Physical', icon: 'fas fa-fist-raised', color: 'var(--zzz-physical)' },
+    { key: 'all', name: '全部', icon: 'fas fa-circle-nodes', color: 'var(--light)' },
+    { key: 'Electric', name: '电', icon: 'fas fa-bolt', color: 'var(--zzz-electric)' },
+    { key: 'Fire', name: '火', icon: 'fas fa-fire', color: 'var(--zzz-fire)' },
+    { key: 'Ice', name: '冰', icon: 'fas fa-snowflake', color: 'var(--zzz-ice)' },
+    { key: 'Frost', name: '霜', icon: 'fas fa-snowflake', color: 'var(--zzz-ice)' },
+    { key: 'Ether', name: '以太', icon: 'fas fa-star', color: 'var(--zzz-ether)' },
+    { key: 'Physical', name: '物理', icon: 'fas fa-fist-raised', color: 'var(--zzz-physical)' },
 ];
 
 // Helper to safely parse JSON
@@ -42,12 +42,12 @@ const safeParseJson = (jsonString, defaultValue = null) => {
 
 // Sorting Options including new ones
 const sortOptions = [
-    { value: 'name-asc', label: 'Name (A-Z)' },
-    { value: 'name-desc', label: 'Name (Z-A)' },
-    { value: 'total-desc', label: 'Total Mods (High-Low)' },
-    { value: 'total-asc', label: 'Total Mods (Low-High)' },
-    { value: 'enabled-desc', label: 'Enabled Mods (High-Low)' },
-    { value: 'enabled-asc', label: 'Enabled Mods (Low-High)' },
+    { value: 'name-asc', label: '名称（升序）' },
+    { value: 'name-desc', label: '名称（降序）' },
+    { value: 'total-desc', label: '模组总数（高→低）' },
+    { value: 'total-asc', label: '模组总数（低→高）' },
+    { value: 'enabled-desc', label: '启用模组（高→低）' },
+    { value: 'enabled-asc', label: '启用模组（低→高）' },
 ];
 const DEFAULT_SORT_OPTION = 'name-asc';
 const OTHER_ENTITY_SUFFIX = '-other'; // Make sure this matches backend
@@ -92,7 +92,7 @@ function HomePage() {
         const savedSort = getLocalStorageItem(sortStorageKey, DEFAULT_SORT_OPTION);
         setSortOption(savedSort);
         // Simple category name update, could fetch real name later if needed
-        setCategoryInfo({ name: categorySlug ? categorySlug.charAt(0).toUpperCase() + categorySlug.slice(1) : 'Unknown', id: null });
+        setCategoryInfo({ name: categorySlug ? categorySlug.charAt(0).toUpperCase() + categorySlug.slice(1) : '未知', id: null });
 
         // Call the new backend command
         invoke('get_entities_by_category_with_counts', { categorySlug })
@@ -102,7 +102,7 @@ function HomePage() {
             })
             .catch(err => {
                 console.error(`Failed to fetch entities with counts for ${categorySlug}:`, err);
-                setError(`Could not load ${categorySlug}. Details: ${typeof err === 'string' ? err : err.message || 'Unknown error'}`);
+                setError(`无法加载 ${categorySlug}。 因为: ${typeof err === 'string' ? err : err.message || '未知错误'}`);
             })
             .finally(() => setLoadingEntities(false));
 
@@ -184,7 +184,7 @@ function HomePage() {
                      marginLeft: (showElementFilters || showAttributeFilters) ? '20px' : 'auto', 
                      marginRight: '20px' 
                  }}>
-                     <label htmlFor="sort-select" style={styles.sortLabel}>Sort by:</label>
+                     <label htmlFor="sort-select" style={styles.sortLabel}>排序依照:</label>
                      <select id="sort-select" value={sortOption} onChange={handleSortChange} style={styles.sortSelect} aria-label="Sort entities">
                          {sortOptions.map(option => ( <option key={option.value} value={option.value}>{option.label}</option> ))}
                      </select>
@@ -232,10 +232,10 @@ function HomePage() {
                          <i className="fas fa-search"></i>
                          <input
                              type="text"
-                             placeholder={`Search ${pageTitle ? pageTitle.toLowerCase() : 'items'}...`}
+                             placeholder={`搜索${pageTitle ? pageTitle.toLowerCase() : '项目'}...`}
                              value={searchTerm}
                              onChange={(e) => setSearchTerm(e.target.value)}
-                             aria-label={`Search ${pageTitle}`}
+                             aria-label={`搜索 ${pageTitle}`}
                              data-global-search="true"
                          />
                      </div>
@@ -258,11 +258,11 @@ function HomePage() {
                         ))
                      ) : entitiesWithCounts.length > 0 ? (
                           <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
-                              No {pageTitle ? pageTitle.toLowerCase() : 'items'} found matching your criteria.
+                              未找到符合筛选条件的{pageTitle ? pageTitle.toLowerCase() : '项目'}
                           </p>
                       ) : (
                           <p className="placeholder-text" style={{ gridColumn: '1 / -1' }}>
-                             No {pageTitle ? pageTitle.toLowerCase() : 'items'} have been added yet.
+                             当前{pageTitle ? pageTitle.toLowerCase() : '项目'}列表为空
                           </p>
                      )}
                  </div>
@@ -277,7 +277,8 @@ const styles = {
         fontSize: '13px',
         color: 'rgba(255, 255, 255, 0.7)',
         marginRight: '8px',
-        whiteSpace: 'nowrap', // Prevent label wrapping
+        whiteSpace: 'nowrap',
+        content: '排序方式：' // 新增中文标签
     },
     sortSelect: {
         padding: '6px 10px',

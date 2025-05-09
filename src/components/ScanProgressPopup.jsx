@@ -91,7 +91,7 @@ function ScanProgressPopup({
     summary,
     error,
     onClose,
-    baseTitle = "Processing..." // Generic base title
+    baseTitle = "处理中..." // 基础标题
 }) {
     if (!isOpen) {
         return null;
@@ -99,8 +99,8 @@ function ScanProgressPopup({
 
     const percentage = progressData?.total > 0 ? Math.round((progressData.processed / progressData.total) * 100) : 0;
     const isComplete = !!summary || !!error;
-    const displayTitle = error ? "Error" : (summary ? "Complete" : baseTitle);
-    const statusMessage = progressData?.message || (isComplete ? '' : 'Initializing...');
+    const displayTitle = error ? "错误" : (summary ? "完成" : baseTitle);
+    const statusMessage = progressData?.message || (isComplete ? '' : '初始化中...');
     const countsText = progressData ? `${progressData.processed} / ${progressData.total}` : '';
     const pathText = progressData?.current_path ? `...${progressData.current_path.slice(-60)}` : <>​</>; // Use zero-width space for spacing
 
@@ -145,7 +145,7 @@ function ScanProgressPopup({
                 {/* Show close button only on completion or error */}
                 {isComplete && (
                     <button className="btn btn-primary" onClick={onClose} style={styles.closeButton}>
-                        Close
+                        关闭
                     </button>
                 )}
             </div>

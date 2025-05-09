@@ -61,11 +61,11 @@ function SettingsPage() {
             if (result) {
                 const success = await updateSetting(SETTINGS_KEY_MODS_FOLDER, result);
                 if (!success) throw new Error("Failed to save setting via context.");
-                if (success) toast.success("Mods Folder updated successfully!");
+                if (success) toast.success("模组文件夹更新成功！");
             }
         } catch (err) {
             console.error("Error changing mods folder:", err);
-            toast.error(`Failed to update Mods Folder: ${err.message || String(err)}`);
+            toast.error(`更新模组文件夹失败：${err.message || String(err)}`);
         } finally {
             setIsChangingFolder(false);
         }
@@ -79,11 +79,11 @@ function SettingsPage() {
             if (result) {
                 const success = await updateSetting(SETTINGS_KEY_QUICK_LAUNCH, result);
                  if (!success) throw new Error("Failed to save setting via context.");
-                if (success) toast.success("Quick Launch File updated successfully!");
+                if (success) toast.success("快速启动文件更新成功！");
             }
         } catch (err) {
             console.error("Error changing quick launch file:", err);
-            toast.error(`Failed to update Quick Launch File: ${err.message || String(err)}`);
+            toast.error(`更新快速启动文件失败：${err.message || String(err)}`);
         } finally {
             setIsChangingFile(false);
         }
@@ -102,10 +102,10 @@ function SettingsPage() {
             }
             const success = await updateSetting(SETTINGS_KEY_CUSTOM_LIBRARY_URL, localCustomUrl);
             if (!success) throw new Error("Failed to save setting via context.");
-            if (success) toast.success("Custom Library URL updated successfully!");
+            if (success) toast.success("自定义库URL更新成功！");
         } catch (err) {
             console.error("Error saving custom URL:", err);
-            toast.error(`Failed to save Custom Library URL: ${err.message || String(err)}`);
+            toast.error(`保存自定义库URL失败：${err.message || String(err)}`);
         } finally {
             setIsSavingUrl(false);
         }
@@ -143,7 +143,7 @@ function SettingsPage() {
              scanListenersRef.current.unlistenComplete = await listen(SCAN_COMPLETE_EVENT, (event) => {
                  console.log('Manual Scan Complete:', event.payload);
                  setShowScanPopup(true);
-                 setScanSummary(event.payload || 'Scan completed successfully!');
+                 setScanSummary(event.payload || '扫描完成！');
                  setScanProgressData(null);
                  setScanError('');
                  setIsManualScanning(false);
@@ -151,7 +151,7 @@ function SettingsPage() {
              scanListenersRef.current.unlistenError = await listen(SCAN_ERROR_EVENT, (event) => {
                  console.error('Manual Scan Error Event:', event.payload);
                  setShowScanPopup(true);
-                 setScanError(event.payload || 'An unknown error occurred during scan.');
+                 setScanError(event.payload || '扫描过程中发生未知错误');
                  setScanProgressData(null);
                  setScanSummary('');
                  setIsManualScanning(false);
@@ -181,20 +181,20 @@ function SettingsPage() {
     return (
         <div className="fadeIn">
             <div className="page-header">
-                <h1 className="page-title">Settings</h1>
+                <h1 className="page-title">设置</h1>
             </div>
 
-            {isLoading && <p className="placeholder-text">Loading settings...</p>}
-            {contextError && <p className="placeholder-text" style={{ color: 'var(--danger)' }}>Error loading settings: {contextError}</p>}
+            {isLoading && <p className="placeholder-text">正在加载设置...</p>}
+            {contextError && <p className="placeholder-text" style={{ color: 'var(--danger)' }}>加载设置时出错：{contextError}</p>}
 
             {!isLoading && (
                 <div style={{ background: 'var(--card-bg)', padding: '25px', borderRadius: '12px' }}>
                     {/* --- Paths Configuration --- */}
-                    <h3 style={styles.sectionHeader}>Paths Configuration</h3>
+                    <h3 style={styles.sectionHeader}>路径配置</h3>
                     {/* Mods Folder Setting */}
                     <div style={styles.settingRow}>
-                        <label style={styles.settingLabel}>Mods Folder:</label>
-                        <span style={styles.settingValue} title={modsFolder || ''}>{modsFolder || 'Not Set'}</span>
+                        <label style={styles.settingLabel}>模组文件夹：</label>
+                        <span style={styles.settingValue} title={modsFolder || ''}>{modsFolder || '未设置'}</span>
                         <button
                             className="btn btn-outline"
                             onClick={handleChangeModsFolder}
@@ -202,13 +202,13 @@ function SettingsPage() {
                             style={{ minWidth: '110px' }}
                         >
                             {isChangingFolder ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-folder-open fa-fw"></i>}
-                            {' '}Change
+                            {' '}更改
                         </button>
                     </div>
                     {/* Quick Launch Setting */}
                     <div style={styles.settingRow}>
-                        <label style={styles.settingLabel}>Quick Launch File:</label>
-                        <span style={styles.settingValue} title={quickLaunchPath || ''}>{quickLaunchPath || 'Not Set'}</span>
+                        <label style={styles.settingLabel}>快速启动：</label>
+                        <span style={styles.settingValue} title={quickLaunchPath || ''}>{quickLaunchPath || '未设置'}</span>
                         <button
                             className="btn btn-outline"
                             onClick={handleChangeQuickLaunch}
@@ -216,17 +216,17 @@ function SettingsPage() {
                             style={{ minWidth: '110px' }}
                         >
                              {isChangingFile ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-file-arrow-up fa-fw"></i>}
-                             {' '}Change
+                             {' '}更改
                         </button>
                     </div>
 
                     {/* Custom Library URL Setting - NEW */}
                      <div style={styles.settingRow}>
-                        <label style={styles.settingLabel} htmlFor="custom-url">Custom Library URL:</label>
+                        <label style={styles.settingLabel} htmlFor="custom-url">自定义库URL：</label>
                         <input
                             id="custom-url"
                             type="url"
-                            placeholder="e.g., https://my-mods.example.com"
+                            placeholder="例如：https://my-mods.example.com"
                             value={localCustomUrl}
                             onChange={(e) => setLocalCustomUrl(e.target.value)}
                             style={styles.input} // Use input style
@@ -237,29 +237,29 @@ function SettingsPage() {
                             onClick={handleSaveCustomUrl}
                             disabled={isSavingUrl || isManualScanning || isChangingFolder || isChangingFile || localCustomUrl === customLibraryUrl} // Disable if unchanged
                             style={{ minWidth: '110px' }}
-                            title={localCustomUrl === customLibraryUrl ? "No changes detected" : "Save URL"}
+                            title={localCustomUrl === customLibraryUrl ? "未检测到更改" : "保存URL"}
                         >
                              {isSavingUrl ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-save fa-fw"></i>}
-                             {' '}Save URL
+                             {' '}保存URL
                         </button>
                      </div>
 
                     {/* --- Mod Management Section --- */}
-                    <h3 style={styles.sectionHeader}>Mod Management</h3>
+                    <h3 style={styles.sectionHeader}>模组管理</h3>
                      <div style={styles.settingRow}>
-                        <label style={styles.settingLabel}>Scan Mods Folder:</label>
+                        <label style={styles.settingLabel}>扫描模组文件夹：</label>
                         <span style={{flexGrow: 1, fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)'}}>
-                            Add new mods and remove deleted mods from the database.
+                            从数据库中添加新模组并移除已删除的模组。
                         </span>
                         <button
                             className="btn btn-primary"
                             onClick={handleManualScan}
                             disabled={isManualScanning || !modsFolder || isSavingUrl || isChangingFile || isChangingFolder}
-                            title={!modsFolder ? "Set Mods Folder path first" : "Scan for new/deleted mods"}
+                            title={!modsFolder ? "请先设置模组文件夹路径" : "扫描新增/删除的模组"}
                             style={{ minWidth: '120px' }}
                         >
                             {isManualScanning && !scanSummary && !scanError ? <i className="fas fa-spinner fa-spin fa-fw"></i> : <i className="fas fa-sync-alt fa-fw"></i>}
-                            {isManualScanning && !scanSummary && !scanError ? ' Scanning...' : ' Scan Now'}
+                            {isManualScanning && !scanSummary && !scanError ? ' 扫描中...' : ' 立即扫描'}
                         </button>
                      </div>
                 </div>
@@ -271,7 +271,7 @@ function SettingsPage() {
                 summary={scanSummary}
                 error={scanError}
                 onClose={closeScanPopup}
-                baseTitle="Scanning Mods..."
+                baseTitle="正在扫描模组..."
             />
         </div>
     );

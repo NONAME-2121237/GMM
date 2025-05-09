@@ -70,7 +70,7 @@ function Sidebar() {
          console.log("Processing dropped file:", fileToProcess.path || fileToProcess.name); // file.path might not be available in browser drop
 
          console.warn("Browser onDrop event cannot reliably access file paths. Relying on Tauri window drop event.")
-         setDropError("Drop files onto the window area, not just the sidebar."); // Guide user
+         setDropError("请将文件拖放到窗口区域，而非侧边栏。"); // Guide user
 
     }, []); // Add dependencies if needed
 
@@ -105,7 +105,7 @@ function Sidebar() {
 
                      if (validFiles.length === 0) {
                          console.log("No valid archive files dropped on window.");
-                         setDropError("Only .zip, .7z, or .rar files are supported.");
+                         setDropError("仅支持 .zip、.7z 或 .rar 格式的文件。");
                          return;
                      }
 
@@ -175,10 +175,10 @@ function Sidebar() {
 
     useEffect(() => {
         const setupSidebarListeners = async () => {
-            applyListenersSidebarRef.current.unlistenStart = await listen(PRESET_APPLY_START_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { setApplyProgressDataSidebar({ processed: 0, total: event.payload || 0, message: 'Starting...' }); setApplySummarySidebar(''); setApplyErrorSidebar(''); setShowApplyPopupSidebar(true); }});
+            applyListenersSidebarRef.current.unlistenStart = await listen(PRESET_APPLY_START_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { setApplyProgressDataSidebar({ processed: 0, total: event.payload || 0, message: '正在启动...' }); setApplySummarySidebar(''); setApplyErrorSidebar(''); setShowApplyPopupSidebar(true); }});
             applyListenersSidebarRef.current.unlistenProgress = await listen(PRESET_APPLY_PROGRESS_EVENT, (event) => { if (applyingPresetIdSidebar !== null && showApplyPopupSidebar) setApplyProgressDataSidebar(event.payload); });
-            applyListenersSidebarRef.current.unlistenComplete = await listen(PRESET_APPLY_COMPLETE_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { if(showApplyPopupSidebar) {setApplySummarySidebar(event.payload || 'Preset applied successfully!'); setApplyProgressDataSidebar(null);} setApplyingPresetIdSidebar(null); } });
-            applyListenersSidebarRef.current.unlistenError = await listen(PRESET_APPLY_ERROR_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { if(showApplyPopupSidebar) { setApplyErrorSidebar(event.payload || 'An unknown error occurred.'); setApplyProgressDataSidebar(null); setApplySummarySidebar('');} else { setApplyErrorSidebar(event.payload || 'An unknown error occurred.'); } setApplyingPresetIdSidebar(null); } });
+            applyListenersSidebarRef.current.unlistenComplete = await listen(PRESET_APPLY_COMPLETE_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { if(showApplyPopupSidebar) {setApplySummarySidebar(event.payload || '预设应用成功！'); setApplyProgressDataSidebar(null);} setApplyingPresetIdSidebar(null); } });
+            applyListenersSidebarRef.current.unlistenError = await listen(PRESET_APPLY_ERROR_EVENT, (event) => { if (applyingPresetIdSidebar !== null) { if(showApplyPopupSidebar) { setApplyErrorSidebar(event.payload || '发生未知错误。'); setApplyProgressDataSidebar(null); setApplySummarySidebar('');} else { setApplyErrorSidebar(event.payload || 'An unknown error occurred.'); } setApplyingPresetIdSidebar(null); } });
         };
         setupSidebarListeners();
         return () => {
@@ -202,7 +202,7 @@ function Sidebar() {
 
         setIsLaunching(true); // Set launching state
 
-        console.log("Quick Launch: Attempting normal launch...");
+        console.log("快速启动: 正在尝试普通启动...");
         try {
             await invoke('launch_executable', { path: quickLaunchPath });
             console.log("Quick Launch: Normal launch successful or detached.");
@@ -226,7 +226,7 @@ function Sidebar() {
                     if (elevatedErrorString.includes("cancelled by user")) {
                          setLaunchError("Admin launch cancelled by user.");
                      } else {
-                         setLaunchError(`Admin Launch Failed: ${elevatedErrorString}`);
+                         setLaunchError(`管理员启动失败: ${elevatedErrorString}`);
                     }
                 }
             } else {
@@ -321,17 +321,17 @@ function Sidebar() {
             <div className="logo">
                  <svg width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="var(--primary)" /><stop offset="100%" stopColor="var(--accent)" /></linearGradient></defs><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="url(#logo-gradient)"></path></svg>
                  {/* Use state for the game name, provide fallback */}
-                 <span>{activeGameDisplay ? activeGameDisplay.toUpperCase() : 'GAME'} Modder</span>
+                 <span>{activeGameDisplay ? activeGameDisplay.toUpperCase() : 'GAME'} <br/>模组管理器</span>
             </div>
 
             {/* Update disabled states */}
-            <button className="btn btn-primary" style={{ width: '100%', marginBottom: '15px' }} onClick={handleQuickLaunch} disabled={!quickLaunchPath || isActionDisabled} title={quickLaunchPath ? `Launch: ${quickLaunchPath}`: "Set Quick Launch path in Settings"} >
-                 {isLaunching ? <><i className="fas fa-spinner fa-spin fa-fw"></i> Launching...</> : <><i className="fas fa-play fa-fw"></i> Quick Launch</>}
+            <button className="btn btn-primary" style={{ width: '100%', marginBottom: '15px' }} onClick={handleQuickLaunch} disabled={!quickLaunchPath || isActionDisabled} title={quickLaunchPath ? `启动路径: ${quickLaunchPath}`: "请在设置中配置快速启动路径"} >
+                 {isLaunching ? <><i className="fas fa-spinner fa-spin fa-fw"></i> 启动中...</> : <><i className="fas fa-play fa-fw"></i> 快速启动</>}
              </button>
              {launchError && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{launchError}</p>}
 
-            <button className="btn btn-outline" style={{ width: '100%', marginBottom: '15px' }} onClick={() => handleInitiateImport()} disabled={!modsFolder || isActionDisabled} title={!modsFolder ? "Set Mods Folder path first" : "Import Mod from Archive"} >
-                 <i className="fas fa-file-import fa-fw"></i> Import Mod
+            <button className="btn btn-outline" style={{ width: '100%', marginBottom: '15px' }} onClick={() => handleInitiateImport()} disabled={!modsFolder || isActionDisabled} title={!modsFolder ? "请先配置模组文件夹路径" : "从压缩包导入模组"} >
+                 <i className="fas fa-file-import fa-fw"></i> 导入模组
             </button>
              {/* Show Import or Drop errors */}
              {(importError || dropError) && <p style={{color: 'var(--danger)', fontSize:'12px', textAlign:'center', marginBottom:'10px'}}>{importError || dropError}</p>}
@@ -339,31 +339,31 @@ function Sidebar() {
 
             {/* Nav Items */}
             <ul className="nav-items">
-                <NavLink to="/" end className={({ isActive }) => `nav-item ${isNavItemActive('/') ? 'active' : ''}`}> <i className="fas fa-home fa-fw"></i> Home </NavLink>
-                <NavLink to="/category/characters" className={({ isActive }) => `nav-item ${isNavItemActive('/category/characters') ? 'active' : ''}`}><i className="fas fa-user fa-fw"></i> Characters</NavLink>
-                <NavLink to="/category/npcs" className={({ isActive }) => `nav-item ${isNavItemActive('/category/npcs') ? 'active' : ''}`}><i className="fas fa-users fa-fw"></i> NPCs</NavLink>
-                <NavLink to="/category/objects" className={({ isActive }) => `nav-item ${isNavItemActive('/category/objects') ? 'active' : ''}`}><i className="fas fa-cube fa-fw"></i> Objects</NavLink>
-                <NavLink to="/category/enemies" className={({ isActive }) => `nav-item ${isNavItemActive('/category/enemies') ? 'active' : ''}`}><i className="fas fa-ghost fa-fw"></i> Enemies</NavLink>
-                <NavLink to="/category/weapons" className={({ isActive }) => `nav-item ${isNavItemActive('/category/weapons') ? 'active' : ''}`}><i className="fas fa-shield-halved fa-fw"></i> Weapons</NavLink>
+                <NavLink to="/" end className={({ isActive }) => `nav-item ${isNavItemActive('/') ? 'active' : ''}`}> <i className="fas fa-home fa-fw"></i> 首页 </NavLink>
+                <NavLink to="/category/characters" className={({ isActive }) => `nav-item ${isNavItemActive('/category/characters') ? 'active' : ''}`}><i className="fas fa-user fa-fw"></i> 角色</NavLink>
+                <NavLink to="/category/npcs" className={({ isActive }) => `nav-item ${isNavItemActive('/category/npcs') ? 'active' : ''}`}><i className="fas fa-users fa-fw"></i> NPC</NavLink>
+                <NavLink to="/category/objects" className={({ isActive }) => `nav-item ${isNavItemActive('/category/objects') ? 'active' : ''}`}><i className="fas fa-cube fa-fw"></i> 物体</NavLink>
+                <NavLink to="/category/enemies" className={({ isActive }) => `nav-item ${isNavItemActive('/category/enemies') ? 'active' : ''}`}><i className="fas fa-ghost fa-fw"></i> 敌人</NavLink>
+                <NavLink to="/category/weapons" className={({ isActive }) => `nav-item ${isNavItemActive('/category/weapons') ? 'active' : ''}`}><i className="fas fa-shield-halved fa-fw"></i> 武器</NavLink>
                 <NavLink to="/category/ui" className={({ isActive }) => `nav-item ${isNavItemActive('/category/ui') ? 'active' : ''}`}><i className="fas fa-palette fa-fw"></i> UI</NavLink>
             </ul>
 
             <div className="separator" style={{margin: '5px 0 15px 0'}}></div>
 
              <ul className="nav-items" style={{paddingTop:0}}>
-                <NavLink to="/presets" className={({ isActive }) => `nav-item ${isNavItemActive('/presets') ? 'active' : ''}`}> <i className="fas fa-layer-group fa-fw"></i> Presets </NavLink>
-                <NavLink to="/settings" className={({ isActive }) => `nav-item ${isNavItemActive('/settings') ? 'active' : ''}`}> <i className="fas fa-cog fa-fw"></i> Settings </NavLink>
+                <NavLink to="/presets" className={({ isActive }) => `nav-item ${isNavItemActive('/presets') ? 'active' : ''}`}> <i className="fas fa-layer-group fa-fw"></i> 预设 </NavLink>
+                <NavLink to="/settings" className={({ isActive }) => `nav-item ${isNavItemActive('/settings') ? 'active' : ''}`}> <i className="fas fa-cog fa-fw"></i> 设置 </NavLink>
             </ul>
 
             <div className="separator"></div>
 
             <button className="btn btn-outline" style={{ width: '100%', marginBottom: '15px' }} onClick={handleOpenModsFolder} title="Open the configured mods folder" disabled={isActionDisabled} >
-                  <i className="fas fa-folder-open fa-fw"></i> Open Mods Folder
+                  <i className="fas fa-folder-open fa-fw"></i> 打开模组文件夹
               </button>
 
             {/* Favorites Section */}
             <div className="preset-section">
-                 <div className="preset-header"><span>Favorites</span> <NavLink to="/presets" title="Manage Presets" style={{ color: 'var(--primary)', fontSize: '18px', textDecoration:'none', opacity:0.8, ':hover': {opacity: 1} }}><i className="fas fa-sliders-h"></i></NavLink> </div>
+                 <div className="preset-header"><span>收藏</span> <NavLink to="/presets" title="管理预设" style={{ color: 'var(--primary)', fontSize: '18px', textDecoration:'none', opacity:0.8, ':hover': {opacity: 1} }}><i className="fas fa-sliders-h"></i></NavLink> </div>
                  {applyErrorSidebar && !showApplyPopupSidebar && <p style={{ color: 'var(--danger)', fontSize: '11px', textAlign: 'center', marginBottom: '5px' }}>{applyErrorSidebar}</p>}
                  {isLoadingFavs ? ( <div style={{ padding: '10px', textAlign: 'center' }}> <i className="fas fa-spinner fa-spin"></i> </div> )
                  : favoritePresets.length > 0 ? (
@@ -377,7 +377,7 @@ function Sidebar() {
                             </div>
                          </div>
                      ))
-                 ) : ( <div style={{ padding: '10px', fontSize: '13px', color: 'rgba(255, 255, 255, 0.6)', textAlign: 'center' }}> No favorite presets yet. </div> )}
+                 ) : ( <div style={{ padding: '10px', fontSize: '13px', color: 'rgba(255, 255, 255, 0.6)', textAlign: 'center' }}> 暂无收藏的预设 </div> )}
             </div>
 
              {/* Import Modal */}

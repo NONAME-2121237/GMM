@@ -15,26 +15,26 @@ const parseDetails = (detailsJson) => {
 
 // Font Awesome icons map for Genshin elements
 const elementIconsFA = {
-    Electro: "fas fa-bolt", Pyro: "fas fa-fire", Cryo: "fas fa-snowflake",
-    Hydro: "fas fa-tint", Anemo: "fas fa-wind", Geo: "fas fa-mountain",
-    Dendro: "fas fa-leaf",
+    雷: "fas fa-bolt", 火: "fas fa-fire", 冰: "fas fa-snowflake",
+    水: "fas fa-tint", 风: "fas fa-wind", 岩: "fas fa-mountain",
+    草: "fas fa-leaf",
 };
 
 // Font Awesome icons map for ZZZ attributes
 const attributeIconsFA = {
-    Physical: "fas fa-fist-raised",
-    Fire: "fas fa-fire-alt",
-    Ice: "fas fa-icicles",
-    Electric: "fas fa-bolt",
+    物理: "fas fa-fist-raised",
+    火: "fas fa-fire-alt",
+    冰: "fas fa-icicles",
+    电: "fas fa-bolt",
     // Add more ZZZ attributes as needed
 };
 
 // Font Awesome icons map for ZZZ specialties
 const specialtyIconsFA = {
-    Assault: "fas fa-crosshairs",
-    Support: "fas fa-hands-helping",
-    Defense: "fas fa-shield-alt",
-    Healer: "fas fa-first-aid",
+    强袭: "fas fa-crosshairs",
+    支援: "fas fa-hands-helping",
+    防御: "fas fa-shield-alt",
+    治疗: "fas fa-first-aid",
     // Add more ZZZ specialties as needed
 };
 
@@ -74,19 +74,19 @@ function EntityCard({ entity }) {
     const isZZZ = attribute || specialty || types.length > 0 || details?.rank;
 
     return (
-        <Link to={`/entity/${slug}`} className={`character-card ${isZZZ ? 'zzz-card' : 'genshin-card'}`} title={`View mods for ${name}`}>
+        <Link to={`/entity/${slug}`} className={`character-card ${isZZZ ? 'zzz-card' : 'genshin-card'}`} title={`查看${name}的模组`}>
 
              {/* Container for Badges (CSS will handle layout) */}
              <div className="card-badges-container">
                  {/* Total Mod Count Badge */}
                  {total_mods > 0 && (
-                    <div className="card-badge total-badge" title={`${total_mods} total mods`}>
+                    <div className="card-badge total-badge" title={`总模组数量：${total_mods}`}>
                         {total_mods} <i className="fas fa-box fa-fw" style={{ marginLeft: '3px', opacity: 0.8 }}></i>
                     </div>
                  )}
                   {/* Enabled Mod Count Badge */}
                  {enabled_mods > 0 && (
-                     <div className="card-badge enabled-badge" title={`${enabled_mods} mods enabled`}>
+                     <div className="card-badge enabled-badge" title={`已启用模组数量：${enabled_mods}`}>
                          {enabled_mods} <i className="fas fa-check-circle fa-fw" style={{ marginLeft: '3px' }}></i>
                      </div>
                  )}
@@ -113,7 +113,7 @@ function EntityCard({ entity }) {
                 
                 {/* ZZZ-specific properties */}
                 {attribute && attributeIconClass && (
-                    <div className="card-attribute" title={`Attribute: ${attribute}`}>
+                    <div className="card-attribute" title={`属性：${attribute}`}>
                        <i className={`${attributeIconClass} fa-fw`} style={{ color: `var(--zzz-${attribute?.toLowerCase()})` || 'var(--light)' }}></i>
                        {attribute}
                     </div>
@@ -122,13 +122,13 @@ function EntityCard({ entity }) {
                 {/* Shared properties with different styling */}
                 {details?.rarity && (
                     <div className="card-element" style={{ marginTop: '5px', fontSize: '13px' }}>
-                        <RarityIcon /> {details.rarity}
+                        <RarityIcon />  {details.rarity}
                     </div>
                 )}
                 
                 {details?.rank && (
                     <div className="card-rank" style={{ marginTop: '5px', fontSize: '13px' }}>
-                        <i className="fas fa-medal fa-fw" style={{ color: '#ffaa33' }}></i> Rank {details.rank}
+                        <i className="fas fa-medal fa-fw" style={{ color: '#ffaa33' }}></i> 等级 {details.rank}
                     </div>
                 )}
             </div>

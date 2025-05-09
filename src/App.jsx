@@ -43,7 +43,7 @@ function AppContent() {
     if (isLoading) {
         return (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100vw', background: 'var(--darker)', color: 'var(--light)' }}>
-               <i className="fas fa-spinner fa-spin fa-2x"></i>  Loading Settings...
+               <i className="fas fa-spinner fa-spin fa-2x"></i>  正在加载设置...
             </div>
        );
     }
