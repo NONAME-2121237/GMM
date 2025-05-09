@@ -63,8 +63,40 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-build
-          path: src-tauri/target/release/
+          name: full-bundle-zip
+          path: |
+            src-tauri/target/release/
+            !src-tauri/target/release/build/ 
           if-no-files-found: error
-          retention-days: 5
+          retention-days: 7
+          overwrite: true
+
+      - name: Upload Artifact (MSI)
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-installer
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      - name: Upload Artifact (MSI ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: |
+            src-tauri/target/release/bundle/msi/*.zip
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+      
+      - name: Upload Artifact (MSI ZIP SIG)
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: |
+            src-tauri/target/release/bundle/msi/*.zip.sig
+          if-no-files-found: error
+          retention-days: 7
           overwrite: true
