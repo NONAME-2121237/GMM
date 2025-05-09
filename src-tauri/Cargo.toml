@@ -15,7 +15,7 @@ name = "gmm_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-tauri = { version = "1.6", features = [ "protocol-asset", "updater", "shell-execute", "process-exit", "shell-open", "fs-all", "path-all", "window-all", "dialog-all"] }
+tauri = { version = "1.6", features = [ "protocol-asset", "shell-execute", "process-exit", "shell-open", "fs-all", "path-all", "window-all", "dialog-all"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rusqlite = { version = "0.31", features = ["bundled"] } # Use bundled for easier setup
