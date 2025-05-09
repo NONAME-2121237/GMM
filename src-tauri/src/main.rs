@@ -95,7 +95,7 @@ type Definitions = HashMap<String, CategoryDefinition>;
 // --- Constants for Settings Keys ---
 const SETTINGS_KEY_MODS_FOLDER: &str = "mods_folder_path";
 const OTHER_ENTITY_SUFFIX: &str = "-other";
-const OTHER_ENTITY_NAME: &str = "Other/Unknown";
+const OTHER_ENTITY_NAME: &str = "其他/未知";
 const DB_NAME: &str = "app_data.sqlite";
 const DISABLED_PREFIX: &str = "DISABLED_";
 const TARGET_IMAGE_FILENAME: &str = "preview.png";
@@ -266,7 +266,7 @@ fn run_traveler_migration_logic(
     db_state: &DbState,
     app_handle: &AppHandle, // Keep for path resolution if needed later
 ) -> Result<String, String> { // Returns success message or error string
-    println!("[Migration] Starting Traveler -> Aether/Lumine migration logic...");
+    println!("[迁移] 开始进行Traveler到Aether/Lumine的迁移逻辑...");
 
     let base_mods_path = get_mods_base_path_from_settings(db_state)
         .map_err(|e| format!("[Migration] Failed to get mods base path: {}", e))?;
@@ -279,7 +279,7 @@ fn run_traveler_migration_logic(
     let migration_status = get_setting_value(conn, SETTINGS_KEY_TRAVELER_MIGRATION_COMPLETE)
         .map_err(|e| format!("[Migration] DB Error checking migration status: {}", e))?;
     if migration_status == Some("true".to_string()) {
-        let msg = "[Migration] Traveler migration already marked as complete. Skipping.";
+        let msg = "[迁移] 迁移标记已完成，跳过迁移流程";
         println!("{}", msg);
         return Ok(msg.to_string());
     }
@@ -290,7 +290,7 @@ fn run_traveler_migration_logic(
     ).optional().map_err(|e| format!("[Migration] DB Error fetching Traveler info: {}", e))?;
 
     if traveler_info.is_none() {
-        let msg = "[Migration] Traveler entity not found. Migration not needed or already partially done.";
+        let msg = "[迁移] 未找到Traveler实体，迁移无需执行或已完成部分流程";
         println!("{}", msg);
         // Mark as complete anyway if Traveler doesn't exist
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
@@ -1338,7 +1338,7 @@ fn initialize_database(app_handle: &AppHandle, active_game_slug: &str) -> Result
              let category_id: i64 = conn.query_row( "SELECT id FROM categories WHERE slug = ?1", params![category_slug], |row| row.get(0), )?;
 
              let other_slug = format!("{}{}", category_slug, OTHER_ENTITY_SUFFIX);
-             conn.execute( "INSERT OR IGNORE INTO entities (category_id, name, slug, description, details, base_image) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![ category_id, OTHER_ENTITY_NAME, other_slug, "Uncategorized assets.", "{}", None::<String> ] )?;
+             conn.execute( "INSERT OR IGNORE INTO entities (category_id, name, slug, description, details, base_image) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![ category_id, OTHER_ENTITY_NAME, other_slug, "未分类的资源。", "{}", None::<String> ] )?;
 
              for entity_def in category_def.entities.iter() {
                  conn.execute( "INSERT OR IGNORE INTO entities (category_id, name, slug, description, details, base_image) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![ category_id, entity_def.name, entity_def.slug, entity_def.description, entity_def.details.as_ref().map(|s| s.to_string()).unwrap_or("{}".to_string()), entity_def.base_image, ] )?;
