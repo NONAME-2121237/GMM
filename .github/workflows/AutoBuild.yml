@@ -63,7 +63,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: full-bundle-zip
+          name: full-bundle-zip.zip
           path: |
             src-tauri/target/release/
             !src-tauri/target/release/build/ 
@@ -74,7 +74,7 @@ jobs:
       - name: Upload Artifact (MSI)
         uses: actions/upload-artifact@v4
         with:
-          name: standalone-installer
+          name: standalone-installer.msi
           path: |
             src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
@@ -84,7 +84,7 @@ jobs:
       - name: Upload Artifact (MSI ZIP)
         uses: actions/upload-artifact@v4
         with:
-          name: appimage
+          name: standalone-installer.zip
           path: |
             src-tauri/target/release/bundle/msi/*.zip
           if-no-files-found: error
@@ -94,7 +94,7 @@ jobs:
       - name: Upload Artifact (MSI ZIP SIG)
         uses: actions/upload-artifact@v4
         with:
-          name: appimage
+          name: standalone-installer.zip.sig
           path: |
             src-tauri/target/release/bundle/msi/*.zip.sig
           if-no-files-found: error
